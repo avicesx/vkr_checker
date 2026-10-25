@@ -1,0 +1,30 @@
+# Ручная проверка на реальных документах: CLI, образцы и результаты прогонов
+manual_test/
+
+# Бинарные образцы документов: тесты собирают DOCX программно и в них не нуждаются
+*.docx
+*.docm
+*.pdf
+~$*
+
+# Результаты прогонов парсера
+test_out.json
+*_out.json
+out.json
+*.parsed.json
+
+# Кэш и артефакты Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Виртуальные окружения и настройки IDE
+.venv/
+venv/
+.idea/
+.vscode/
