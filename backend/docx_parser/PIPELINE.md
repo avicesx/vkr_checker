@@ -557,5 +557,35 @@ label `lo.version`.
 - [ ] `python -m compileall -q docx_parser tests` проходит;
 - [ ] `python -m pytest tests -q` проходит;
 - [ ] при изменении конвертации проверен реальный legacy-файл через Docker;
+- [ ] при изменении правил обновлен `rule_engine/RULES.md`;
 - [ ] этот документ обновлен, если поменялись фазы, поля или команды.
+
+---
+
+## 10. Нормоконтроль поверх разбора
+
+Правила оформления проверяет отдельный пакет `rule_engine`: он получает готовый
+`ParsedDocxDocument` и не разбирает OOXML заново. `schema_version` парсера при
+этом не меняется — правила работают с уже разрешенным каскадом стилей и
+нормализованными единицами (`size_pt`, `*_mm`).
+
+```python
+from docx_parser.pipeline import DocxParserPipeline
+from rule_engine import RuleEngine, load_ruleset
+
+document = DocxParserPipeline("vkr.docx").parse()
+engine = RuleEngine(load_ruleset("rule_engine/rules/vkr_test_rules.json"))
+report = engine.check(document)
+print(report.passed, report.summary.violations_total)
+```
+
+Ручной прогон с JSON-отчетом:
+
+```bash
+python manual_test/check_rules.py manual_test/test.docx --outdir manual_test/out
+```
+
+Формат набора правил, области действия (`scope`), состав отчета и ограничения
+описаны в [`rule_engine/RULES.md`](../rule_engine/RULES.md).
+
 

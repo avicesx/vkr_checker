@@ -1,0 +1,53 @@
+{
+  "ruleset_id": "vkr-rule-engine-test",
+  "ruleset_version": "1.0.0",
+  "description": "Тестовый набор: шрифт основного текста, красная строка и поля страницы",
+  "rules": [
+    {
+      "rule_id": "font_body_text",
+      "kind": "font",
+      "severity": "error",
+      "message": "Основной текст набирается гарнитурой Times New Roman, 14 pt",
+      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "target": {
+        "scope": "body_text"
+      },
+      "expected": {
+        "family": "Times New Roman",
+        "size_pt": 14.0,
+        "size_tolerance_pt": 0.5
+      }
+    },
+    {
+      "rule_id": "indent_first_line",
+      "kind": "indent",
+      "severity": "error",
+      "message": "Абзац основного текста начинается с отступа 12,5 мм",
+      "requirement_ref": "Методические указания, требования к абзацам",
+      "target": {
+        "scope": "body_text"
+      },
+      "expected": {
+        "first_line_mm": 12.5,
+        "tolerance_mm": 0.5
+      }
+    },
+    {
+      "rule_id": "page_margins",
+      "kind": "margin",
+      "severity": "error",
+      "message": "Поля страницы: левое 30, правое 15, верхнее и нижнее 20 мм",
+      "requirement_ref": "Методические указания, требования к полям страницы",
+      "target": {
+        "scope": "sections"
+      },
+      "expected": {
+        "left_mm": 30.0,
+        "right_mm": 15.0,
+        "top_mm": 20.0,
+        "bottom_mm": 20.0,
+        "tolerance_mm": 1.0
+      }
+    }
+  ]
+}
