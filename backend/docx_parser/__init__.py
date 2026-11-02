@@ -21,12 +21,19 @@ LibreOffice пересчитывает вёрстку, и геометрия с�
 """
 
 from .converter import convert_to_docx
-from .pipeline import DocxParserPipeline, parse_any_to_json_file, parse_docx_to_json_file
+from .pipeline import (
+    DocxParserPipeline,
+    parse_any_to_json_file,
+    parse_docx_to_json_file,
+)
+from .pdf_norm_control_parser import PdfNormControlParser, PdfNormControlReport
 from .schema import ParsedDocxDocument
 
 __all__ = [
     "DocxParserPipeline",
     "ParsedDocxDocument",
+    "PdfNormControlParser",
+    "PdfNormControlReport",
     "convert_to_docx",
     "parse_any_to_json_file",
     "parse_docx_to_json_file",
