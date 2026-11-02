@@ -28,3 +28,5 @@ dist/
 venv/
 .idea/
 .vscode/
+
+documents/

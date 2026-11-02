@@ -249,6 +249,31 @@ docDefaults → theme → engine default.
 `anomalies.pdf_docx_mismatch_warning`. Если выравнивание не применилось,
 `pagination_source` остается эвристическим.
 
+### Самостоятельная проверка PDF
+
+`PdfNormControlParser` анализирует PDF напрямую, без преобразования в DOCX:
+
+```python
+from docx_parser import PdfNormControlParser
+
+report = PdfNormControlParser("documents/vkr/example.pdf").parse("urfu")
+print(report.model_dump_json(indent=2))
+```
+
+Профили `mpgu`, `urgpu` и `urfu` основаны на требованиях из
+`documents/вкр_3_работы.xlsx` и применяются независимо: у методичек отличаются,
+например, поля и положение номера страницы. Анализатор сейчас проверяет
+извлекаемые параметры оформления: основной шрифт и его размер, оценку
+межстрочного интервала и абзацного отступа, положение текстовой области,
+положение номера страницы и формат A4 там, где он указан в требованиях.
+Смысловые требования не проверяются.
+
+PDF хранит отрисованные символы и координаты, но не сохраняет свойства Word
+вроде назначенных полей страницы или стиля абзаца. Поэтому поля выводятся как
+`not_assessed` с оценкой видимых границ текста; геометрические оценки имеют
+ограниченную уверенность. Для сканированных PDF без текстового слоя анализ
+завершится явной ошибкой. Для этого API требуется PyMuPDF (`pip install pymupdf`).
+
 ### Фаза 6. Структура и ссылки
 
 `StructureCrossRefParser.process_document_structure()`:
@@ -359,6 +384,7 @@ backend/
 │   ├── visual_and_math_parser.py      картинки, фигуры, диаграммы, OLE, OMML
 │   ├── section_header_footer_parser.py секции, колонтитулы, сноски, пагинация
 │   ├── pdf_page_aligner.py            привязка блоков к страницам PDF
+│   ├── pdf_norm_control_parser.py     самостоятельная проверка оформления PDF
 │   ├── structure_crossref_parser.py   оглавление, дерево, подписи, ссылки
 │   ├── metadata_anomalies_parser.py   core/app/settings и аномалии
 │   └── PIPELINE.md                    этот документ
@@ -374,6 +400,7 @@ backend/
 | Добавить свойство таблицы или ячейки | `table_parser.py` + `schema.py` |
 | Добавить тип визуального объекта | `visual_and_math_parser.py` + `schema.py` |
 | Изменить пагинацию или PDF-сверку | `pdf_page_aligner.py`, `section_header_footer_parser.py` |
+| Проверить PDF как самостоятельный файл | `pdf_norm_control_parser.py` |
 | Изменить оглавление/ссылки/библиографию | `structure_crossref_parser.py` |
 | Добавить аномалию | `metadata_anomalies_parser.py` + `DocumentAnomalies` |
 | Изменить конвертацию или таймауты | `converter.py` |
@@ -396,6 +423,10 @@ cd c:\code\raw_docx_test\backend
 python -m compileall -q docx_parser tests
 python -m pytest tests -q
 ```
+
+На реальном корпусе из `documents/vkr` также выполняются интеграционные
+проверки. DOCX и PDF-оригиналы только читаются; искусственные варианты ошибок
+создаются в тестовых временных каталогах.
 
 Интеграционные тесты, которым нужен реальный LibreOffice или Docker, помечены
 `integration`:

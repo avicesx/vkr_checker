@@ -17,6 +17,7 @@
 docx-lo:1.0.0); сам образ собирается из docker/libreoffice/Dockerfile.
 Тег запинен, потому что версия LibreOffice влияет на экспорт .docx.
 """
+
 from __future__ import annotations
 
 import os
@@ -70,17 +71,25 @@ def is_native_docx(path: str | Path) -> bool:
 
 @lru_cache(maxsize=1)
 def _docker_available() -> bool:
-    """Проверяет, что Docker CLI установлен и демон отвечает (результат кэшируется)."""
+    """Проверяет, что Docker CLI, демон и требуемый образ доступны."""
     if shutil.which("docker") is None:
         return False
     try:
-        proc = subprocess.run(
+        info = subprocess.run(
             ["docker", "info", "--format", "ok"],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        return proc.returncode == 0
+        if info.returncode != 0:
+            return False
+        image = subprocess.run(
+            ["docker", "image", "inspect", DOCKER_IMAGE],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return image.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -118,21 +127,34 @@ def _docker_command(
     """Собирает команду docker run: staging смонтирован только на чтение."""
     profile = f"/tmp/lo-{uuid.uuid4().hex}"
     cmd = [
-        "docker", "run", "--rm", "--network", "none",
-        "--memory", DOCKER_MEMORY_LIMIT,
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--memory",
+        DOCKER_MEMORY_LIMIT,
     ]
     if container_name:
         # Имя нужно, чтобы снять контейнер, если CLI убит по таймауту.
         cmd += ["--name", container_name]
     cmd += [
-        "--user", _docker_user(),
-        "-v", f"{staging_dir.resolve()}:/data:ro",
-        "-v", f"{outdir.resolve()}:/out",
+        "--user",
+        _docker_user(),
+        "-v",
+        f"{staging_dir.resolve()}:/data:ro",
+        "-v",
+        f"{outdir.resolve()}:/out",
         DOCKER_IMAGE,
-        "soffice", "--headless", "--norestore",
+        "soffice",
+        "--headless",
+        "--norestore",
         f"-env:UserInstallation=file://{profile}",
-        "--convert-to", CONVERT_FILTER,
-        "--outdir", "/out", f"/data/{source_name}",
+        "--convert-to",
+        CONVERT_FILTER,
+        "--outdir",
+        "/out",
+        f"/data/{source_name}",
     ]
     return cmd
 
@@ -141,10 +163,15 @@ def _local_command(soffice: str, source: Path, outdir: Path) -> List[str]:
     """Собирает команду локального soffice с изолированным профилем."""
     profile = Path(tempfile.gettempdir()) / f"lo-{uuid.uuid4().hex}"
     return [
-        soffice, "--headless", "--norestore",
+        soffice,
+        "--headless",
+        "--norestore",
         f"-env:UserInstallation={profile.as_uri()}",
-        "--convert-to", CONVERT_FILTER,
-        "--outdir", str(outdir), str(source),
+        "--convert-to",
+        CONVERT_FILTER,
+        "--outdir",
+        str(outdir),
+        str(source),
     ]
 
 
@@ -200,7 +227,16 @@ def _docker_lo_version(image: str) -> Optional[str]:
     """Возвращает версию LibreOffice из Docker-образа (один запуск на процесс)."""
     try:
         proc = subprocess.run(
-            ["docker", "run", "--rm", "--network", "none", image, "soffice", "--version"],
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                image,
+                "soffice",
+                "--version",
+            ],
             capture_output=True,
             text=True,
             timeout=60,
@@ -311,7 +347,9 @@ def convert_to_docx(
         produced = _expected_output(fresh_out, source.stem)
         if produced is None:
             created = sorted(item.name for item in fresh_out.glob("*.docx"))
-            details = f"; создано: {created}" if created else "; каталог результата пуст"
+            details = (
+                f"; создано: {created}" if created else "; каталог результата пуст"
+            )
             raise RuntimeError(
                 f"Конвертация не удалась ({tool}): файл {source.stem}.docx не создан"
                 f"{details}"
@@ -346,9 +384,7 @@ def _timed_run(
     """Запускает конвертацию и возвращает ее длительность в миллисекундах."""
     started = time.monotonic()
     if container_name:
-        _run_conversion(
-            cmd, timeout, source, tool, container_name=container_name
-        )
+        _run_conversion(cmd, timeout, source, tool, container_name=container_name)
     else:
         _run_conversion(cmd, timeout, source, tool)
     return int((time.monotonic() - started) * 1000)
