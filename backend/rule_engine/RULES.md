@@ -6,13 +6,19 @@
 `ParsedDocxDocument`, где каскад стилей уже разрешен, а единицы приведены к
 пунктам и миллиметрам.
 
-Первая итерация покрывает три проверки:
+Набор покрывает девять проверок ВКР: текст, поля страницы, иерархию и нумерацию
+заголовков, оформление заголовков, состав разделов и оглавление.
 
-| Вид правила | Что проверяет | Объект |
-|---|---|---|
-| `font` | гарнитура, кегль, начертание | ран (фрагмент текста) внутри абзаца |
-| `indent` | отступ первой строки, слева, справа | абзац |
-| `margin` | левое, правое, верхнее, нижнее поле, корешковый отступ | секция |
+| Вид правила | Что проверяет | Объект | `scope` |
+|---|---|---|---|
+| `font` | гарнитура, кегль, начертание | ран (фрагмент текста) внутри абзаца | абзацы, `headings` |
+| `indent` | отступ первой строки, слева, справа | абзац | абзацы, `headings` |
+| `margin` | левое, правое, верхнее, нижнее поле, корешковый отступ | секция | `sections` |
+| `heading_levels` | стартовый уровень, перескоки уровней, максимальная глубина | заголовок из `document_tree` | `headings` |
+| `heading_numbering` | последовательность номеров, номер родителя, глубина номера, точка после номера | заголовок с `section_number` | `headings` |
+| `heading_format` | точка в конце заголовка, регистр, выравнивание | заголовок и его абзац | `headings` |
+| `required_sections` | наличие разделов и порядок их следования | структура документа | `document_structure` |
+| `toc` | наличие оглавления, записи, сверка с заголовками | `TocContainerBlock` | `toc` |
 
 ---
 
@@ -59,7 +65,7 @@ python manual_test/check_rules.py manual_test/test.docx \
 ```json
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "1.0.0",
+  "ruleset_version": "2.0.0",
   "description": "Тестовый набор",
   "rules": [
     {
@@ -80,7 +86,7 @@ python manual_test/check_rules.py manual_test/test.docx \
 | Поле | Обязательно | Смысл |
 |---|---|---|
 | `rule_id` | да | уникальный идентификатор внутри набора |
-| `kind` | да | `font`, `indent` или `margin` |
+| `kind` | да | `font`, `indent`, `margin`, `heading_levels`, `heading_numbering`, `heading_format`, `required_sections`, `toc` |
 | `message` | да | формулировка требования для отчета |
 | `severity` | нет | `error` (по умолчанию), `warning`, `info` |
 | `requirement_ref` | нет | ссылка на пункт методических указаний |
@@ -101,10 +107,17 @@ python manual_test/check_rules.py manual_test/test.docx \
 | `headers_footers` | только колонтитулы всех секций |
 | `footnotes` | только сноски и концевые сноски |
 | `sections` | секции целиком (только для `kind="margin"`) |
+| `headings` | заголовки в порядке следования из `document_tree` (уровни, нумерация, оформление) |
+| `document_structure` | структура документа: состав и порядок разделов |
+| `toc` | блоки оглавления `TocContainerBlock` и их записи |
 
 Строки оглавления (`TocContainerBlock.raw_paragraphs`) в выборку не попадают
 никогда: это навигация, а не текст работы. Правило `margin` обязано иметь
-`scope="sections"`, правила `font` и `indent` — любую из абзацных областей.
+`scope="sections"`, правила `font` и `indent` — любую из абзацных областей или
+`headings`, а структурные правила (`heading_*`, `required_sections`, `toc`)
+работают только в своей области: `headings`, `document_structure` и `toc`
+соответственно. Несовместимый `scope` — ошибка загрузки набора, а не молчаливое
+нарушение.
 
 Исключения по умолчанию действуют только для `body_text` — это семантическая
 выборка «основного текста». Остальные области берут объекты как есть: правило
@@ -119,6 +132,8 @@ python manual_test/check_rules.py manual_test/test.docx \
 | `include_list_items` | `false` | проверяет элементы списков (`list_info` или итоговый `num_id`) |
 | `include_empty` | `false` | проверяет пустые абзацы и абзацы только с графикой/формулой |
 | `style_ids` | `[]` | ограничивает выборку перечисленными `styleId` (`[]` — без ограничения; работает во всех областях) |
+| `exclude_roles` | `[]` | не проверять заголовки этих ролей вместе с поддеревом (`appendix`, `task_sheet`, `title_page`); только для `headings` и `document_structure` |
+| `min_heading_confidence` | `heuristic_visual` | минимальная уверенность распознавания заголовка: `explicit_outline_or_style`, `structural_keyword_match`, `heuristic_visual` |
 
 Подписи определяются по `cross_ref_index` (`figures`, `tables`, `Apps`):
 `caption_block_id` каждого объекта исключается из выборки.
@@ -166,6 +181,92 @@ python manual_test/check_rules.py manual_test/test.docx \
 
 ---
 
+### `heading_levels` — иерархия заголовков
+
+| Поле | По умолчанию | Смысл |
+|---|---|---|
+| `first_level` | `1` | уровень, с которого начинается документ |
+| `allow_skipped_levels` | `false` | разрешить переход `1 → 3` без промежуточного уровня |
+| `max_level` | `null` | максимальная глубина вложенности заголовков |
+
+Уровни берутся из `document_tree` (узел `level`), то есть парсер уже свел
+`outlineLvl`, стили заголовков и глубину номера. Нарушение сообщает пару
+«ожидаемый уровень → фактический»: `first_level`, `max_level` или
+`max_level_after_previous`.
+
+### `heading_numbering` — нумерация разделов
+
+| Поле | По умолчанию | Смысл |
+|---|---|---|
+| `check_sequence` | `true` | номера соседних заголовков идут подряд: 1, 2, 3 |
+| `check_parent_number` | `true` | номер подраздела начинается с номера родителя: `1.2` внутри `1` |
+| `check_depth_matches_level` | `true` | глубина номера совпадает с уровнем: `1.1` — второй уровень |
+| `number_ending` | `any` | `with_dot` / `without_dot` — требование к точке после номера |
+| `require_number_for_roles` | `["main_chapter", "sub_section"]` | роли, которые обязаны быть пронумерованы |
+
+Последовательность считается внутри групп соседних заголовков (сиблингов) и
+отдельно по глубине номера, поэтому перезапуск нумерации в приложениях не ломает
+проверку разделов. Номера, которые не разбираются как `1.2.3` (например
+`Приложение А`), в последовательности не участвуют, но проверяются на
+обязательность по роли. В нарушении видно, какой номер ожидался и какой найден.
+
+
+### `heading_format` — оформление заголовка
+
+| Поле | По умолчанию | Смысл |
+|---|---|---|
+| `trailing_dot` | `any` | `forbid` / `require` — точка в конце текста заголовка |
+| `trailing_dot_in_number` | `any` | точка после номера (`1.` в начале строки) |
+| `case` | `any` | `uppercase`, `capitalized`, `not_uppercase` |
+| `alignment` | `null` | ожидаемое `effective_props.alignment`: `left`, `center`, `right`, `both`, `distribute` |
+
+Регистр проверяется по буквам заголовка: `capitalized` требует прописную первую
+букву и запрещает заголовок целиком прописными, `uppercase` — наоборот.
+Несколько расхождений одного заголовка собираются в одно нарушение, чтобы
+нормоконтролер видел заголовок, а не три записи подряд.
+
+### `required_sections` — состав и порядок разделов
+
+Разделы задаются списком `sections`; каждый элемент — `label` (метка для отчета
+и `violation_id`), `role` (семантическая роль из `document_tree`), `titles`
+(допустимые названия) и `required`. Метки уникальны.
+
+```json
+{
+  "label": "заключение",
+  "role": "conclusion",
+  "titles": ["ЗАКЛЮЧЕНИЕ"],
+  "required": true
+}
+```
+
+`titles` сравниваются без учета регистра, точки, двоеточия и лишних пробелов и
+допускают продолжение названия: `СПИСОК ЛИТЕРАТУРЫ` совпадет с
+`СПИСОК ЛИТЕРАТУРЫ ПО ТЕМЕ`. Это же поле отделяет структурное `ЗАКЛЮЧЕНИЕ` от
+главы `ВЫВОДЫ`, у которой та же роль `conclusion`. Пропуск раздела дает
+нарушение уровня документа (`<rule_id>:section:<label>`), а раздел, оказавшийся
+выше предыдущего, — нарушение на своем заголовке.
+
+### `toc` — оглавление
+
+| Поле | По умолчанию | Смысл |
+|---|---|---|
+| `require_toc` | `true` | требовать наличие оглавления |
+| `require_automated` | `false` | требовать поле `TOC`/SDT вместо ручного списка |
+| `require_page_numbers` | `true` | номер страницы в каждой записи |
+| `check_page_numbers` | `false` | сверять номер страницы с фактической страницей заголовка |
+| `check_titles` | `true` | сверять названия записей с найденными заголовками |
+| `require_dot_leader` | `false` | требовать отточие до номера страницы |
+| `check_completeness` | `null` | требовать присутствия разделов из `required_entries`; по умолчанию включается, если `required_entries` задан |
+| `required_entries` | `[]` | список разделов в формате `SectionSpec` (как у `required_sections`) |
+| `max_depth` | `null` | максимальная глубина записи (`indent_level`) |
+
+`check_page_numbers` включается только вместе с точной пагинацией (PDF): при
+оценочной разметке парсер оставляет `is_page_number_match = None`, и правило
+молча ничего не сверяет. `check_completeness` без `required_entries` — ошибка
+загрузки набора, потому что сверять полноту не с чем.
+
+
 ## 4. Структура отчета
 
 `RuleEngine.check()` возвращает `RuleCheckReport`:
@@ -173,7 +274,7 @@ python manual_test/check_rules.py manual_test/test.docx \
 ```json
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "1.0.0",
+  "ruleset_version": "2.0.0",
   "parser_schema_version": "2.4.0",
   "document": {
     "filename": "vkr.docx",
@@ -183,7 +284,7 @@ python manual_test/check_rules.py manual_test/test.docx \
     "total_pages_est": 80
   },
   "summary": {
-    "rules_applied": 3,
+    "rules_applied": 9,
     "objects_checked": 761,
     "violations_total": 9,
     "by_severity": {"error": 9},
@@ -230,7 +331,10 @@ python manual_test/check_rules.py manual_test/test.docx \
   нормоконтролеру.
 - Нарушение адресуется **абзацем**, а не раном: `occurrences` показывает,
   сколько ранов внутри абзаца не соответствует правилу. Для `margin` адрес —
-  секция (`violation_id = "<rule_id>:section:<idx>"`).
+  секция (`violation_id = "<rule_id>:section:<idx>"`), для `required_sections` —
+  раздел (`"<rule_id>:section:<label>"`), для `toc` — запись
+  (`"<rule_id>:toc:<toc_id>:entry<N>"`) или заголовок, забытый в оглавлении
+  (`"<rule_id>:toc:missing:<block_id>"`).
 - `passed` равен `true`, только если нет нарушений уровня `error`. Правила с
   `severity="warning"` или `"info"` не блокируют документ.
 - Отчет детерминирован: нет таймстемпов и абсолютных путей, поэтому два прогона
@@ -255,8 +359,18 @@ python manual_test/check_rules.py manual_test/test.docx \
 5. **Стили не анализируются как цепочка**: проверяется результат каскада, а не
    то, в каком стиле задано значение. Для отладки в `found` отступа добавляется
    `first_line_source` (`direct`, `paragraph_style`, `doc_defaults` и т.п.).
-6. **Оглавление** исключено из выборки: строки `TocContainerBlock.raw_paragraphs`
-   не считаются основным текстом.
+6. **Строки оглавления** не попадают в текстовые правила: их проверяет
+   отдельный `toc`, а `font`/`indent` со `scope="body_text"` их не видят.
+7. **Уровни и роли заголовков берет парсер**: если заголовок распознан
+   эвристически, структурные правила работают по этой оценке. Сузить выборку
+   можно через `min_heading_confidence`, а приложения и задание исключить через
+   `exclude_roles`.
+8. **Номера страниц в оглавлении** сверяются только при точной пагинации из
+   PDF (`check_page_numbers`): при оценочной разметке парсер не выставляет
+   `is_page_number_match`, и правило не выдумывает расхождения.
+9. **Приложения** часто перезапускают нумерацию разделов, поэтому в штатном
+   наборе структурные правила исключают роль `appendix`; проверка самих
+   приложений — отдельная задача.
 
 
 ---
@@ -274,7 +388,8 @@ python manual_test/check_rules.py manual_test/test.docx --rules my_rules.json --
 ```
 
 5. Если правило ловит лишнее, сначала настройте `target`
-   (`include_headings`, `style_ids`), и только потом трогайте `tolerance`.
+   (`include_headings`, `style_ids`, `exclude_roles`, `min_heading_confidence`),
+   и только потом трогайте `tolerance`.
 6. Проверьте набор в тестах: `RuleSet.model_validate(json.loads(...))` падает на
    противоречивых правилах, поэтому ошибку видно без запуска документа.
 
@@ -295,10 +410,13 @@ python manual_test/check_rules.py manual_test/test.docx --rules my_rules.json --
 
 ## 7. Ограничения и направление развития
 
-Чего в первой итерации нет:
+Чего в наборе пока нет:
 
-- интервалов (межстрочный, до/после абзаца), выравнивания, отступов списков;
+- интервалов (межстрочный, до/после абзаца), выравнивания основного текста,
+  отступов списков;
 - проверки колонтитулов и нумерации страниц как отдельного требования;
+- проверки самих приложений: их нумерация и оформление пока исключены из
+  структурных правил;
 - автоматического подбора требований по методичке — набор пишется руками;
 - отчета для человека в Markdown/PDF: есть JSON и консольная сводка.
 
@@ -307,6 +425,9 @@ python manual_test/check_rules.py manual_test/test.docx --rules my_rules.json --
 - новые `kind` (`spacing`, `alignment`, `page_size`) добавляются как
   дискриминированные модели в `rules.py` и отдельный метод проверки в
   `engine.py`; остальной код не меняется;
+- структурные правила переиспользуют `SectionSpec`, поэтому новые проверки
+  («аннотация», «перечень сокращений», «приложения») описываются данными без
+  правки движка;
 - если понадобится «допустимый диапазон», в `expected` можно добавить
   `min_mm`/`max_mm` без ломания существующих наборов;
 - `check_json_file()` позволяет прогонять правила на уже собранных JSON без
@@ -318,7 +439,8 @@ python manual_test/check_rules.py manual_test/test.docx --rules my_rules.json --
 
 ```bash
 python -m pytest tests/test_rule_schema.py tests/test_rules_engine.py \
-    tests/test_rules_fonts.py tests/test_rules_indents.py tests/test_rules_margins.py -q
+    tests/test_rules_fonts.py tests/test_rules_indents.py tests/test_rules_margins.py \
+    tests/test_rules_headings.py tests/test_rules_sections.py tests/test_rules_toc.py -q
 python -m pytest tests -q
 ```
 

@@ -1,7 +1,7 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "1.0.0",
-  "description": "Тестовый набор: шрифт основного текста, красная строка и поля страницы",
+  "ruleset_version": "2.0.0",
+  "description": "Тестовый набор ВКР: текст, поля страницы, заголовки, обязательные разделы и оглавление",
   "rules": [
     {
       "rule_id": "font_body_text",
@@ -47,6 +47,154 @@
         "top_mm": 20.0,
         "bottom_mm": 20.0,
         "tolerance_mm": 1.0
+      }
+    },
+    {
+      "rule_id": "heading_levels",
+      "kind": "heading_levels",
+      "severity": "error",
+      "message": "Заголовки образуют непрерывную иерархию: старт с уровня 1, без перескоков уровней",
+      "requirement_ref": "Методические указания, требования к заголовкам",
+      "target": {
+        "scope": "headings",
+        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+      },
+      "expected": {
+        "first_level": 1,
+        "allow_skipped_levels": false,
+        "max_level": 3
+      }
+    },
+    {
+      "rule_id": "heading_numbering",
+      "kind": "heading_numbering",
+      "severity": "error",
+      "message": "Разделы нумеруются последовательно, подраздел начинается с номера родительского раздела",
+      "requirement_ref": "Методические указания, требования к нумерации разделов",
+      "target": {
+        "scope": "headings",
+        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+      },
+      "expected": {
+        "check_sequence": true,
+        "check_parent_number": true,
+        "check_depth_matches_level": true,
+        "number_ending": "any",
+        "require_number_for_roles": ["main_chapter", "sub_section"]
+      }
+    },
+    {
+      "rule_id": "heading_format_text",
+      "kind": "heading_format",
+      "severity": "error",
+      "message": "Заголовок набирается с прописной буквы и без точки в конце",
+      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "target": {
+        "scope": "headings",
+        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+      },
+      "expected": {
+        "trailing_dot": "forbid"
+      }
+    },
+    {
+      "rule_id": "heading_alignment",
+      "kind": "heading_format",
+      "severity": "warning",
+      "message": "Заголовки выравниваются по центру",
+      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "target": {
+        "scope": "headings",
+        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+      },
+      "expected": {
+        "alignment": "center"
+      }
+    },
+    {
+      "rule_id": "required_sections",
+      "kind": "required_sections",
+      "severity": "error",
+      "message": "Документ содержит введение, разделы, заключение и список литературы в требуемом порядке",
+      "requirement_ref": "Методические указания, требования к структуре работы",
+      "target": {
+        "scope": "document_structure",
+        "exclude_roles": ["title_page", "task_sheet"]
+      },
+      "expected": {
+        "sections": [
+          {
+            "label": "введение",
+            "role": "introduction",
+            "titles": ["ВВЕДЕНИЕ"],
+            "required": true
+          },
+          {
+            "label": "основные разделы",
+            "role": "main_chapter",
+            "required": true
+          },
+          {
+            "label": "заключение",
+            "role": "conclusion",
+            "titles": ["ЗАКЛЮЧЕНИЕ"],
+            "required": true
+          },
+          {
+            "label": "список литературы",
+            "role": "bibliography",
+            "required": true
+          },
+          {
+            "label": "приложения",
+            "role": "appendix",
+            "titles": ["ПРИЛОЖЕНИЕ", "ПРИЛОЖЕНИЯ"],
+            "required": false
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "toc",
+      "kind": "toc",
+      "severity": "error",
+      "message": "Оглавление перечисляет все разделы и подразделы и указывает номера страниц",
+      "requirement_ref": "Методические указания, требования к оглавлению",
+      "target": {
+        "scope": "toc"
+      },
+      "expected": {
+        "require_toc": true,
+        "require_automated": false,
+        "require_page_numbers": true,
+        "check_page_numbers": false,
+        "check_titles": true,
+        "require_dot_leader": false,
+        "check_completeness": true,
+        "required_entries": [
+          {
+            "label": "введение",
+            "role": "introduction",
+            "titles": ["ВВЕДЕНИЕ"]
+          },
+          {
+            "label": "раздел",
+            "role": "main_chapter"
+          },
+          {
+            "label": "подраздел",
+            "role": "sub_section"
+          },
+          {
+            "label": "заключение",
+            "role": "conclusion",
+            "titles": ["ЗАКЛЮЧЕНИЕ"]
+          },
+          {
+            "label": "список литературы",
+            "role": "bibliography"
+          }
+        ]
       }
     }
   ]
