@@ -15,7 +15,7 @@ from api.main import MAX_FILE_SIZE_BYTES, create_app
 
 
 def _docx_bytes() -> bytes:
-    """Build a minimal OOXML package for upload API tests."""
+    """создаёт минимальный пакет OOXML для тестов API загрузки"""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("[Content_Types].xml", "<Types/>")
@@ -24,12 +24,12 @@ def _docx_bytes() -> bytes:
 
 
 def _client(tmp_path: Path) -> TestClient:
-    """Create a test client whose storage is isolated to the test directory."""
+    """создаёт тестовый клиент с отдельным каталогом хранения"""
     return TestClient(create_app(tmp_path / "store"))
 
 
 def _upload_files(guidelines_name: str = "guide.docx") -> dict[str, tuple]:
-    """Return a valid thesis and guide multipart payload."""
+    """возвращает multipart-данные ВКР и методички"""
     guidelines = (
         b"%PDF-1.7\nexample" if guidelines_name.endswith(".pdf") else _docx_bytes()
     )
@@ -44,7 +44,7 @@ def test_upload_creates_check_and_status_is_retrievable(
     tmp_path: Path,
     guidelines_name: str,
 ) -> None:
-    """Create a check for supported guide formats and retrieve its status."""
+    """создаёт проверку с поддерживаемой методичкой и получает её статус"""
     with _client(tmp_path) as client:
         response = client.post(
             "/api/v1/checks",
@@ -63,7 +63,7 @@ def test_upload_creates_check_and_status_is_retrievable(
 
 
 def test_upload_rejects_non_docx_thesis(tmp_path: Path) -> None:
-    """Reject thesis uploads whose extension is not DOCX."""
+    """отклоняет ВКР с расширением, отличным от DOCX"""
     files = _upload_files()
     files["thesis"] = ("thesis.pdf", b"%PDF-1.7", "application/pdf")
 
@@ -71,11 +71,11 @@ def test_upload_rejects_non_docx_thesis(tmp_path: Path) -> None:
         response = client.post("/api/v1/checks", files=files)
 
     assert response.status_code == 415
-    assert "thesis must be a .docx" in response.json()["detail"]
+    assert "Поле thesis должно содержать файл .docx" in response.json()["detail"]
 
 
 def test_upload_rejects_invalid_docx_content(tmp_path: Path) -> None:
-    """Reject a DOCX extension when the uploaded bytes are not an OOXML package."""
+    """отклоняет файл DOCX, содержимое которого не является пакетом OOXML"""
     files = _upload_files()
     files["thesis"] = ("thesis.docx", b"not a docx", "application/octet-stream")
 
@@ -83,11 +83,11 @@ def test_upload_rejects_invalid_docx_content(tmp_path: Path) -> None:
         response = client.post("/api/v1/checks", files=files)
 
     assert response.status_code == 415
-    assert "not a valid DOCX" in response.json()["detail"]
+    assert "не является корректным документом DOCX" in response.json()["detail"]
 
 
 def test_upload_rejects_invalid_pdf_content(tmp_path: Path) -> None:
-    """Reject a PDF extension without a PDF file signature."""
+    """отклоняет файл PDF с неверной сигнатурой"""
     files = _upload_files("guide.pdf")
     files["guidelines"] = ("guide.pdf", b"not a pdf", "application/pdf")
 
@@ -95,11 +95,11 @@ def test_upload_rejects_invalid_pdf_content(tmp_path: Path) -> None:
         response = client.post("/api/v1/checks", files=files)
 
     assert response.status_code == 415
-    assert "not a valid PDF" in response.json()["detail"]
+    assert "не является корректным документом PDF" in response.json()["detail"]
 
 
 def test_upload_rejects_file_over_size_limit(tmp_path: Path) -> None:
-    """Reject files larger than the per-file upload limit."""
+    """отклоняет файлы, превышающие установленный предел размера"""
     files = _upload_files()
     files["thesis"] = (
         "thesis.docx",
@@ -111,20 +111,20 @@ def test_upload_rejects_file_over_size_limit(tmp_path: Path) -> None:
         response = client.post("/api/v1/checks", files=files)
 
     assert response.status_code == 413
-    assert "20 MiB" in response.json()["detail"]
+    assert "20 МиБ" in response.json()["detail"]
 
 
 def test_status_endpoint_returns_not_found_for_unknown_id(tmp_path: Path) -> None:
-    """Return 404 when no check exists for the requested ID."""
+    """возвращает 404, если проверка с указанным ID не найдена"""
     with _client(tmp_path) as client:
         response = client.get(f"/api/v1/checks/{uuid4()}")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Check not found"}
+    assert response.json() == {"detail": "Проверка не найдена"}
 
 
 def test_files_and_status_survive_store_recreation(tmp_path: Path) -> None:
-    """Persist both uploaded files and status beyond a client/application restart."""
+    """сохраняет файлы и статус после перезапуска клиента и приложения"""
     storage_dir = tmp_path / "persistent"
     with TestClient(create_app(storage_dir)) as client:
         created = client.post(
@@ -147,7 +147,7 @@ def test_files_and_status_survive_store_recreation(tmp_path: Path) -> None:
 
 
 def test_openapi_contract_is_checked_in_and_matches_application() -> None:
-    """Keep the checked-in OpenAPI contract synchronized with FastAPI routes."""
+    """проверяет соответствие OpenAPI-контракта схеме приложения"""
     contract_path = Path(__file__).resolve().parents[1] / "openapi.json"
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     application_contract = create_app().openapi()
