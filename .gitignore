@@ -30,3 +30,6 @@ venv/
 .vscode/
 
 documents/
+
+# Local API upload database and files
+backend/data/
