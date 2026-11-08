@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from docx_parser import converter
-from docx_parser.converter import (
+from parser.docx import converter
+from parser.docx.converter import (
     convert_to_docx,
     detect_source_format,
     is_native_docx,
 )
-from docx_parser.pipeline import DocxParserPipeline, parse_any_to_json_file
+from parser.docx.pipeline import DocxParserPipeline, parse_any_to_json_file
 
 MANUAL_SAMPLE = Path(__file__).resolve().parents[1] / "manual_test" / "3.doc"
 

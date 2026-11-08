@@ -14,7 +14,7 @@ import re
 from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
 
-from .schema import (
+from parser.core.schema import (
     BibliographyEntry,
     BlockUnion,
     CrossReferenceIndex,

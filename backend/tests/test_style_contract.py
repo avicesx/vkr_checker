@@ -1,6 +1,6 @@
 """Контракт оформления кода: докстринги и отсутствие истории правок.
 
-Проверяются модули пакетов docx_parser и rule_engine, классы и публичные
+Проверяются модули пакетов parser (core, docx) и rule_engine, классы и публичные
 функции: у каждого символа есть докстринг, первая строка модульного докстринга
 короткая и заканчивается точкой. Комментарии и докстринги не должны содержать
 отсылок к прошлым версиям, номерам абзацев конкретного документа или названиям
@@ -15,9 +15,12 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PARSER_ROOT = PROJECT_ROOT / "parser"
 PACKAGE_MODULES = sorted(
     [
-        *list((PROJECT_ROOT / "docx_parser").glob("*.py")),
+        *list(PARSER_ROOT.glob("*.py")),
+        *list((PARSER_ROOT / "core").glob("*.py")),
+        *list((PARSER_ROOT / "docx").glob("*.py")),
         *list((PROJECT_ROOT / "rule_engine").glob("*.py")),
     ]
 )

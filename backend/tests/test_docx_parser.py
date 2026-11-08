@@ -7,8 +7,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Optional
 
-from docx_parser.pipeline import parse_docx_to_json_file
-from docx_parser.schema import (
+from parser.docx.pipeline import parse_docx_to_json_file
+from parser.core.schema import (
     DocumentTreeNode,
     ParagraphBlock,
     ParsedDocxDocument,

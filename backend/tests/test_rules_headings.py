@@ -8,8 +8,8 @@ outlineLvl) и проверяют, что каждое правило загол
 from __future__ import annotations
 
 from conftest import DocxPackageBuilder
-from docx_parser.pipeline import DocxParserPipeline
-from docx_parser.schema import ParsedDocxDocument
+from parser.docx.pipeline import DocxParserPipeline
+from parser.core.schema import ParsedDocxDocument
 from rule_engine import RuleCheckReport, RuleEngine, RuleSet
 
 TEXT = """

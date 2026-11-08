@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 
 from conftest import DocxPackageBuilder
-from docx_parser.pipeline import DocxParserPipeline
-from docx_parser.schema import ParsedDocxDocument
+from parser.docx.pipeline import DocxParserPipeline
+from parser.core.schema import ParsedDocxDocument
 from rule_engine import (
     DEFAULT_RULESET_PATH,
     RuleEngine,

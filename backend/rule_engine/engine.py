@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from docx_parser.schema import (
+from parser.core.schema import (
     BlockUnion,
     DocumentTreeNode,
     ParagraphBlock,

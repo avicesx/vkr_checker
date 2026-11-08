@@ -19,7 +19,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .schema import (
+from .pdf_page_text import read_page_image_boxes, read_page_lines
+from .pdf_text_utils import (
+    PT_TO_MM,
+    RE_PAGE_NUM_CANDIDATE,
+    normalize_compact,
+)
+from parser.core.schema import (
     BlockUnion,
     EquationObject,
     ParagraphBlock,
@@ -29,14 +35,6 @@ from .schema import (
     TableRow,
     TocContainerBlock,
     VisualObject,
-)
-
-PT_TO_MM = 25.4 / 72.0  # 1 пункт PDF = 0.352778 мм
-
-RE_NON_ALNUM = re.compile(r"[^\w]+", re.UNICODE)
-RE_PAGE_NUM_CANDIDATE = re.compile(
-    r"^\s*(?:стр\.?|страница|page|p\.?)?\s*[\-\u2012\u2013\u2014]?\s*(?P<num>\d{1,4})\s*[\-\u2012\u2013\u2014]?\s*$",
-    re.IGNORECASE,
 )
 
 
@@ -106,12 +104,13 @@ class PdfPageAligner:
 
     @staticmethod
     def _normalize_compact(text: str) -> str:
+        """Сжимает строку до буквенно-цифрового потока в нижнем регистре (ё -> е).
+
+        Тонкая обертка над общим помощником pdf_text_utils.normalize_compact:
+        правило сравнения строк обязано совпадать у выравнивания DOCX и у
+        автономного PDF-парсера.
         """
-        Сжимает строку до буквенно-цифрового потока в нижнем регистре (ё -> е).
-        Делает сопоставление нечувствительным к мягким переносам слов и разрывам строк в PDF.
-        """
-        t = text.lower().replace("ё", "е")
-        return RE_NON_ALNUM.sub("", t).replace("_", "")
+        return normalize_compact(text)
 
     def align_and_enrich(
         self,
@@ -121,10 +120,10 @@ class PdfPageAligner:
         equations: List[EquationObject],
     ) -> PdfAlignmentReport:
         """Проставляет блокам физические страницы, координаты и аудит колонтитулов."""
-        import fitz  # PyMuPDF
+        import pymupdf
 
         pdf_sha256 = self._compute_sha256(self.pdf_path)
-        pdf_doc = fitz.open(str(self.pdf_path))
+        pdf_doc = pymupdf.open(str(self.pdf_path))
         total_pages = len(pdf_doc)
 
         # Базовые поля страницы из первого раздела (для зонирования колонтитулов)
@@ -214,31 +213,24 @@ class PdfPageAligner:
             header_limit_y_mm = max(14.0, top_margin_mm - 0.8)
             footer_limit_y_mm = min(page_h_mm - 14.0, page_h_mm - bottom_margin_mm + 0.8)
 
-            raw_dict = page.get_text("dict")
+            page_lines = read_page_lines(page)
             page_raw_lines: List[Tuple[float, float, float, float, str, str, float]] = []
 
-            for b in raw_dict.get("blocks", []):
-                if b.get("type") == 0:  # Текстовый блок
-                    for line in b.get("lines", []):
-                        spans = line.get("spans", [])
-                        if not spans:
-                            continue
-                        line_txt = "".join(s.get("text", "") for s in spans).strip()
-                        if not line_txt:
-                            continue
-                        bbox = line.get("bbox", (0, 0, 0, 0))
-                        x0_mm = round(bbox[0] * PT_TO_MM, 2)
-                        y0_mm = round(bbox[1] * PT_TO_MM, 2)
-                        x1_mm = round(bbox[2] * PT_TO_MM, 2)
-                        y1_mm = round(bbox[3] * PT_TO_MM, 2)
-
-                        main_span = max(spans, key=lambda s: len(s.get("text", "")))
-                        f_name = main_span.get("font", "")
-                        f_size = round(float(main_span.get("size", 12.0)), 1)
-                        page_raw_lines.append((x0_mm, y0_mm, x1_mm, y1_mm, line_txt, f_name, f_size))
-
-            # Сортируем строки страницы сверху вниз, слева направо (с допуском 1.5 мм по вертикали)
-            page_raw_lines.sort(key=lambda item: (round(item[1] / 1.5), item[0]))
+            for raw_line in page_lines:
+                text = raw_line.text
+                if not text:
+                    continue
+                page_raw_lines.append(
+                    (
+                        raw_line.x0_mm,
+                        raw_line.y0_mm,
+                        raw_line.x1_mm,
+                        raw_line.y1_mm,
+                        text,
+                        raw_line.font_name,
+                        round(raw_line.font_size_pt, 1),
+                    )
+                )
 
             header_candidates: List[Tuple[float, float, float, float, str, str, float]] = []
             footer_candidates: List[Tuple[float, float, float, float, str, str, float]] = []
@@ -294,18 +286,16 @@ class PdfPageAligner:
             # Извлекаем прямоугольники растровых картинок со страницы PDF
             vis_boxes: List[_PdfVisualBox] = []
             try:
-                for img_info in page.get_image_info():
-                    ib = img_info.get("bbox")
-                    if ib:
-                        vis_boxes.append(
-                            _PdfVisualBox(
-                                page_num=page_num,
-                                x0_mm=round(ib[0] * PT_TO_MM, 2),
-                                y0_mm=round(ib[1] * PT_TO_MM, 2),
-                                x1_mm=round(ib[2] * PT_TO_MM, 2),
-                                y1_mm=round(ib[3] * PT_TO_MM, 2),
-                            )
+                for ib in read_page_image_boxes(page):
+                    vis_boxes.append(
+                        _PdfVisualBox(
+                            page_num=page_num,
+                            x0_mm=round(ib[0] * PT_TO_MM, 2),
+                            y0_mm=round(ib[1] * PT_TO_MM, 2),
+                            x1_mm=round(ib[2] * PT_TO_MM, 2),
+                            y1_mm=round(ib[3] * PT_TO_MM, 2),
                         )
+                    )
             except Exception:
                 pass
             visual_boxes_by_page[page_num] = self.cluster_drawings(vis_boxes)

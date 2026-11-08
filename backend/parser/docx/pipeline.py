@@ -1,12 +1,15 @@
-"""Оркестратор конвейера .docx (+ PDF) -> ParsedDocxDocument.
+"""Оркестратор конвейера .docx (+ PDF) -> ParsedDocument.
 
 Пакет разбирает уже нормализованный OOXML-пакет. Legacy-форматы (.doc, .rtf,
 .odt и другие, читаемые LibreOffice) сначала конвертируются в .docx модулем
-docx_parser.converter. Точек входа две:
+parser.docx.converter. Публичных точек входа три:
 
-    parse_docx_to_json_file — нативный .docx, конвертация не нужна;
-    parse_any_to_json_file   — любой поддерживаемый формат: при необходимости
-                               конвертирует через LibreOffice и затем разбирает.
+    DocxParserPipeline.parse()          — с PDF режим docx_pdf, без PDF docx_only;
+    DocxParserPipeline.parse_docx_only() — только DOCX, переданный PDF игнорируется;
+    parse_docx_to_json_file             — нативный .docx и запись JSON на диск;
+    parse_any_to_json_file              — любой поддерживаемый формат: при
+                                          необходимости конвертация LibreOffice,
+                                          затем разбор и запись JSON.
 
 Документ проходит семь фаз:
 
@@ -19,7 +22,11 @@ docx_parser.converter. Точек входа две:
 7. Метаданные, настройки и аномалии оформления.
 
 Порядок фаз фиксирован: структура и ссылки анализируются после PDF-выравнивания,
-поэтому страницы в отчете физические, а не оценочные.
+поэтому страницы в отчете физические, а не оценочные. Без PDF пятая фаза
+пропускается, и отчет честно помечает пагинацию как оценочную: page_count.method
+равен docx_native_breaks при наличии w:lastRenderedPageBreak, иначе
+geometric_estimation. Режим и его возможности попадают в parse_mode, source и
+capabilities (контракт описан в mode.py и ARCHITECTURE.md).
 
 PDF-сверка: эталонный PDF должен быть снят с ИСХОДНОГО файла. LibreOffice
 пересчитывает вёрстку при конвертации .doc -> .docx, поэтому PDF, отрендеренный
@@ -33,12 +40,18 @@ from typing import Dict, List, Literal, Optional, Tuple
 from lxml import etree
 
 from .metadata_anomalies_parser import MetaAndAnomaliesParser
+from parser.core.mode import ParseMode, detect_mode
 from .paragraph_parser import NS_EXT, NumberingStateTracker, ParagraphParser
 from .pdf_page_aligner import PdfPageAligner
-from .schema import (
+from parser.core.schema import (
     BlockUnion,
+    DocumentCapabilities,
+    DocumentMeta,
+    PageCountInfo,
     ParagraphBlock,
-    ParsedDocxDocument,
+    ParsedDocument,
+    SectionProperties,
+    SourceInfo,
     TableBlock,
     TocContainerBlock,
 )
@@ -51,8 +64,12 @@ from .visual_and_math_parser import VisualAndMathParser
 
 class DocxParserPipeline:
     """
-    Главный оркестратор: нормализованный .docx (+ эталонный PDF) -> ParsedDocxDocument.
-    Координирует работу всех подсистем в 7 последовательных фаз; PDF-выравнивание
+    Главный оркестратор: нормализованный .docx (+ эталонный PDF) -> ParsedDocument.
+
+    parse() выбирает режим по фактическим файлам: с переданным PDF это docx_pdf,
+    без PDF — docx_only. parse_docx_only() принудительно разбирает только DOCX
+    и игнорирует PDF из конструктора. Обе точки входа вызывают единый
+    _parse_core, поэтому семь фаз разбора не дублируются. PDF-выравнивание
     выполняется до анализа структуры, чтобы оглавление и перекрестные ссылки
     сверялись по физическим страницам листа.
     """
@@ -83,18 +100,48 @@ class DocxParserPipeline:
         self.lo_version = lo_version
         self.lo_image = lo_image
 
-    def parse(self) -> ParsedDocxDocument:
+    def parse(self) -> ParsedDocument:
         """
-        Прогоняет документ через все фазы и собирает отчет.
+        Выбирает режим по фактическим файлам и собирает отчет.
+
+        С переданным в конструктор PDF разбор идет в режиме docx_pdf (PDF
+        уточняет физические страницы), без PDF — в режиме docx_only.
 
         Raises:
             ValueError: в пакете нет word/document.xml или w:body.
         """
+        return self._parse_core(self.docx_path, self.pdf_path)
+
+    def parse_docx_only(self) -> ParsedDocument:
+        """
+        Разбирает только DOCX: PDF, переданный в конструктор, игнорируется.
+
+        Raises:
+            ValueError: в пакете нет word/document.xml или w:body.
+        """
+        return self._parse_core(self.docx_path, None, requested_mode="docx_only")
+
+    def _parse_core(
+        self,
+        docx_path: str | Path,
+        pdf_path: Optional[str | Path] = None,
+        requested_mode: Optional[str] = None,
+    ) -> ParsedDocument:
+        """Единый конвейер из семи фаз и сборка контракта режима разбора."""
+        parse_mode = detect_mode(docx_path, pdf_path, requested_mode)
+        if parse_mode == "pdf_only":
+            raise ValueError(
+                "Режим pdf_only разбирает только PDF: "
+                "DocxParserPipeline его не выполняет"
+            )
+        # PDF участвует в разборе только в комбинированном режиме docx_pdf.
+        has_pdf = parse_mode == "docx_pdf" and pdf_path is not None
+
         alignment_report = None
-        with zipfile.ZipFile(self.docx_path, "r") as zf:
+        with zipfile.ZipFile(docx_path, "r") as zf:
             namelist = set(zf.namelist())
             if "word/document.xml" not in namelist:
-                raise ValueError(f"Файл '{self.docx_path}' не содержит word/document.xml")
+                raise ValueError(f"Файл '{docx_path}' не содержит word/document.xml")
 
             styles_bytes = zf.read("word/styles.xml") if "word/styles.xml" in namelist else None
             theme_bytes = zf.read("word/theme/theme1.xml") if "word/theme/theme1.xml" in namelist else None
@@ -254,8 +301,8 @@ class DocxParserPipeline:
             # упоминаний и записей оглавления должны быть физическими. На эвристической
             # пагинации DOCX сверка оглавления дает ложные расхождения.
             alignment_report = None
-            if self.pdf_path is not None:
-                alignment_report = PdfPageAligner(self.pdf_path).align_and_enrich(
+            if has_pdf:
+                alignment_report = PdfPageAligner(pdf_path).align_and_enrich(
                     blocks=blocks,
                     sections=sections,
                     visuals=visual_math_parser.visuals_registry,
@@ -301,7 +348,7 @@ class DocxParserPipeline:
             # ---------------------------------------------------------
             meta_anomalies_parser = MetaAndAnomaliesParser(
                 zf=zf,
-                docx_path=self.docx_path,
+                docx_path=str(docx_path),
                 source_format=self.source_format,
                 converted_via_lo=self.converted_via_lo,
                 conversion_tool=self.conversion_tool,
@@ -339,7 +386,37 @@ class DocxParserPipeline:
             else:
                 pdf_pages_audit = []
 
-            return ParsedDocxDocument(
+            # ---------------------------------------------------------
+            # Сборка контракта режима: страницы, источник, возможности
+            # ---------------------------------------------------------
+            if alignment_report is not None:
+                # PDF измерен постранично: число страниц точное.
+                page_count = PageCountInfo(
+                    total_pages=max(alignment_report.total_pages, 1),
+                    method="pdf_exact",
+                    confidence="high",
+                )
+            else:
+                page_count = _estimate_docx_only_page_count(
+                    sections=sections,
+                    blocks=blocks,
+                    has_native_breaks=has_rendered_breaks,
+                )
+                # Последняя секция обязана заканчиваться на последней странице отчета.
+                if sections:
+                    sections[-1].page_end_est = max(
+                        sections[-1].page_end_est, page_count.total_pages
+                    )
+
+            return ParsedDocument(
+                parse_mode=parse_mode,
+                source=_build_source(parse_mode=parse_mode, meta=doc_meta, has_pdf=has_pdf),
+                capabilities=_build_capabilities(
+                    has_pdf=has_pdf,
+                    pagination_source=pagination_source,
+                    page_count=page_count,
+                ),
+                page_count=page_count,
                 meta=doc_meta,
                 settings=global_settings,
                 theme=style_resolver.theme_resolver.theme_data,
@@ -388,13 +465,107 @@ class DocxParserPipeline:
                     yield from cls._iter_unwrapped_body_nodes(list(branch))
 
 
+def _max_page_of_sections(sections: List[SectionProperties]) -> int:
+    """Максимальная page_end_est по секциям (0, если секций нет)."""
+    ends = [
+        section.page_end_est
+        for section in sections
+        if isinstance(section.page_end_est, int) and section.page_end_est >= 1
+    ]
+    return max(ends) if ends else 0
+
+
+def _max_page_of_blocks(blocks: List[BlockUnion]) -> int:
+    """Максимальная page_end_est по блокам с учетом вложенных ячеек и оглавления."""
+    max_page = 0
+    for block in blocks:
+        max_page = max(max_page, block.page_end_est)
+        if isinstance(block, TableBlock):
+            for row in block.rows:
+                max_page = max(max_page, row.page_start_est, row.page_end_est)
+                for cell in row.cells:
+                    max_page = max(max_page, _max_page_of_blocks(cell.blocks))
+        elif isinstance(block, TocContainerBlock):
+            max_page = max(max_page, _max_page_of_blocks(block.raw_paragraphs))
+    return max_page
+
+
+def _estimate_docx_only_page_count(
+    sections: List[SectionProperties],
+    blocks: List[BlockUnion],
+    has_native_breaks: bool,
+) -> PageCountInfo:
+    """Оценивает число страниц DOCX без PDF по секциям, блокам и маркерам разрыва."""
+    total_pages = max(
+        _max_page_of_sections(sections),
+        _max_page_of_blocks(blocks),
+        1,
+    )
+    if has_native_breaks:
+        return PageCountInfo(
+            total_pages=total_pages,
+            method="docx_native_breaks",
+            confidence="medium",
+            note=(
+                "PDF не передан: страницы восстановлены по маркерам "
+                "w:lastRenderedPageBreak, оставленным Word при сохранении"
+            ),
+        )
+    return PageCountInfo(
+        total_pages=total_pages,
+        method="geometric_estimation",
+        confidence="low",
+        note=(
+            "PDF не передан: число страниц оценено по геометрии DOCX "
+            "(высоты абзацев, таблиц и разрывы страниц), возможна погрешность"
+        ),
+    )
+
+
+def _build_capabilities(
+    has_pdf: bool,
+    pagination_source: str,
+    page_count: PageCountInfo,
+) -> DocumentCapabilities:
+    """Собирает матрицу возможностей DOCX-конвейера для фактического режима."""
+    return DocumentCapabilities(
+        styles_parsed=True,
+        numbering_parsed=True,
+        sections_parsed=True,
+        exact_pagination=has_pdf and pagination_source == "pdf_exact",
+        pdf_layout_coordinates=has_pdf,
+        visual_registry=True,
+        footnotes_parsed=True,
+        cross_references=True,
+        word_metadata=True,
+        # Маркеры lastRenderedPageBreak дают измеренные страницы, а не оценку.
+        page_count_estimated=page_count.method not in ("pdf_exact", "docx_native_breaks"),
+    )
+
+
+def _build_source(parse_mode: ParseMode, meta: DocumentMeta, has_pdf: bool) -> SourceInfo:
+    """Описывает фактический источник разбора и хэши файлов из meta."""
+    return SourceInfo(
+        mode=parse_mode,
+        has_docx=True,
+        has_pdf=has_pdf,
+        docx_filename=meta.filename,
+        docx_sha256=meta.file_sha256,
+        pdf_filename=meta.pdf_filename if has_pdf else None,
+        pdf_sha256=meta.pdf_sha256 if has_pdf else None,
+    )
+
+
 def parse_docx_to_json_file(
     docx_path: str | Path,
     output_json_path: str | Path,
     indent: int = 2,
     pdf_path: Optional[str | Path] = None,
-) -> ParsedDocxDocument:
-    """Утилита верхнего уровня: парсит .docx и сохраняет отформатированный JSON на диск."""
+) -> ParsedDocument:
+    """Парсит .docx и сохраняет отформатированный JSON на диск.
+
+    При pdf_path=None результат собирается в режиме docx_only.
+    """
     pipeline = DocxParserPipeline(docx_path, pdf_path=pdf_path)
     parsed_doc = pipeline.parse()
     Path(output_json_path).write_text(
@@ -412,7 +583,7 @@ def parse_any_to_json_file(
     outdir: Optional[str | Path] = None,
     backend: Optional[str] = None,
     timeout: Optional[int] = None,
-) -> ParsedDocxDocument:
+) -> ParsedDocument:
     """
     Конвертирует legacy-формат при необходимости, разбирает документ и пишет JSON.
 

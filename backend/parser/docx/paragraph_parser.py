@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set, Tuple
 from lxml import etree
 
-from .schema import (
+from parser.core.schema import (
     HeadingMetadata,
     InlineSpecialChar,
     ListItemMetadata,

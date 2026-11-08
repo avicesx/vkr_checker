@@ -10,8 +10,8 @@ from typing import Dict
 
 import pytest
 from conftest import DocxPackageBuilder
-from docx_parser.pipeline import DocxParserPipeline
-from docx_parser.schema import ParsedDocxDocument
+from parser.docx.pipeline import DocxParserPipeline
+from parser.core.schema import ParsedDocxDocument
 from rule_engine import RuleEngine, RuleSet
 
 PLAIN_PARAGRAPH = """

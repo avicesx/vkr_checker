@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from lxml import etree
 
 from .paragraph_parser import NS_EXT, ParagraphParser
-from .schema import (
+from parser.core.schema import (
     BorderEdge,
     ChartDetails,
     ColorValue,

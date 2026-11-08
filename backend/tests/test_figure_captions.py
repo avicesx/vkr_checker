@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from conftest import DocxPackageBuilder, make_fake_png_bytes
-from docx_parser.pipeline import DocxParserPipeline
+from parser.docx.pipeline import DocxParserPipeline
 
 
 IMAGE_PARAGRAPH = """

@@ -18,7 +18,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from lxml import etree
 
 from .paragraph_parser import NS_EXT, ParagraphParser
-from .schema import (
+from parser.core.schema import (
     BlockUnion,
     BoxBorders,
     FootnoteItem,

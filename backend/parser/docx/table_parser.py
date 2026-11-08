@@ -14,7 +14,7 @@ import re
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 from lxml import etree
 
-from .schema import (
+from parser.core.schema import (
     BlockUnion,
     BorderEdge,
     BoxBorders,

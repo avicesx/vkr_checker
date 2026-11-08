@@ -3,14 +3,81 @@
 Парсеры только заполняют эти структуры; имена полей и правила сериализации
 образуют публичный контракт, поэтому переименование поля меняет JSON.
 
-Порядок секций файла: базовые примитивы (цвета, рамки, источники свойств),
-абзацы и раны, таблицы, визуальные объекты и формулы, секции и колонтитулы,
-дерево документа, перекрестные ссылки, аномалии, корневая модель
-ParsedDocxDocument.
+Порядок секций файла: режимы и возможности (0), базовые примитивы (цвета, рамки,
+источники свойств), абзацы и раны, таблицы, визуальные объекты и формулы, секции
+и колонтитулы, дерево документа, перекрестные ссылки, аномалии, корневая модель
+ParsedDocument (исторический алиас — ParsedDocxDocument).
 """
 from __future__ import annotations
 from typing import Annotated, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, model_serializer, model_validator
+
+from parser.core.mode import ParseMode
+
+
+# =====================================================================
+# 0. РЕЖИМЫ РАЗБОРА: ИСТОЧНИК, ВОЗМОЖНОСТИ И ПАГИНАЦИЯ
+# =====================================================================
+
+class SourceInfo(BaseModel):
+    """Фактический источник разбора и его идентификаторы.
+
+    Заполняется парсером/сервисом до возврата результата. mode совпадает с
+    parse_mode корневой модели, а has_docx/has_pdf отражают реально
+    использованные файлы (а не наличие путей в запросе).
+    """
+
+    mode: ParseMode
+    has_docx: bool = Field(description="DOCX реально участвовал в разборе")
+    has_pdf: bool = Field(
+        description="PDF реально участвовал в разборе; при False поля pdf_* в JSON удаляются"
+    )
+    docx_filename: Optional[str] = Field(default=None, description="Имя исходного DOCX-файла")
+    docx_sha256: Optional[str] = Field(default=None, description="SHA-256 исходного DOCX-файла")
+    pdf_filename: Optional[str] = Field(default=None, description="Имя эталонного PDF-файла")
+    pdf_sha256: Optional[str] = Field(default=None, description="SHA-256 эталонного PDF-файла")
+
+
+class DocumentCapabilities(BaseModel):
+    """Что именно удалось извлечь в выбранном режиме.
+
+    Флаги описывают не «качество», а наличие данных: потребитель (сервис,
+    rule_engine) обязан проверять их перед использованием полей.
+    """
+
+    styles_parsed: bool = Field(default=True, description="Каскад стилей и docDefaults разобран")
+    numbering_parsed: bool = Field(default=True, description="numbering.xml и уровни списков разобраны")
+    sections_parsed: bool = Field(default=True, description="Секции (w:sectPr) и их страницы разобраны")
+    exact_pagination: bool = Field(
+        default=False,
+        description="Пагинация точная, как в PDF (pagination_source='pdf_exact')",
+    )
+    pdf_layout_coordinates: bool = Field(
+        default=False, description="Есть координаты вёрстки из PDF (границы текста, зоны колонтитулов)"
+    )
+    visual_registry: bool = Field(default=True, description="Реестр визуальных объектов (рисунки, OLE, фигуры)")
+    footnotes_parsed: bool = Field(default=True, description="Сноски и концевые сноски разобраны")
+    cross_references: bool = Field(default=True, description="Оглавление, подписи и перекрестные ссылки разобраны")
+    word_metadata: bool = Field(default=True, description="Метаданные docProps (автор, даты, статистика Word)")
+    page_count_estimated: bool = Field(
+        default=True, description="Число страниц оценочное, а не измерено по PDF или маркерам разрыва"
+    )
+
+
+class PageCountInfo(BaseModel):
+    """Число страниц документа и способ его получения."""
+
+    total_pages: int = Field(ge=1, description="Итоговое число страниц, всегда >= 1")
+    method: Literal[
+        "pdf_exact",
+        "docx_native_breaks",
+        "geometric_estimation",
+        "app_xml_metadata",
+    ] = Field(description="Способ получения числа страниц")
+    confidence: Literal["high", "medium", "low"] = Field(description="Достоверность значения")
+    note: Optional[str] = Field(
+        default=None, description="Пояснение, если значение оценочное или взято из устаревшего источника"
+    )
 
 
 # =====================================================================
@@ -26,6 +93,7 @@ PropertySource = Literal[
     "doc_defaults",     # Взято из w:docDefaults в styles.xml
     "theme",            # Разрешено через theme/theme1.xml (+major/+minor)
     "engine_default",   # Вшитый дефолт MS Word (когда в XML пусто везде)
+    "pdf_estimate",     # Измерено по геометрии PDF (только в режимах с PDF)
 ]
 
 
@@ -1099,10 +1167,174 @@ class DocumentAnomalies(BaseModel):
     )
 
 
-class ParsedDocxDocument(BaseModel):
-    """Корневая модель отчета: блоки, структура, метаданные и аномалии."""
+def _read_attr(value: object, name: str):
+    """Читает поле из модели или из dict; None, если значения нет."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
 
-    schema_version: str = "2.4.0"
+
+def _max_section_page(sections: object) -> Optional[int]:
+    """Максимальный page_end_est по секциям (None, если секций нет)."""
+    if not isinstance(sections, (list, tuple)):
+        return None
+    ends = []
+    for section in sections:
+        end = _read_attr(section, "page_end_est")
+        if isinstance(end, int) and end >= 1:
+            ends.append(end)
+    return max(ends) if ends else None
+
+
+def _derive_source(mode: ParseMode, has_pdf: bool, meta: object) -> SourceInfo:
+    """Собирает SourceInfo из legacy-метаданных (когда source не передан явно)."""
+    if mode == "pdf_only":
+        docx_filename = None
+        docx_sha256 = None
+    else:
+        docx_filename = _read_attr(meta, "filename")
+        docx_sha256 = _read_attr(meta, "file_sha256")
+
+    pdf_filename = _read_attr(meta, "pdf_filename")
+    pdf_sha256 = _read_attr(meta, "pdf_sha256")
+    if mode == "pdf_only" and has_pdf and pdf_filename is None:
+        # В режиме pdf_only meta.filename описывает уже сам PDF.
+        pdf_filename = _read_attr(meta, "filename")
+        pdf_sha256 = pdf_sha256 or _read_attr(meta, "file_sha256")
+    if not has_pdf:
+        # PDF не участвовал в разборе: источник не должен ссылаться на него.
+        pdf_filename = None
+        pdf_sha256 = None
+
+    return SourceInfo(
+        mode=mode,
+        has_docx=mode != "pdf_only",
+        has_pdf=has_pdf,
+        docx_filename=docx_filename,
+        docx_sha256=docx_sha256,
+        pdf_filename=pdf_filename,
+        pdf_sha256=pdf_sha256,
+    )
+
+
+def _derive_page_count(
+    meta: object,
+    has_pdf: bool,
+    pdf_pages_audit: object,
+    sections: object,
+) -> PageCountInfo:
+    """Восстанавливает число страниц для payload без поля page_count."""
+    audit_pages = len(pdf_pages_audit) if isinstance(pdf_pages_audit, (list, tuple)) else 0
+    meta_pages = _read_attr(meta, "word_stat_pages")
+    pagination_source = _read_attr(meta, "pagination_source")
+
+    if has_pdf and audit_pages >= 1:
+        return PageCountInfo(total_pages=audit_pages, method="pdf_exact", confidence="high")
+
+    if has_pdf and isinstance(meta_pages, int) and meta_pages >= 1:
+        return PageCountInfo(
+            total_pages=meta_pages,
+            method="app_xml_metadata",
+            confidence="low",
+            note="PDF приложен, но постраничный аудит пуст: Pages взято из docProps/app.xml",
+        )
+
+    section_pages = _max_section_page(sections)
+    if pagination_source == "docx_native_breaks" and section_pages is not None:
+        return PageCountInfo(
+            total_pages=section_pages,
+            method="docx_native_breaks",
+            confidence="medium",
+            note="Число страниц восстановлено по маркерам lastRenderedPageBreak в DOCX",
+        )
+
+    if isinstance(meta_pages, int) and meta_pages >= 1:
+        return PageCountInfo(
+            total_pages=meta_pages,
+            method="app_xml_metadata",
+            confidence="low",
+            note="Pages из docProps/app.xml может быть устаревшим: Word обновляет его при сохранении",
+        )
+
+    if section_pages is not None:
+        return PageCountInfo(
+            total_pages=section_pages,
+            method="geometric_estimation",
+            confidence="low",
+            note="PDF не приложен: число страниц оценено по геометрии DOCX",
+        )
+
+    return PageCountInfo(
+        total_pages=1,
+        method="geometric_estimation",
+        confidence="low",
+        note="Источник не передал ни геометрию, ни PDF: принята одна страница",
+    )
+
+
+def _derive_capabilities(
+    mode: ParseMode,
+    has_pdf: bool,
+    page_count: object,
+    pagination_source: object,
+) -> DocumentCapabilities:
+    """Собирает матрицу возможностей из режима и способа подсчета страниц."""
+    has_docx = mode != "pdf_only"
+    method = _read_attr(page_count, "method")
+    if mode == "pdf_only":
+        # В pdf_only сами страницы PDF и есть документ: границы страниц точные.
+        exact_pagination = method == "pdf_exact"
+    else:
+        # В docx_pdf точная пагинация подтверждается только успешной сверкой с PDF.
+        exact_pagination = pagination_source == "pdf_exact"
+    return DocumentCapabilities(
+        styles_parsed=has_docx,
+        numbering_parsed=has_docx,
+        sections_parsed=has_docx,
+        exact_pagination=exact_pagination,
+        pdf_layout_coordinates=has_pdf,
+        visual_registry=has_docx,
+        footnotes_parsed=has_docx,
+        cross_references=has_docx,
+        word_metadata=has_docx,
+        page_count_estimated=method not in ("pdf_exact", "docx_native_breaks"),
+    )
+
+
+class ParsedDocument(BaseModel):
+    """Корневая модель отчета для всех трех режимов разбора.
+
+    Модель — единый контракт для docx_only, pdf_only и docx_pdf. Поля
+    parse_mode/source/capabilities/page_count имеют безопасные дефолты и при
+    отсутствии выводятся из legacy-метаданных (meta), поэтому JSON версии 2.x
+    продолжает валидироваться без правок.
+    """
+
+    schema_version: str = "3.0.0"
+    parse_mode: ParseMode = Field(
+        default="docx_only",
+        description="Режим разбора: docx_only, pdf_only или docx_pdf",
+    )
+    source: SourceInfo = Field(
+        default_factory=lambda: SourceInfo(mode="docx_only", has_docx=True, has_pdf=False),
+        description="Фактические источники разбора и их идентификаторы",
+    )
+    capabilities: DocumentCapabilities = Field(
+        default_factory=DocumentCapabilities,
+        description="Какие данные реально извлечены в выбранном режиме",
+    )
+    page_count: PageCountInfo = Field(
+        default_factory=lambda: PageCountInfo(
+            total_pages=1,
+            method="geometric_estimation",
+            confidence="low",
+            note="Число страниц не передано источником",
+        ),
+        description="Число страниц и способ его получения",
+    )
+
     meta: DocumentMeta
     settings: GlobalSettings
     theme: ThemeData
@@ -1121,26 +1353,92 @@ class ParsedDocxDocument(BaseModel):
     cross_ref_index: CrossReferenceIndex = Field(default_factory=CrossReferenceIndex)
     anomalies: DocumentAnomalies = Field(default_factory=DocumentAnomalies)
 
+    @model_validator(mode="before")
+    @classmethod
+    def fill_contract_defaults(cls, data):
+        """Достраивает контрактные поля для payload без parse_mode/source/page_count.
+
+        Явно переданные значения не перетираются: продюсер (DocxParserPipeline,
+        PDF-парсер, сервис) всегда имеет приоритет над выводом из legacy-метаданных.
+        """
+        if not isinstance(data, dict):
+            return data
+        raw = dict(data)
+        meta = raw.get("meta")
+        audit = raw.get("pdf_pages_audit")
+        pdf_present = _read_attr(meta, "pdf_filename") is not None or bool(audit)
+
+        source_value = raw.get("source")
+        explicit_has_pdf = _read_attr(source_value, "has_pdf")
+        parse_mode = raw.get("parse_mode") or _read_attr(source_value, "mode")
+        if parse_mode is None:
+            parse_mode = "docx_pdf" if pdf_present else "docx_only"
+        if raw.get("parse_mode") is None:
+            raw["parse_mode"] = parse_mode
+
+        if explicit_has_pdf is not None:
+            has_pdf = bool(explicit_has_pdf)
+        elif parse_mode == "docx_only":
+            has_pdf = False
+        else:
+            has_pdf = pdf_present or parse_mode in ("docx_pdf", "pdf_only")
+
+        if source_value is None:
+            raw["source"] = _derive_source(parse_mode, has_pdf, meta).model_dump()
+
+        if raw.get("page_count") is None:
+            raw["page_count"] = _derive_page_count(
+                meta, has_pdf, audit, raw.get("sections")
+            ).model_dump()
+
+        if raw.get("capabilities") is None:
+            raw["capabilities"] = _derive_capabilities(
+                parse_mode,
+                has_pdf,
+                raw["page_count"],
+                _read_attr(meta, "pagination_source"),
+            ).model_dump()
+
+        return raw
+
     @model_serializer(mode="wrap")
     def serialize_without_pdf_fields(self, handler):
-        """Сериализует модель без полей, зависящих от PDF."""
+        """Удаляет pdf_*-поля из JSON только когда PDF не участвовал в разборе.
+
+        В режимах docx_pdf и pdf_only поля pdf_* и rendered_page_numbers_present
+        остаются в выводе, даже если meta.pdf_filename не заполнен (это возможно
+        у PDF-парсера, у которого PDF — единственный источник).
+
+        Флаг capabilities.pdf_layout_coordinates не удаляется никогда: это
+        контрактное поле матрицы возможностей, а не PDF-данные; в режиме без PDF
+        оно просто равно False.
+        """
         data = handler(self)
-        if self.meta.pdf_filename is not None:
+        if self.source.has_pdf:
             return data
+
+        preserved_keys = {"pdf_layout_coordinates"}
 
         def strip_pdf_fields(value):
             if isinstance(value, dict):
                 return {
                     key: strip_pdf_fields(item)
                     for key, item in value.items()
-                    if not key.startswith("pdf_")
-                    and key != "rendered_page_numbers_present"
+                    if key in preserved_keys
+                    or (
+                        not key.startswith("pdf_")
+                        and key != "rendered_page_numbers_present"
+                    )
                 }
             if isinstance(value, list):
                 return [strip_pdf_fields(item) for item in value]
             return value
 
         return strip_pdf_fields(data)
+
+
+# Исторический алиас: rule_engine и старые импорты обращаются к ParsedDocxDocument.
+ParsedDocxDocument = ParsedDocument
 
 
 StyleDefinition.model_rebuild()
@@ -1150,4 +1448,4 @@ TocContainerBlock.model_rebuild()
 HeaderFooterContent.model_rebuild()
 FootnoteItem.model_rebuild()
 DocumentTreeNode.model_rebuild()
-ParsedDocxDocument.model_rebuild()
+ParsedDocument.model_rebuild()

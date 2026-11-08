@@ -2,7 +2,7 @@
 
 Пакет проверяет оформление документа по декларативному набору правил и
 возвращает отчет с адресом нарушения, ожидаемым и фактическим значением.
-Разбор DOCX остается за `docx_parser`: правила читают готовый
+Разбор DOCX остается за `parser.docx`: правила читают готовый
 `ParsedDocxDocument`, где каскад стилей уже разрешен, а единицы приведены к
 пунктам и миллиметрам.
 
@@ -25,7 +25,7 @@
 ## 1. Быстрый старт
 
 ```python
-from docx_parser.pipeline import DocxParserPipeline
+from parser.docx.pipeline import DocxParserPipeline
 from rule_engine import DEFAULT_RULESET_PATH, RuleEngine, load_ruleset
 
 document = DocxParserPipeline("vkr.docx").parse()
@@ -275,7 +275,7 @@ python manual_test/check_rules.py manual_test/test.docx \
 {
   "ruleset_id": "vkr-rule-engine-test",
   "ruleset_version": "2.0.0",
-  "parser_schema_version": "2.4.0",
+  "parser_schema_version": "3.0.0",
   "document": {
     "filename": "vkr.docx",
     "file_sha256": "…",
