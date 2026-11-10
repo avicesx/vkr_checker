@@ -19,57 +19,57 @@ DOCX_REQUIRED_PARTS = {"[Content_Types].xml", "word/document.xml"}
 
 
 def _validate_docx(filename: str | None, content: bytes, field: str) -> str:
-    """Validate a DOCX filename and its OOXML ZIP structure."""
+    """проверяет расширение и структуру OOXML-файла"""
     if not filename or Path(filename).suffix.lower() != ".docx":
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"{field} must be a .docx file",
+            detail=f"Поле {field} должно содержать файл .docx",
         )
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             if not DOCX_REQUIRED_PARTS.issubset(archive.namelist()):
-                raise ValueError("required OOXML parts are missing")
+                raise ValueError("В архиве отсутствуют обязательные части OOXML")
     except (OSError, zipfile.BadZipFile, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"{field} is not a valid DOCX document",
+            detail=f"Поле {field} не является корректным документом DOCX",
         ) from exc
     return filename
 
 
 def _validate_pdf(filename: str | None, content: bytes) -> str:
-    """Validate a PDF filename and its file signature."""
+    """проверяет расширение PDF и сигнатуру файла"""
     if not filename or Path(filename).suffix.lower() != ".pdf":
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="guidelines must be a .docx or .pdf file",
+            detail="Поле guidelines должно содержать файл .docx или .pdf",
         )
     if not content.startswith(b"%PDF-"):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="guidelines is not a valid PDF document",
+            detail="Поле guidelines не является корректным документом PDF",
         )
     return filename
 
 
 async def _read_limited(upload: UploadFile, field: str) -> bytes:
-    """Read an upload while enforcing the configured per-file size limit."""
+    """читает файл, не превышая установленный предел размера"""
     content = await upload.read(MAX_FILE_SIZE_BYTES + 1)
     if len(content) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"{field} exceeds the 20 MiB per-file limit",
+            detail=f"Размер файла {field} превышает ограничение 20 МиБ",
         )
     if not content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field} must not be empty",
+            detail=f"Файл {field} не должен быть пустым",
         )
     return content
 
 
 def create_app(storage_dir: Path | str | None = None) -> FastAPI:
-    """Build the API application with an optional storage directory override."""
+    """создаёт API-приложение с необязательным переопределением каталога хранения"""
     configured_storage = storage_dir or os.environ.get(
         "CHECK_STORAGE_DIR", "data/checks"
     )
@@ -81,10 +81,10 @@ def create_app(storage_dir: Path | str | None = None) -> FastAPI:
         yield
 
     application = FastAPI(
-        title="VKR Norm Control API",
+        title="API нормоконтроля ВКР",
         description=(
-            "Upload a thesis and its formatting guide to create a check. "
-            "This version stores uploads and exposes the initial uploaded status."
+            "Загрузка ВКР и методички для создания проверки. "
+            "Текущая версия сохраняет файлы и возвращает начальный статус uploaded."
         ),
         version="1.0.0",
         lifespan=lifespan,
@@ -95,25 +95,25 @@ def create_app(storage_dir: Path | str | None = None) -> FastAPI:
         "/api/v1/checks",
         response_model=CheckResponse,
         status_code=status.HTTP_201_CREATED,
-        tags=["checks"],
-        summary="Upload thesis and formatting guide",
+        tags=["Проверки"],
+        summary="Загрузить ВКР и методичку",
         responses={
-            400: {"model": ErrorResponse, "description": "Empty file"},
-            413: {"model": ErrorResponse, "description": "File exceeds 20 MiB"},
-            415: {"model": ErrorResponse, "description": "Unsupported or invalid file"},
+            400: {"model": ErrorResponse, "description": "Пустой файл"},
+            413: {"model": ErrorResponse, "description": "Размер файла превышает 20 МиБ"},
+            415: {"model": ErrorResponse, "description": "Неподдерживаемый или некорректный файл"},
         },
     )
     async def create_check(
         thesis: Annotated[
             UploadFile,
-            File(description="Thesis document in DOCX format; maximum 20 MiB"),
+            File(description="ВКР в формате DOCX; не более 20 МиБ"),
         ],
         guidelines: Annotated[
             UploadFile,
-            File(description="Formatting guide in DOCX or PDF format; maximum 20 MiB"),
+            File(description="Методичка в формате DOCX или PDF; не более 20 МиБ"),
         ],
     ) -> CheckResponse:
-        """Validate and save uploaded files, then return the new check ID."""
+        """проверяет и сохраняет файлы, затем возвращает ID новой проверки"""
         thesis_content = await _read_limited(thesis, "thesis")
         thesis_filename = _validate_docx(thesis.filename, thesis_content, "thesis")
         guidelines_content = await _read_limited(guidelines, "guidelines")
@@ -135,17 +135,17 @@ def create_app(storage_dir: Path | str | None = None) -> FastAPI:
     @application.get(
         "/api/v1/checks/{check_id}",
         response_model=CheckResponse,
-        tags=["checks"],
-        summary="Get check status",
-        responses={404: {"model": ErrorResponse, "description": "Check not found"}},
+        tags=["Проверки"],
+        summary="Получить статус проверки",
+        responses={404: {"model": ErrorResponse, "description": "Проверка не найдена"}},
     )
     async def get_check_status(check_id: UUID) -> CheckResponse:
-        """Return the current persisted status for a check ID."""
+        """возвращает сохранённый статус проверки по её ID"""
         check = await run_in_threadpool(store.get_check, str(check_id))
         if check is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Check not found",
+                detail="Проверка не найдена",
             )
         return check
 
