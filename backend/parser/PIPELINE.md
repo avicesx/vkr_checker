@@ -768,12 +768,12 @@ JSON-контракта: имена полей и правила сериали�
 backend/
 ├── parser/
 │   ├── __init__.py                    описание слоёв, без тяжёлых импортов
+│   ├── ARCHITECTURE.md                контракт режимов и матрица возможностей
+│   ├── PIPELINE.md                    этот документ
 │   ├── core/
 │   │   ├── __init__.py                описание контракта
 │   │   ├── schema.py                  Pydantic-модели и JSON-контракт 3.0.0
-│   │   ├── mode.py                    ParseMode, detect_mode, normalize_parse_mode
-│   │   ├── ARCHITECTURE.md            контракт режимов и матрица возможностей
-│   │   └── PIPELINE.md                этот документ
+│   │   └── mode.py                    ParseMode, detect_mode, normalize_parse_mode
 │   ├── docx/
 │   │   ├── __init__.py                публичный API (PEP 562): DocxParserPipeline, ...
 │   │   ├── pipeline.py                оркестратор, parse()/parse_docx_only()
@@ -793,14 +793,18 @@ backend/
 │       ├── extractor.py               строки, спаны, изображения, таблицы
 │       ├── layout.py                  поля, колонтитулы, номера, интервал, аудит, секции
 │       ├── structure.py               абзацы, заголовки, списки, TOC, дерево
-│       ├── parser.py                  сборка ParsedDocument режима pdf_only
-│       └── main.py                    CLI: PDF -> JSON (python -m parser.pdf.main)
+│       └── parser.py                  сборка ParsedDocument режима pdf_only
 ├── services/
 │   ├── __init__.py
 │   └── document_parsing.py            parse_document, parse_to_json_file, режимы
 ├── tests/                             unit + integration
 ├── manual_test/                       реальные файлы и ручные CLI
 ├── rule_engine/                       нормоконтроль поверх готового ParsedDocument
+│   ├── engine.py                      применение правил, статусы pass/fail/not_assessed
+│   ├── rules.py                       модель набора правил и виды проверок
+│   ├── findings.py                    отчет: нарушения, оценки, уверенность
+│   ├── rules/                         vkr_test_rules.json и профили mpgu/urgpu/urfu
+│   └── RULES.md                       формат правил, области действия, профили вузов
 └── docker/libreoffice/Dockerfile      запиненный образ LibreOffice
 ```
 
@@ -820,6 +824,8 @@ backend/
 | Изменить выбор режима или контракт сервиса | `services/document_parsing.py` |
 | Изменить конвертацию или таймауты | `parser/docx/converter.py` |
 | Изменить порядок фаз | `parser/docx/pipeline.py` (осторожно: есть зависимости) |
+| Изменить профиль вуза (поля, номер страницы, формат) | `rule_engine/rules/{mpgu,urgpu,urfu}.json` + `rule_engine/RULES.md` |
+| Добавить вид проверки | `rule_engine/rules.py`, `rule_engine/engine.py` |
 
 ---
 
@@ -843,6 +849,10 @@ python -m pytest tests -q
 зависят от бинарных образцов. Интеграционные проверки читают реальный
 `manual_test/3.doc` (каталог не входит в git) и штатно пропускаются, если его
 или Docker/LibreOffice нет в окружении.
+
+На реальном корпусе из `documents/vkr` также выполняются интеграционные
+проверки. DOCX и PDF-оригиналы только читаются; искусственные варианты ошибок
+создаются в тестовых временных каталогах.
 
 Интеграционные тесты, которым нужен реальный LibreOffice или Docker, помечены
 `integration`:
@@ -1085,4 +1095,36 @@ python manual_test/check_rules.py manual_test/test.docx --outdir manual_test/out
 пропускаться по `capabilities`: флаги `styles_parsed`, `numbering_parsed`,
 `sections_parsed`, `footnotes_parsed`, `cross_references` там равны `False`.
 Формат набора правил, области действия (`scope`), состав отчета и ограничения
-описаны в [`rule_engine/RULES.md`](../../rule_engine/RULES.md).
+описаны в [`rule_engine/RULES.md`](../rule_engine/RULES.md).
+
+### 13.1. Проверка PDF как самостоятельного документа
+
+PDF проверяется без преобразования в DOCX: `parser.pdf.parse_pdf()` строит
+`ParsedDocument` в режиме `pdf_only`, а профильный набор правил
+`rule_engine/rules/{mpgu,urgpu,urfu}.json` задает требования вуза.
+
+```python
+from parser.pdf import parse_pdf
+from rule_engine import RuleEngine, load_profile_ruleset
+
+document = parse_pdf("documents/vkr/example.pdf")
+engine = RuleEngine(load_profile_ruleset("urfu"))
+report = engine.check(document)
+print(report.passed, report.summary.violations_total, report.not_assessed)
+```
+
+Профили `mpgu`, `urgpu` и `urfu` основаны на требованиях из
+`documents/вкр_3_работы.xlsx` и применяются независимо: у методичек отличаются,
+например, поля и положение номера страницы. Проверяются извлекаемые параметры
+оформления: основной шрифт и его размер, межстрочный интервал и абзацный отступ,
+положение текстовой области, положение номера страницы и формат A4 там, где он
+указан в требованиях. Смысловые требования не проверяются.
+
+PDF хранит отрисованные символы и координаты, но не сохраняет свойства Word
+вроде назначенных полей страницы или стиля абзаца. Поэтому часть проверок
+возвращает `not_assessed` с оценкой видимых границ текста, а геометрические
+оценки имеют пониженную уверенность (`confidence`). Для сканированных PDF без
+текстового слоя анализ завершится явной ошибкой. Для этого режима требуется
+PyMuPDF (`pip install pymupdf`).
+
+Список профилей и их правила — в [`rule_engine/RULES.md`](../rule_engine/RULES.md), §9.
