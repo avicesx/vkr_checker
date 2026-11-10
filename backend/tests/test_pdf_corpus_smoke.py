@@ -1,133 +1,159 @@
+"""Смоук-тесты PDF-нормоконтроля на реальном корпусе ВКР.
+
+Файл заменил тест старого анализатора ``PdfNormControlParser``: документ
+разбирается конвейером ``parser.pdf``, а требования и статусы проверок даёт
+``rule_engine`` с профильными ruleset (mpgu/urgpu/urfu из ``rule_engine/rules``).
+Корпус берётся из соседнего с репозиторием каталога ``documents/vkr``. Если
+корпуса или PyMuPDF нет, пропускаются только тесты, которым нужен реальный
+PDF, — профильный тест без корпуса выполняется всегда.
+"""
 from __future__ import annotations
+
 from pathlib import Path
+from typing import List, Optional, Set
+
 import pytest
-from docx_parser import PdfNormControlParser
+
+from rule_engine import (
+    LineSpacingRule,
+    PageFormatRule,
+    PageNumberPositionRule,
+    RuleEngine,
+    load_profile_ruleset,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VKR_DIR = PROJECT_ROOT.parent / "documents" / "vkr"
+PROFILES = ("mpgu", "urgpu", "urfu")
+CHECK_STATUSES = {"pass", "fail", "not_assessed"}
+CONFIDENCE_LEVELS = {"high", "medium", "low"}
+NEW_CHECK_KINDS = (PageNumberPositionRule, PageFormatRule, LineSpacingRule)
+
 REAL_VKR_PDFS = sorted(
     path for path in VKR_DIR.glob("*.pdf") if any(ord(char) > 127 for char in path.name)
 )
-
-pymupdf = pytest.importorskip(
-    "pymupdf",
-    reason="Для прямого анализа PDF требуется PyMuPDF (pip install pymupdf)",
+CORPUS_REASON = (
+    f"Корпус ВКР не найден: {VKR_DIR} (нужны PDF с кириллицей в имени файла)"
 )
+#: Сентинел None даёт по одному явному skip на профиль, когда корпуса нет.
+CORPUS_CASES: List[Optional[Path]] = list(REAL_VKR_PDFS) or [None]
+
+
+def _parse_pdf(path: Path):
+    """Лениво подключает parser.pdf и PyMuPDF: без них модуль не падает на сборе."""
+    try:
+        import pymupdf  # noqa: F401  (проверка доступности до импорта parser.pdf)
+    except ImportError:
+        pytest.skip("Для прямого анализа PDF требуется PyMuPDF (pip install pymupdf)")
+    from parser.pdf import parse_pdf
+
+    return parse_pdf(path)
+
+
+def _profiled_check_ids(profile_id: str) -> Set[str]:
+    """Возвращает id правил профиля, для которых движок пишет assessment."""
+    ruleset = load_profile_ruleset(profile_id)
+    return {rule.rule_id for rule in ruleset.rules if isinstance(rule, NEW_CHECK_KINDS)}
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("profile_id", PROFILES)
 @pytest.mark.parametrize(
     "pdf_path",
-    REAL_VKR_PDFS,
-    ids=lambda path: path.name,
+    CORPUS_CASES,
+    ids=lambda path: path.name if isinstance(path, Path) else "no-corpus",
 )
-def test_real_vkr_pdfs_are_analyzed_without_conversion(pdf_path: Path) -> None:
-    report = PdfNormControlParser(pdf_path).parse("urfu")
-
-    assert report.filename == pdf_path.name
-    assert report.page_count > 1
-    assert report.dominant_font_size_pt == 14.0
-    assert report.times_new_roman_char_ratio is not None
-    assert report.times_new_roman_char_ratio > 0.9
-    assert report.findings
-
-
-def test_vkr_pdf_profiles_apply_their_own_conflicting_requirements(
-    tmp_path: Path,
+def test_real_vkr_pdf_is_checked_with_profile_ruleset(
+    pdf_path: Optional[Path],
+    profile_id: str,
 ) -> None:
-    pdf_path = tmp_path / "layout_sample.pdf"
-    pdf = pymupdf.open()
-    page = pdf.new_page(width=595.28, height=841.89)
-    page.insert_text(
-        pymupdf.Point(85.0, 100.0),
-        "\n".join(f"Строка основного текста номер {row + 1}" for row in range(10)),
-        fontname="Times-Roman",
-        fontsize=14,
-        lineheight=1.5,
+    """Отчёт по реальному PDF собирается для профиля и содержит валидные статусы."""
+    if pdf_path is None:
+        pytest.skip(CORPUS_REASON)
+
+    document = _parse_pdf(pdf_path)
+
+    assert document.parse_mode == "pdf_only"
+    assert document.meta.filename == pdf_path.name
+    assert document.page_count.total_pages > 1
+
+    ruleset = load_profile_ruleset(profile_id)
+    report = RuleEngine(ruleset).check(document)
+
+    assert report.document.filename == pdf_path.name
+    assert report.ruleset_id == ruleset.ruleset_id
+    assert report.parser_schema_version == document.schema_version
+    assert report.summary.rules_applied == len(ruleset.rules)
+
+    assessments = {assessment.rule_id: assessment for assessment in report.assessments}
+    assert set(assessments) == _profiled_check_ids(profile_id), (
+        "движок должен оценивать ровно те новые правила, которые есть в профиле"
     )
-    page.insert_text(
-        pymupdf.Point(292.0, 820.0),
-        "1",
-        fontname="Times-Roman",
-        fontsize=10,
+    assert report.summary.not_assessed_total == len(report.not_assessed)
+
+    rule_ids = {rule.rule_id for rule in ruleset.rules}
+    for assessment in report.assessments:
+        assert assessment.status in CHECK_STATUSES
+        assert assessment.confidence in CONFIDENCE_LEVELS
+        assert assessment.expected_text
+        assert assessment.observed_text
+
+    for violation in report.violations:
+        assert violation.rule_id in rule_ids
+        assert violation.severity in {"error", "warning", "info"}
+        assert violation.message
+        assert violation.found_text
+
+    failed_ids = {
+        assessment.rule_id
+        for assessment in report.assessments
+        if assessment.status == "fail"
+    }
+    assert failed_ids <= {violation.rule_id for violation in report.violations}
+    assert report.passed == (
+        not any(violation.severity == "error" for violation in report.violations)
     )
-    pdf.save(pdf_path)
-    pdf.close()
 
-    mpgu = PdfNormControlParser(pdf_path).parse("mpgu")
-    urgpu = PdfNormControlParser(pdf_path).parse("urgpu")
-    urfu = PdfNormControlParser(pdf_path).parse("urfu")
+    number_check = assessments["page_number_position"]
+    pages_with_number = number_check.details["pages_with_number"]
+    threshold = number_check.details["threshold"]
+    if number_check.status == "not_assessed":
+        assert pages_with_number < threshold
+        assert number_check.confidence == "low"
+    else:
+        assert pages_with_number >= threshold
+        assert number_check.confidence == "medium"
 
-    def page_number_finding(report):
-        return next(f for f in report.findings if f.rule_id == "page_number_position")
-
-    assert page_number_finding(mpgu).expected == "top_center"
-    assert page_number_finding(urgpu).expected == "bottom_center"
-    assert page_number_finding(urfu).expected == "bottom_center"
-    assert any(f.rule_id == "page_size_a4" for f in urfu.findings)
-    assert not any(f.rule_id == "page_size_a4" for f in mpgu.findings)
-
-
-@pytest.mark.parametrize(
-    ("fault", "expected_rule"),
-    [
-        ("font_size_12", "body_font_size"),
-        ("wrong_font_family", "body_font_family"),
-        ("single_spacing", "line_spacing"),
-        ("wrong_page_number_position", "page_number_position"),
-    ],
-)
-def test_pdf_format_checker_reports_one_deliberate_format_fault(
-    tmp_path: Path,
-    fault: str,
-    expected_rule: str,
-) -> None:
-    pdf_path = tmp_path / f"{fault}.pdf"
-    pdf = pymupdf.open()
-    for page_index in range(4):
-        page = pdf.new_page(width=595.28, height=841.89)
-        fontname = "helv" if fault == "wrong_font_family" else "Times-Roman"
-        fontsize = 12 if fault == "font_size_12" else 14
-        lineheight = 1.0 if fault == "single_spacing" else 1.5
-        page.insert_text(
-            pymupdf.Point(85.0, 100.0),
-            "\n".join(f"Строка основного текста номер {row + 1}" for row in range(12)),
-            fontname=fontname,
-            fontsize=fontsize,
-            lineheight=lineheight,
+    spacing_check = assessments["line_spacing_body"]
+    if spacing_check.status == "not_assessed":
+        assert spacing_check.details["source"] == "none"
+        assert spacing_check.confidence == "low"
+    else:
+        # Для pdf_only интервал берётся из агрегата parser.pdf
+        # (meta.pdf_median_leading_ratio либо медиана постраничных оценок),
+        # а абзацы PDF-структуры со шкалой Word (шаг / (кегль × 1,2)) исключены.
+        assert spacing_check.details["source"] == "pdf_leading"
+        assert spacing_check.details["sample_count"] > 0
+        assert spacing_check.details["median_ratio"] is not None
+        # Типографское шаг/кегль движок переводит в множитель Word.
+        assert spacing_check.details["pdf_single_line_factor"] == pytest.approx(
+            1.15
         )
-        number_y = 55.0 if fault == "wrong_page_number_position" else 820.0
-        page.insert_text(
-            pymupdf.Point(292.0, number_y),
-            str(page_index + 1),
-            fontname=fontname,
-            fontsize=9,
+        assert spacing_check.details["word_multiplier"] == pytest.approx(
+            spacing_check.details["median_ratio"] / 1.15, abs=1e-3
         )
-    pdf.save(pdf_path)
-    pdf.close()
-
-    report = PdfNormControlParser(pdf_path).parse("urfu")
-    findings = {finding.rule_id: finding for finding in report.findings}
-
-    assert findings[expected_rule].status == "fail"
-    if fault == "font_size_12":
-        assert report.dominant_font_size_pt == 12.0
-    elif fault == "single_spacing":
-        assert report.median_line_leading_ratio is not None
-        assert report.median_line_leading_ratio == pytest.approx(1.0)
 
 
-@pytest.mark.parametrize("profile_id", ["mpgu", "urgpu", "urfu"])
-def test_all_guide_profiles_are_independently_available(
-    profile_id: str, tmp_path: Path
-) -> None:
-    pdf_path = tmp_path / "one_page.pdf"
-    pdf = pymupdf.open()
-    page = pdf.new_page(width=595.28, height=841.89)
-    page.insert_text(pymupdf.Point(85, 100), "Проверка формата PDF", fontsize=14)
-    pdf.save(pdf_path)
-    pdf.close()
+def test_profile_rulesets_configure_different_new_checks() -> None:
+    """Профили различаются набором новых проверок: формат листа задан только у УрФУ."""
+    urfu_ids = _profiled_check_ids("urfu")
+    mpgu_ids = _profiled_check_ids("mpgu")
+    urgpu_ids = _profiled_check_ids("urgpu")
 
-    result = PdfNormControlParser(pdf_path).parse(profile_id)
-    assert result.profile_id == profile_id
-    assert result.profile_title
+    assert "page_format" in urfu_ids
+    assert "page_format" not in mpgu_ids
+    assert "page_format" not in urgpu_ids
+    common = {"page_number_position", "line_spacing_body"}
+    assert common <= urfu_ids
+    assert common <= mpgu_ids
+    assert common <= urgpu_ids

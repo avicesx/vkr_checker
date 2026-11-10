@@ -1,0 +1,100 @@
+"""Движок правил нормоконтроля: проверка разбора DOCX по JSON-набору требований.
+
+Пакет работает поверх `parser.docx`: движок получает ParsedDocxDocument с уже
+разрешенным каскадом стилей и нормализованными единицами, применяет правила из
+JSON-набора и возвращает отчет с локацией, ожиданием и фактическим значением.
+
+Точка входа:
+    RuleEngine(load_ruleset("rules.json")).check(document) -> RuleCheckReport
+"""
+from __future__ import annotations
+
+from .engine import RuleEngine
+from .findings import (
+    CheckStatus,
+    Confidence,
+    DocumentRef,
+    RuleAssessment,
+    RuleCheckReport,
+    RuleCheckSummary,
+    Violation,
+    ViolationLocation,
+)
+from .rules import (
+    DEFAULT_RULESET_PATH,
+    PROFILE_RULESET_PATHS,
+    FontExpectation,
+    FontRule,
+    HeadingFormatExpectation,
+    HeadingFormatRule,
+    HeadingLevelsExpectation,
+    HeadingLevelsRule,
+    HeadingNumberingExpectation,
+    HeadingNumberingRule,
+    IndentExpectation,
+    IndentRule,
+    LineSpacingExpectation,
+    LineSpacingRule,
+    MarginExpectation,
+    MarginRule,
+    PageFormatExpectation,
+    PageFormatRule,
+    PageNumberPositionExpectation,
+    PageNumberPositionRule,
+    RequiredSectionsExpectation,
+    RequiredSectionsRule,
+    Rule,
+    RuleSet,
+    RuleTarget,
+    SectionSpec,
+    TocExpectation,
+    TocRule,
+    available_profiles,
+    load_default_ruleset,
+    load_profile_ruleset,
+    load_ruleset,
+)
+
+__all__ = [
+    "DEFAULT_RULESET_PATH",
+    "PROFILE_RULESET_PATHS",
+    "CheckStatus",
+    "Confidence",
+    "DocumentRef",
+    "FontExpectation",
+    "FontRule",
+    "HeadingFormatExpectation",
+    "HeadingFormatRule",
+    "HeadingLevelsExpectation",
+    "HeadingLevelsRule",
+    "HeadingNumberingExpectation",
+    "HeadingNumberingRule",
+    "IndentExpectation",
+    "IndentRule",
+    "LineSpacingExpectation",
+    "LineSpacingRule",
+    "MarginExpectation",
+    "MarginRule",
+    "PageFormatExpectation",
+    "PageFormatRule",
+    "PageNumberPositionExpectation",
+    "PageNumberPositionRule",
+    "RequiredSectionsExpectation",
+    "RequiredSectionsRule",
+    "Rule",
+    "RuleAssessment",
+    "RuleCheckReport",
+    "RuleCheckSummary",
+    "RuleEngine",
+    "RuleSet",
+    "RuleTarget",
+    "SectionSpec",
+    "TocExpectation",
+    "TocRule",
+    "Violation",
+    "ViolationLocation",
+    "available_profiles",
+    "load_default_ruleset",
+    "load_profile_ruleset",
+    "load_ruleset",
+]

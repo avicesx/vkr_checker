@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 from lxml import etree
 
-from .schema import (
+from parser.core.schema import (
     BorderEdge,
     BoxBorders,
     ColorValue,

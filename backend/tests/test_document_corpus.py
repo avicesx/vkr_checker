@@ -1,8 +1,8 @@
 from __future__ import annotations
 import pytest
 from conftest import DocxPackageBuilder
-from docx_parser.pipeline import DocxParserPipeline
-from docx_parser.schema import ParagraphBlock
+from parser.docx.pipeline import DocxParserPipeline
+from parser.core.schema import ParagraphBlock
 
 
 def _build_variant(

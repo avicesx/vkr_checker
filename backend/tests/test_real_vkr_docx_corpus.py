@@ -4,8 +4,8 @@ from typing import Callable
 from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 from lxml import etree
-from docx_parser.pipeline import DocxParserPipeline
-from docx_parser.schema import ParagraphBlock
+from parser.docx.pipeline import DocxParserPipeline
+from parser.core.schema import ParagraphBlock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VKR_DIR = PROJECT_ROOT.parent / "documents" / "vkr"

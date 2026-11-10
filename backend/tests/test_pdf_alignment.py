@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from conftest import COMMON_XMLNS, DocxPackageBuilder, make_fake_png_bytes
-from docx_parser.pipeline import DocxParserPipeline
-from docx_parser.schema import ParagraphBlock, TableBlock, TocContainerBlock
+from parser.docx.pipeline import DocxParserPipeline
+from parser.core.schema import ParagraphBlock, TableBlock, TocContainerBlock
 
 fitz = pytest.importorskip("fitz", reason="Для тестов PDF-выравнивателя требуется PyMuPDF (pip install pymupdf)")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from docx_parser import parse_docx_to_json_file
+from parser.docx import parse_docx_to_json_file
 
 OLE_MARKUP = """
 <w:p>

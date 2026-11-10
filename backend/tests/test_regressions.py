@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 
 from conftest import COMMON_XMLNS, DocxPackageBuilder, make_fake_png_bytes
-from docx_parser.pipeline import DocxParserPipeline
-from docx_parser.schema import ParagraphBlock, TableBlock, TocContainerBlock
+from parser.docx.pipeline import DocxParserPipeline
+from parser.core.schema import ParagraphBlock, TableBlock, TocContainerBlock
 
 def test_libreoffice_zero_hanging_does_not_overwrite_first_line_indent(
     docx_builder: DocxPackageBuilder,

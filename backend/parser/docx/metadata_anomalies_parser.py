@@ -15,7 +15,7 @@ import zipfile
 from typing import Dict, List, Optional, Tuple
 from lxml import etree
 
-from .schema import (
+from parser.core.schema import (
     BlockUnion,
     ColorValue,
     CommentArtifact,

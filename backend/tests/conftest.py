@@ -159,6 +159,19 @@ class DocxPackageBuilder:
         self.files[arcname] = raw_bytes
         return self
 
+    def add_style_xml(self, style_xml: str) -> "DocxPackageBuilder":
+        """Добавляет описание w:style в styles.xml, сохраняя базовые стили пакета."""
+        styles = self.files["word/styles.xml"].decode("utf-8")
+        closing_tag = "</w:styles>"
+        if closing_tag not in styles:
+            raise AssertionError("в word/styles.xml нет закрывающего тега w:styles")
+        updated = styles.replace(
+            closing_tag,
+            f"{style_xml.strip()}\n          {closing_tag}",
+            1,
+        )
+        return self.set_xml("word/styles.xml", updated)
+
     def add_rel(self, r_id: str, target: str) -> "DocxPackageBuilder":
         self.rels[r_id] = target
         return self
