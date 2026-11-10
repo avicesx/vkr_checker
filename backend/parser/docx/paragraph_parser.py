@@ -7,6 +7,12 @@
 и списков, сканер микропробелов и ParagraphParser, который собирает
 w:r / w:fld / w:hyperlink / w:drawing в ParagraphBlock со спанами и служебными
 токенами разметки.
+
+Уровень нумерованного заголовка равен глубине номера («3.1.1» — третий), потому
+что стили ВКР объявляют `outlineLvl` на единицу глубже собственной нумерации.
+Метки служебных страниц («ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА», «РАБОТА
+ВЫПОЛНЕНА», «ЗАДАНИЕ») заголовками не считаются: это реквизиты титула и листа
+задания, а не элементы структуры работы.
 """
 from __future__ import annotations
 
@@ -15,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set, Tuple
 from lxml import etree
 
+from parser.core.heading_labels import is_title_page_label
 from parser.core.schema import (
     HeadingMetadata,
     InlineSpecialChar,
@@ -330,7 +337,14 @@ RE_CAPTION_GUARD = re.compile(
 
 
 class HeadingAndListAnalyzer:
-    """Определяет заголовки, списки и ручные маркеры в абзаце."""
+    """Определяет заголовки, списки и ручные маркеры в абзаце.
+
+    Порядок проверок отражает силу доказательств: структурное название
+    («ВВЕДЕНИЕ», «ПРИЛОЖЕНИЕ А») и номер важнее стиля абзаца, поэтому уровень
+    нумерованного заголовка считается по глубине номера, а `outlineLvl` задает
+    уровень только заголовку без номера. Реквизиты служебных страниц заголовками
+    не считаются вообще, даже если набраны стилем заголовка.
+    """
 
     @staticmethod
     def analyze_heading(
@@ -347,6 +361,11 @@ class HeadingAndListAnalyzer:
         if not clean_full or len(clean_full) > 300:
             return None
         if RE_CAPTION_GUARD.match(clean_full):
+            return None
+        if is_title_page_label(clean_full):
+            # «ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА», «РАБОТА ВЫПОЛНЕНА», «ЗАДАНИЕ»:
+            # реквизит титульного листа или листа задания, а не элемент структуры.
+            # Стиль заголовка на служебной странице не делает строку заголовком.
             return None
 
         style_str = f"{style_id or ''} {style_name_ui or ''}".lower()
@@ -405,7 +424,11 @@ class HeadingAndListAnalyzer:
             if is_explicit_style or (is_section_pattern and (is_all_bold or len(clean_full) < 180)):
                 has_num_dot = marker_clean.endswith(".")
                 num_parts = [p for p in marker_clean.strip(".").split(".") if p.isdigit()]
-                calc_lvl = explicit_level or max(1, min(9, len(num_parts)))
+                # Нумерованный заголовок получает уровень по глубине номера: «3.1.1» —
+                # третий уровень. Стиль абзаца (outlineLvl) в ВКР бывает сдвинут
+                # относительно нумерации, поэтому при расхождении побеждает номер.
+                calc_lvl = len(num_parts) if num_parts else (explicit_level or 1)
+                calc_lvl = max(1, min(9, calc_lvl))
                 has_title_dot = clean_full.endswith(".")
                 return HeadingMetadata(
                     is_heading=True,
@@ -440,7 +463,10 @@ class HeadingAndListAnalyzer:
                 is_explicit_style or is_all_bold or is_multi_level or word_prefix is not None
             ):
                 num_parts = num_core.split(".")
-                calc_lvl = explicit_level or max(1, min(9, len(num_parts)))
+                # Уровень = глубина номера (см. ветку автонумерации): стиль абзаца
+                # «1.3. Заголовок подраздела» может объявлять первый уровень просто
+                # потому, что первая цифра стоит в самом имени стиля.
+                calc_lvl = max(1, min(9, len(num_parts)))
                 raw_sec_num = f"{num_core}." if trailing_dot else num_core
                 return HeadingMetadata(
                     is_heading=True,

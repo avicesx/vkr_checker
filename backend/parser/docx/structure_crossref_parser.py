@@ -81,6 +81,30 @@ RE_BROKEN_FIELD = re.compile(
     re.IGNORECASE,
 )
 
+#: Заголовок списка литературы. Синонимы ВКР: «СПИСОК ЛИТЕРАТУРЫ», «СПИСОК
+#: ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ», «СПИСОК ИСТОЧНИКОВ», «БИБЛИОГРАФИЧЕСКИЙ СПИСОК»,
+#: «ИСТОЧНИКИ». Сравнение по началу названия: «Обзор использованных источников» —
+#: подраздел главы, а не список литературы, хотя слово «источников» в нем есть,
+#: поэтому вхождения ключевых слов в середине названия роль не назначают.
+RE_BIBLIOGRAPHY_TITLE = re.compile(
+    r"^\s*(?:"
+    r"список\s+(?:"
+    r"(?:использованн\w*|используем\w*|цитируем\w*|нормативн\w*)\s+"
+    r")?(?:литератур\w*|источник\w*)"
+    r"|библиограф\w*"
+    r"|литература\b"
+    r"|источник\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+
+#: Продолжение приложения: «Продолжение ПРИЛОЖЕНИЯ А», «Окончание приложения Б».
+#: Такой лист — часть приложения, а не подраздел основного текста.
+RE_APPENDIX_CONTINUATION = re.compile(
+    r"^\s*(?:продолжение|окончание)\s+приложени[яй]\b",
+    re.IGNORECASE,
+)
+
 RE_CITATION_BRACKETS = re.compile(
     r"\[\s*\d+(?:\s*(?:[,;]|[\—\–\-])\s*(?:[сpстр]+\.?\s*)?\d+)*\s*\]",
     re.IGNORECASE,
@@ -431,7 +455,12 @@ class StructureCrossRefParser:
     ) -> str:
         """Определяет роль заголовка: введение, раздел, заключение, приложение."""
         up = re.sub(r"\s+", " ", clean_title).strip().upper()
-        if heading_kind == "appendix_heading" or up.startswith("ПРИЛОЖЕНИЕ") or up == "ПРИЛОЖЕНИЯ":
+        if (
+            heading_kind == "appendix_heading"
+            or up.startswith("ПРИЛОЖЕНИЕ")
+            or up == "ПРИЛОЖЕНИЯ"
+            or RE_APPENDIX_CONTINUATION.match(clean_title)
+        ):
             return "appendix"
         if " ЗАДАНИЕ" in f" {up}" or up.startswith("ЗАДАНИЕ"):
             return "task_sheet"
@@ -445,7 +474,7 @@ class StructureCrossRefParser:
             return "introduction"
         if up in ("ЗАКЛЮЧЕНИЕ", "ВЫВОДЫ"):
             return "conclusion"
-        if any(k in up for k in ("СПИСОК", "ЛИТЕРАТУРЫ", "ИСТОЧНИКОВ", "БИБЛИОГРАФ")):
+        if RE_BIBLIOGRAPHY_TITLE.match(clean_title):
             return "bibliography"
         if level == 1:
             return "main_chapter"

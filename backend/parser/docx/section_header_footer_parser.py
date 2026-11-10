@@ -295,7 +295,7 @@ class HybridPageTracker:
         avg_char_width_mm = max(1.2, font_pt * cls.PT_TO_MM * width_factor)
         chars_per_full_line = max(15.0, (avail_line_width_mm / avg_char_width_mm) * 0.94)
 
-        first_line_indent_chars = max(0.0, eff.indent_first_line_mm) / avg_char_width_mm
+        first_line_indent_chars = max(0.0, eff.indent_first_line_mm or 0.0) / avg_char_width_mm
         segments = para.text_visible.split("\n")
         total_lines = 0
 

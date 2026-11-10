@@ -171,7 +171,7 @@ class VisualAndMathParser:
             vis = self.visuals_registry.get(vis_id)
             if vis is not None:
                 vis.parent_para_alignment = eff.alignment
-                vis.parent_para_first_line_indent_mm = eff.indent_first_line_mm
+                vis.parent_para_first_line_indent_mm = eff.indent_first_line_mm or 0.0
                 vis.parent_para_line_spacing_rule = eff.line_spacing_rule
                 vis.parent_para_keep_next = eff.keep_next
                 vis.page_est = para.page_start_est
@@ -181,7 +181,7 @@ class VisualAndMathParser:
             for eq_id in para.embedded_equation_ids:
                 eq = eq_map.get(eq_id)
                 if eq is not None:
-                    eq.parent_para_first_line_indent_mm = eff.indent_first_line_mm
+                    eq.parent_para_first_line_indent_mm = eff.indent_first_line_mm or 0.0
                     eq.page_est = para.page_start_est
                     if eff.alignment in ("left", "center", "right"):
                         eq.alignment = eff.alignment  # type: ignore[assignment]

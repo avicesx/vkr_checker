@@ -136,8 +136,12 @@ def test_heading_deeper_than_max_level_is_reported(
 
 def test_exclude_roles_hides_appendix_subtree(docx_builder: DocxPackageBuilder) -> None:
     """Приложение исключается из проверки вместе со своим поддеревом."""
-    body = _heading("1 Раздел") + _heading("ПРИЛОЖЕНИЕ А")
-    rule = _numbering_rule(expected={"require_number_for_roles": ["appendix"]})
+    body = (
+        _heading("1 Раздел")
+        + _heading("ПРИЛОЖЕНИЕ А")
+        + _heading("1.9 Пункт внутри приложения", level=3)
+    )
+    rule = _numbering_rule()
 
     without_exclusion = _check(docx_builder, body, rule)
     with_exclusion = _check(
@@ -150,7 +154,7 @@ def test_exclude_roles_hides_appendix_subtree(docx_builder: DocxPackageBuilder) 
     )
 
     assert without_exclusion.summary.violations_total == 1
-    assert without_exclusion.summary.objects_checked == 2
+    assert without_exclusion.summary.objects_checked == 3
     assert with_exclusion.summary.violations_total == 0
     assert with_exclusion.summary.objects_checked == 1
 
@@ -203,12 +207,12 @@ def test_number_depth_must_match_heading_level(docx_builder: DocxPackageBuilder)
 
 def test_required_number_for_role_is_reported(docx_builder: DocxPackageBuilder) -> None:
     """Если роль обязана быть пронумерована, заголовок без номера нарушает правило."""
-    body = _heading("ВВЕДЕНИЕ") + TEXT
+    body = _heading("Анализ предметной области") + TEXT
 
     report = _check(
         docx_builder,
         body,
-        _numbering_rule(expected={"require_number_for_roles": ["introduction"]}),
+        _numbering_rule(expected={"require_number_for_roles": ["main_chapter"]}),
     )
 
     assert report.summary.violations_total == 1

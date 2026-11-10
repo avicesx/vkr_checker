@@ -94,6 +94,7 @@ PropertySource = Literal[
     "theme",            # Разрешено через theme/theme1.xml (+major/+minor)
     "engine_default",   # Вшитый дефолт MS Word (когда в XML пусто везде)
     "pdf_estimate",     # Измерено по геометрии PDF (только в режимах с PDF)
+    "pdf_unmeasured",   # Геометрия PDF не позволяет измерить: значение None, а не 0
 ]
 
 
@@ -459,7 +460,13 @@ class ParagraphPropertiesEffective(BaseModel):
 
     indent_left_mm: float = 0.0
     indent_right_mm: float = 0.0
-    indent_first_line_mm: float = 0.0
+    indent_first_line_mm: Optional[float] = Field(
+        default=0.0,
+        description=(
+            "Красная строка, мм. None — отступ не измерен (pdf_only: абзац из одной "
+            "строки, заголовок, список или центрированный абзац), а не «отступ 0 мм»"
+        ),
+    )
     indent_first_line_source: PropertySource = "engine_default"
 
     space_before_pt: float = 0.0

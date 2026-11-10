@@ -158,7 +158,7 @@
       "rule_id": "toc",
       "kind": "toc",
       "severity": "error",
-      "message": "Оглавление перечисляет все разделы и подразделы и указывает номера страниц",
+      "message": "Оглавление перечисляет главы и разделы и указывает номера страниц",
       "requirement_ref": "Методические указания, требования к оглавлению",
       "target": {
         "scope": "toc"
@@ -171,6 +171,7 @@
         "check_titles": true,
         "require_dot_leader": false,
         "check_completeness": true,
+        "max_depth": 2,
         "required_entries": [
           {
             "label": "введение",

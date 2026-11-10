@@ -181,15 +181,21 @@ services (оркестрация)
 
 ### 3.5. `PropertySource`
 
-Допустимые значения (добавлено `pdf_estimate`):
+Допустимые значения (добавлены `pdf_estimate` и `pdf_unmeasured`):
 
 ```
 "direct" | "character_style" | "paragraph_style" | "numbering_style" |
-"table_style" | "doc_defaults" | "theme" | "engine_default" | "pdf_estimate"
+"table_style" | "doc_defaults" | "theme" | "engine_default" | "pdf_estimate" |
+"pdf_unmeasured"
 ```
 
 `pdf_estimate` — значение свойства измерено по геометрии PDF (только в режимах
 `pdf_only` и `docx_pdf`); в `docx_only` не встречается.
+
+`pdf_unmeasured` — геометрия PDF не позволяет измерить свойство: само значение
+равно `None`, а не `0`. Пока используется для `indent_first_line_mm`, когда
+абзац состоит из одной строки, является заголовком/списком или выключен по
+центру: «не измерено» и «отступа нет» — разные факты.
 
 ### 3.6. Смежные enum и поля, важные для режимов
 

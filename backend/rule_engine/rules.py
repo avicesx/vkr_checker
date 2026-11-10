@@ -14,6 +14,12 @@
 абзацами. Исключения по умолчанию действуют только для scope="body_text":
 остальные области берут объекты как есть.
 
+Контекст блока (``exclude_contexts``) — отдельный фильтр выборки основного
+текста: титульный лист и листинги кода набраны по другим требованиям и не
+должны давать нарушения шрифта и отступов. Контекст вычисляет
+`rule_engine.context` по признакам самого абзаца, поэтому правило остается
+декларативным: в наборе правил перечисляются только исключаемые контексты.
+
 Структурные правила (уровни и нумерация заголовков, обязательные разделы,
 оглавление) работают по document_tree и TocContainerBlock, которые готовит
 `parser.docx`: роли разделов и номера уже вычислены на этапе разбора.
@@ -54,6 +60,28 @@ HeadingRole = Literal[
     "unknown",
 ]
 """Семантические роли заголовков; совпадают с DocumentTreeNode.semantic_role парсера."""
+
+NUMBERLESS_HEADING_ROLES: frozenset[HeadingRole] = frozenset(
+    {
+        "bibliography",
+        "introduction",
+        "conclusion",
+        "appendix",
+        "title_page",
+        "task_sheet",
+        "abbreviations",
+    }
+)
+"""Роли, заголовки которых в ВКР не нумеруются.
+
+Структурные элементы работы — «ВВЕДЕНИЕ», «ЗАКЛЮЧЕНИЕ», «СПИСОК
+ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ», «ТЕРМИНЫ И ОПРЕДЕЛЕНИЯ», «ПРИЛОЖЕНИЕ А», лист
+задания — не имеют номера раздела, поэтому требование номера к ним не
+применяется, даже если роль перечислена в
+`HeadingNumberingExpectation.require_number_for_roles`: перечень ролей задает,
+какие заголовки проверять, а этот набор — какие из них структурно безномерные.
+Нумеруются главы (`main_chapter`) и подразделы (`sub_section`).
+"""
 
 HeadingConfidence = Literal[
     "explicit_outline_or_style",
@@ -112,6 +140,9 @@ class RuleTarget(BaseModel):
     Флаги include_* действуют только для scope="body_text": это семантическая
     выборка «основного текста». Остальные области берут объекты как есть, чтобы
     правило «все ячейки таблиц» не пропускало элементы списков внутри ячеек.
+
+    exclude_contexts отсекает служебные зоны (титульный лист, листинги) в
+    областях body_text и body_paragraphs; в остальных областях поле не действует.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -154,6 +185,14 @@ class RuleTarget(BaseModel):
         default=False,
         description="Проверять пустые абзацы и абзацы только с графикой/формулой",
     )
+    exclude_contexts: List[str] = Field(
+        default_factory=lambda: ["title_page", "code_listing"],
+        description=(
+            "Не проверять блоки этих контекстов в областях body_text и body_paragraphs: "
+            "'title_page' — титульный лист, 'code_listing' — листинг кода. "
+            "Пусто — прежнее поведение без контекстной фильтрации"
+        ),
+    )
 
 
 class FontExpectation(BaseModel):
@@ -163,7 +202,7 @@ class FontExpectation(BaseModel):
 
     family: Optional[str] = Field(
         default=None,
-        description="Гарнитура, например 'Times New Roman'; сравнение без учета регистра",
+        description="Гарнитура, например 'Times New Roman'; сравнение по нормализованному имени",
     )
     size_pt: Optional[float] = Field(
         default=None,
@@ -181,6 +220,14 @@ class FontExpectation(BaseModel):
     check_complex_script: bool = Field(
         default=False,
         description="Учитывать complex script (font_cs): источники шума, по умолчанию выключено",
+    )
+    normalize_family: bool = Field(
+        default=True,
+        description=(
+            "Сравнивать гарнитуру по нормализованному имени: без учета регистра, пробелов, "
+            "дефисов, subset-префикса 'XXXXXX+' и стилевых маркеров "
+            "(MT/PS/PSMT/Bold/Italic/Regular/Roman). false — прежнее строгое сравнение"
+        ),
     )
 
     @field_validator("family")
@@ -311,7 +358,11 @@ class HeadingNumberingExpectation(BaseModel):
     )
     require_number_for_roles: List[HeadingRole] = Field(
         default_factory=lambda: ["main_chapter", "sub_section"],
-        description="Заголовки этих ролей обязаны иметь номер (пусто — нумерация не обязательна)",
+        description=(
+            "Заголовки этих ролей обязаны иметь номер (пусто — нумерация не обязательна). "
+            "Роли из NUMBERLESS_HEADING_ROLES (введение, заключение, список литературы, "
+            "приложения, лист задания, перечень сокращений) номер не требуют"
+        ),
     )
 
     @model_validator(mode="after")
@@ -478,7 +529,11 @@ class TocExpectation(BaseModel):
         default=None,
         ge=1,
         le=9,
-        description="Максимальная глубина записей оглавления (пусто — без ограничения)",
+        description=(
+            "До какой глубины заголовки обязаны быть в оглавлении: при 2 сверяются "
+            "главы и разделы, подразделы глубже второго уровня пропуском не считаются. "
+            "Пусто — все уровни. Записи оглавления глубже этой глубины допускаются"
+        ),
     )
 
     @model_validator(mode="after")
@@ -494,13 +549,17 @@ class TocExpectation(BaseModel):
             and not self.check_titles
             and not self.require_dot_leader
             and not self.check_completeness
-            and self.max_depth is None
         ):
             raise ValueError("TocExpectation пусто: включите хотя бы одну проверку оглавления")
         if self.check_completeness and not self.required_entries:
             raise ValueError(
                 "TocExpectation: check_completeness требует required_entries, "
                 "иначе полноту не с чем сверять"
+            )
+        if self.max_depth is not None and not self.check_completeness:
+            raise ValueError(
+                "TocExpectation: max_depth задает глубину сверки полноты и требует "
+                "check_completeness с required_entries"
             )
         return self
 

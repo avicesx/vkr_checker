@@ -9,6 +9,47 @@
 умолчанию из выборки исключены заголовки, подписи рисунков и таблиц, элементы
 списков, пустые абзацы и строки оглавления. Это позволяет применять правило
 «основной текст» без ручных исключений в наборе правил.
+
+Титульный лист и листинги кода — служебные зоны: они набраны по требованиям
+методички к титулу и коду, а не к основному тексту. Их контекст определяет
+`rule_engine.context`; `RuleTarget.exclude_contexts` перечисляет контексты,
+которые правило не проверяет (по умолчанию оба).
+
+Сверка шрифта сравнивает гарнитуры по нормализованному имени: Word пишет одну
+и ту же гарнитуру как «Times New Roman», «TimesNewRoman», «TimesNewRomanPSMT»
+или «ABCDEF+TimesNewRoman-BoldMT», поэтому subset-префикс и стилевые маркеры
+отбрасываются (`rule_engine._fonts`). Символические раны — гарнитуры Symbol,
+Wingdings и раны из одних небуквенных знаков (±, ≤, ×) — правилом шрифта не
+проверяются: кегль и начертание у математических знаков не осмысленны.
+
+Заголовки калиброваны по корпусу ВКР. Уровень нумерованного заголовка равен
+глубине номера (`3.1.1` — третий уровень), поэтому расхождение с `outlineLvl`
+стиля не превращается в перескок уровня; проверка глубины номера при этом
+сравнивает его с местом в иерархии, а не с уровнем, вычисленным из него же.
+Метки служебных страниц («ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА», «ЗАДАНИЕ»)
+разбор заголовками не считает, список литературы узнается по синонимам
+названий (`SECTION_TITLE_SYNONYMS`: «СПИСОК ИСТОЧНИКОВ», «БИБЛИОГРАФИЧЕСКИЙ
+СПИСОК», «ИСТОЧНИКИ»), а структурные роли (`NUMBERLESS_HEADING_ROLES`) номер не
+требуют.
+
+Оглавление сверяется с заголовками и приложениями. Запись «ПРИЛОЖЕНИЕ А»
+указывает на приложение по букве: правило ищет ее среди заголовков приложений,
+подписей «Продолжение ПРИЛОЖЕНИЯ А» и сущностей `entity_type="appendix"`, а если
+буквы в подписи нет — по названию («(обязательное) Название»). Одна запись
+приложения покрывает и подзаголовки внутри него. `TocExpectation.max_depth`
+задает глубину, до которой заголовки обязаны быть в оглавлении: при `max_depth:
+2` подраздел «3.1.1» пропуском не считается, а пропуск главы остается
+нарушением.
+
+Правила деградируют по `DocumentCapabilities`: в `pdf_only`
+(`capabilities.styles_parsed=False`) нет ни `w:pPr`, ни стилей, ни
+`numbering.xml`, поэтому отступы абзаца не проверяются (источник требования
+ненадежен — см. `_check_indent_rule`), complex script не сверяется, а допуск
+полей страницы расширяется до геометрии PDF (±1.5 мм). Гарнитура, кегль,
+начертание, заголовки и оглавление проверяются и в этом режиме: запись шрифта
+PDF (`TimesNewRoman`, `ABCDEF+…`, `LiberationSans`) сравнивается по
+нормализованному имени, поэтому запись шрифта не шумит, а настоящая другая
+гарнитура — нарушение.
 """
 from __future__ import annotations
 
@@ -28,8 +69,13 @@ from parser.core.schema import (
     TableBlock,
     TextRun,
     TocContainerBlock,
+    TocEntryItem,
 )
 
+from ._fonts import (
+    is_symbolic_family as _is_symbolic_family,
+    same_family as _same_family,
+)
 from .findings import (
     DocumentRef,
     RuleCheckReport,
@@ -38,6 +84,7 @@ from .findings import (
     build_summary,
 )
 from .rules import (
+    NUMBERLESS_HEADING_ROLES,
     FontExpectation,
     FontRule,
     HeadingFormatRule,
@@ -102,8 +149,60 @@ CONFIDENCE_RANK: Dict[str, int] = {
 
 RE_SECTION_NUMBER = re.compile(r"^\d+(?:\.\d+)*$")
 
+#: Группы синонимов названий разделов: один и тот же раздел ВКР называется
+#: по-разному. Сравнение нормализованных названий идет внутри группы, поэтому
+#: «СПИСОК ИСТОЧНИКОВ», «БИБЛИОГРАФИЧЕСКИЙ СПИСОК» и «ИСТОЧНИКИ» удовлетворяют
+#: требованию «список литературы» из набора правил.
+SECTION_TITLE_SYNONYMS: Tuple[frozenset[str], ...] = (
+    frozenset(
+        {
+            "СПИСОК ЛИТЕРАТУРЫ",
+            "СПИСОК ИСПОЛЬЗОВАННОЙ ЛИТЕРАТУРЫ",
+            "СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ",
+            "СПИСОК ИСПОЛЬЗУЕМЫХ ИСТОЧНИКОВ",
+            "СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ И ЛИТЕРАТУРЫ",
+            "СПИСОК ИСТОЧНИКОВ",
+            "БИБЛИОГРАФИЧЕСКИЙ СПИСОК",
+            "БИБЛИОГРАФИЯ",
+            "ИСТОЧНИКИ",
+            "ЛИТЕРАТУРА",
+        }
+    ),
+)
+"""Синонимы названий разделов; сравнение идет по нормализованному названию."""
+
+RE_APPENDIX_CAPTION = re.compile(
+    r"^\s*(?:(?P<continuation>продолжение|окончание)\s+)?"
+    r"приложени[ея]\s+(?P<letter>[А-ЯЁA-Z0-9]+)\s*"
+    r"(?:\(\s*(?:обязательное|справочное|рекомендуемое)\s*\)\s*)?"
+    r"(?P<title>.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+"""Подпись приложения: «ПРИЛОЖЕНИЕ А», «ПРИЛОЖЕНИЕ А (обязательное) Название».
+
+Буква приложения — идентификатор: в оглавлении ВКР запись «ПРИЛОЖЕНИЕ А»
+указывает на приложение, а не на заголовок с таким текстом. Продолжение
+приложения («Продолжение ПРИЛОЖЕНИЯ А») доказывает, что приложение существует,
+даже если подпись первого листа набрана без буквы.
+"""
+
+RE_APPENDIX_KIND_MARKER = re.compile(
+    r"^\s*\(\s*(?:обязательное|справочное|рекомендуемое)\s*\)\s*(?P<title>.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+"""Титульная строка приложения без буквы: «(обязательное) Название приложения»."""
+
+TOC_TITLE_MIN_CHARS = 8
+"""Минимальная длина названия для сверки записи оглавления с заголовком."""
+
+APPENDIX_LETTERS = frozenset("АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ")
+"""Буквы, которыми нумеруют приложения ВКР (кроме Ё, Й, Ъ, Ы, Ь)."""
+
 SNIPPET_LIMIT = 80
 EPSILON = 1e-9
+
+#: Допуск полей страницы в pdf_only, мм: поля измерены по геометрии текста.
+PDF_ONLY_MARGIN_TOLERANCE_MM = 1.5
 
 
 @dataclass(frozen=True)
@@ -142,6 +241,28 @@ def _heading_section_number(record: _HeadingRecord) -> Optional[str]:
     if heading is not None and heading.section_number_raw:
         return heading.section_number_raw
     return record.node.section_number
+
+
+def _expected_number_depth(record: _HeadingRecord) -> Optional[int]:
+    """Ожидаемая глубина номера заголовка: номер продолжает нумерацию родителя.
+
+    Уровень нумерованного заголовка равен глубине его номера, поэтому сверять
+    глубину номера с уровнем бессмысленно: уровень вычислен из нее же. Правило
+    проверяет место номера в иерархии: у потомка глубина на единицу больше, чем
+    у ближайшего пронумерованного предка. Так «3.1.1» внутри «3.1» корректен, а
+    «3.1.1» сразу после главы «1» — нет.
+
+    ``None`` — ожидание не определено: у заголовка нет родителя (номер верхнего
+    уровня проверяет правило уровней) или родитель не нумерован (например,
+    «ВВЕДЕНИЕ»), и тогда неизвестно, продолжением какой нумерации является номер.
+    """
+    parent = record.parent
+    if parent is None:
+        return None
+    parent_numbers = _parse_section_number(parent.section_number)
+    if parent_numbers is None:
+        return None
+    return len(parent_numbers) + 1
 
 
 def _collect_heading_records(
@@ -192,8 +313,31 @@ def _section_matches(spec: SectionSpec, record: _HeadingRecord) -> bool:
     title = heading.clean_title_text if heading is not None else record.node.title
     normalized = _normalize_heading_text(title)
     for token in spec.titles:
-        normalized_token = _normalize_heading_text(token)
-        if normalized == normalized_token or normalized.startswith(normalized_token + " "):
+        if _title_matches(normalized, _normalize_heading_text(token)):
+            return True
+    return False
+
+
+def _synonym_group(normalized_title: str) -> frozenset[str]:
+    """Возвращает группу синонимов, в которой состоит нормализованное название."""
+    for group in SECTION_TITLE_SYNONYMS:
+        if normalized_title in group:
+            return group
+    return frozenset({normalized_title})
+
+
+def _title_matches(normalized_actual: str, normalized_expected: str) -> bool:
+    """Сравнивает названия разделов с учетом синонимов и уточнения в начале.
+
+    «СПИСОК ИСТОЧНИКОВ» и «СПИСОК ЛИТЕРАТУРЫ» — одно и то же требование, а
+    «СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ ПО ТЕМЕ РАБОТЫ» начинается с названия
+    раздела, поэтому тоже подходит: проверяется каждое название из группы
+    синонимов требования.
+    """
+    if not normalized_actual or not normalized_expected:
+        return False
+    for candidate in _synonym_group(normalized_expected):
+        if normalized_actual == candidate or normalized_actual.startswith(candidate + " "):
             return True
     return False
 
@@ -204,6 +348,238 @@ def _collapse_text(text: str, limit: int = SNIPPET_LIMIT) -> str:
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: limit - 1].rstrip() + "…"
+
+
+@dataclass(frozen=True)
+class _AppendixEvidence:
+    """Приложение документа: буква, название и заголовок, если он найден."""
+
+    letter: Optional[str]
+    title: str
+    heading_block_id: Optional[str]
+
+
+def _iter_tree_nodes(nodes: Iterable[DocumentTreeNode]) -> Iterable[DocumentTreeNode]:
+    """Обходит дерево документа в порядке следования."""
+    for node in nodes:
+        yield node
+        yield from _iter_tree_nodes(node.children)
+
+
+def _parse_appendix_caption(text: str) -> Optional[Tuple[Optional[str], str]]:
+    """Разбирает подпись приложения на букву и название.
+
+    Возвращает ``(letter, title)`` для строк «ПРИЛОЖЕНИЕ А», «ПРИЛОЖЕНИЕ А
+    (обязательное) Название», «Продолжение ПРИЛОЖЕНИЯ Б» и «(справочное)
+    Название» (последняя — титульная строка приложения без буквы). ``None`` —
+    строка не похожа на подпись приложения.
+    """
+    collapsed = " ".join(text.split())
+    if not collapsed:
+        return None
+    caption = RE_APPENDIX_CAPTION.match(collapsed)
+    if caption is not None:
+        letter = (caption.group("letter") or "").upper()
+        return (letter or None), caption.group("title").strip()
+    marker = RE_APPENDIX_KIND_MARKER.match(collapsed)
+    if marker is not None:
+        return None, (marker.group("title") or "").strip()
+    return None
+
+
+def _collect_appendix_evidence(
+    document: ParsedDocxDocument,
+) -> List[_AppendixEvidence]:
+    """Собирает приложения документа по заголовкам, подписям и продолжениям.
+
+    Источники намеренно разные: в части ВКР подпись приложения распознается как
+    заголовок (роль ``appendix``), в части — как обычный абзац «Продолжение
+    ПРИЛОЖЕНИЯ А», а титульный лист приложения может быть набран вообще без
+    буквы: «(обязательное) Общее техническое задание…». Запись оглавления
+    «ПРИЛОЖЕНИЕ <буква>» ищется по букве, а если буквы в тексте нет — по
+    названию приложения.
+    """
+    evidence: List[_AppendixEvidence] = []
+    seen: Set[Tuple[Optional[str], str, Optional[str]]] = set()
+    tree_nodes = list(_iter_tree_nodes(document.document_tree))
+
+    def add(letter: Optional[str], title: str, block_id: Optional[str]) -> None:
+        key = (letter, _normalize_heading_text(title), block_id)
+        if key in seen:
+            return
+        seen.add(key)
+        evidence.append(
+            _AppendixEvidence(
+                letter=letter,
+                title=_normalize_heading_text(title),
+                heading_block_id=block_id,
+            )
+        )
+
+    for node in tree_nodes:
+        role = node.semantic_role
+        if role != "appendix" and node.heading_block_id is None:
+            continue
+        caption = _parse_appendix_caption(node.title)
+        if caption is None:
+            continue
+        letter, title = caption
+        if role == "appendix":
+            add(letter, title, node.heading_block_id)
+        else:
+            add(letter, title, None)
+
+    for entity in document.cross_ref_index.Apps:
+        if entity.entity_type != "appendix":
+            continue
+        letter = (entity.number_str or "").strip().upper() or None
+        add(
+            letter,
+            entity.title_text or "",
+            entity.caption_block_id or entity.target_object_id,
+        )
+
+    for block in document.blocks:
+        if not isinstance(block, ParagraphBlock):
+            continue
+        caption = _parse_appendix_caption(block.text_visible)
+        if caption is None:
+            continue
+        letter, title = caption
+        is_heading = block.heading_info is not None
+        add(letter, title, block.block_id if is_heading else None)
+
+    return evidence
+
+
+def _entry_appendix_caption(entry: TocEntryItem) -> Optional[Tuple[Optional[str], str]]:
+    """Разбирает запись оглавления как подпись приложения (буква и название)."""
+    for text in (entry.extracted_title, entry.raw_text):
+        caption = _parse_appendix_caption(text)
+        if caption is not None:
+            letter, title = caption
+            if letter is not None:
+                return caption
+            if title:
+                return caption
+    number = (entry.extracted_number or "").strip().upper()
+    if len(number) == 1 and number in APPENDIX_LETTERS:
+        return number, ""
+    return None
+
+
+def _match_appendix_entry(
+    entry: TocEntryItem,
+    evidence: List[_AppendixEvidence],
+) -> Optional[_AppendixEvidence]:
+    """Находит приложение для записи оглавления: сначала по букве, затем по названию.
+
+    Буква приложения — идентификатор записи, название вторично: в оглавлении
+    пишут «ПРИЛОЖЕНИЕ А (обязательное) Матрица ответственности», а на листе
+    приложения — «ПРИЛОЖЕНИЕ А (обязательное)». Если буквы в документе нет
+    (титул приложения набран без нее), приложение ищется по названию: подпись
+    «(обязательное) Общее техническое задание…» отвечает записи оглавления.
+    """
+    caption = _entry_appendix_caption(entry)
+    if caption is None:
+        return None
+    letter, title = caption
+    normalized_title = _normalize_heading_text(title)
+
+    if letter:
+        for candidate in evidence:
+            if candidate.letter == letter:
+                return candidate
+
+    if len(normalized_title) < TOC_TITLE_MIN_CHARS:
+        return None
+    best: Optional[_AppendixEvidence] = None
+    for candidate in evidence:
+        candidate_title = candidate.title
+        if len(candidate_title) < TOC_TITLE_MIN_CHARS:
+            continue
+        if not (
+            normalized_title.startswith(candidate_title)
+            or candidate_title.startswith(normalized_title)
+        ):
+            continue
+        if best is None or len(candidate_title) > len(best.title):
+            best = candidate
+    return best
+
+
+def _appendix_subtree_heading_ids(document: ParsedDocxDocument) -> Set[str]:
+    """Заголовки, которые находятся внутри приложений (поддерево роли ``appendix``)."""
+    collected: Set[str] = set()
+
+    def walk(nodes: Iterable[DocumentTreeNode], inside: bool) -> None:
+        for node in nodes:
+            node_inside = inside or node.semantic_role == "appendix"
+            if node_inside and node.heading_block_id is not None:
+                collected.add(node.heading_block_id)
+            walk(node.children, node_inside)
+
+    walk(document.document_tree, False)
+    return collected
+
+
+def _appendix_covered_heading_ids(
+    entry: TocEntryItem,
+    subtree_ids: Set[str],
+    headings_by_block: Dict[str, _HeadingRecord],
+) -> Set[str]:
+    """Заголовки приложения, которые названы внутри записи оглавления.
+
+    В оглавлении приложение перечислено одной записью «ПРИЛОЖЕНИЕ А
+    (обязательное) Матрица ответственности», а в тексте у приложения есть
+    заголовок «Матрица ответственности». Такой заголовок считается указанным в
+    оглавлении: он входит в название записи.
+    """
+    text = _normalize_heading_text(f"{entry.extracted_title} {entry.raw_text}")
+    covered: Set[str] = set()
+    for block_id in subtree_ids:
+        if block_id not in headings_by_block:
+            continue
+        title = _normalize_heading_text(headings_by_block[block_id].node.title)
+        if len(title) < TOC_TITLE_MIN_CHARS:
+            continue
+        if title in text:
+            covered.add(block_id)
+    return covered
+
+
+def _match_entry_heading(
+    entry: TocEntryItem,
+    headings: List[_HeadingRecord],
+    matched_ids: Set[str],
+) -> Optional[str]:
+    """Ищет заголовок для записи, которую разбор не сопоставил сам.
+
+    PDF отдает запись оглавления вместе с отточием («1.2 Сбор и анализ
+    требований......»), и точного совпадения названия с заголовком нет. Если
+    номер записи совпадает с номером заголовка, а название заголовка входит в
+    запись, это та же запись: заголовок считается указанным в оглавлении.
+    Запись без номера сопоставляется только по названию.
+    """
+    entry_number = _parse_section_number(entry.extracted_number)
+    entry_text = _normalize_heading_text(f"{entry.extracted_title} {entry.raw_text}")
+    if not entry_text:
+        return None
+    best: Optional[Tuple[int, str]] = None
+    for record in headings:
+        block_id = record.paragraph.block_id
+        if block_id in matched_ids:
+            continue
+        title = _normalize_heading_text(record.node.title)
+        if len(title) < TOC_TITLE_MIN_CHARS or title not in entry_text:
+            continue
+        heading_number = _parse_section_number(_heading_section_number(record))
+        if entry_number is not None and heading_number != entry_number:
+            # Номер в записи — сильный признак: заголовок с другим номером не пара.
+            continue
+        if best is None or len(title) > best[0]:
+            best = (len(title), block_id)
+    return best[1] if best is not None else None
 
 
 def _format_measure(value: Optional[float], unit: str) -> str:
@@ -247,9 +623,49 @@ def _caption_block_ids(document: ParsedDocxDocument) -> Set[str]:
     return {entity.caption_block_id for entity in entities}
 
 
-def _same_family(actual: str, expected: str) -> bool:
-    """Сравнивает гарнитуры без учета регистра и лишних пробелов."""
-    return " ".join(actual.split()).casefold() == " ".join(expected.split()).casefold()
+def _is_pdf_only(document: ParsedDocxDocument) -> bool:
+    """True, если документ разобран только по PDF: стилей, pPr и numbering нет.
+
+    Признак берется из матрицы возможностей, а не из имени файла: DOCX-конвейер
+    всегда поднимает ``styles_parsed`` в True, PDF-парсер ставит False, потому
+    что в PDF нет ни каскада стилей, ни ``w:sectPr``. По этому флагу правила
+    отключают то, что физически не измерено, и расширяют допуск геометрии.
+    """
+    return not document.capabilities.styles_parsed
+
+
+def _document_contexts(
+    document: ParsedDocxDocument,
+    caption_ids: Optional[Set[str]] = None,
+) -> Dict[str, str]:
+    """Считает контекст каждого блока документа для фильтра exclude_contexts.
+
+    Импорт `context` ленивый: классификатор — отдельный слой поверх разбора, и
+    движок не должен тянуть его при импорте пакета. Классификация выполняется
+    один раз на документ, а не на каждое правило: региональный проход
+    (префиксная зона титула, слияние листингов) зависит от соседних блоков.
+    """
+    from .context import classify_document_contexts
+
+    if caption_ids is None:
+        caption_ids = _caption_block_ids(document)
+    return classify_document_contexts(
+        document.blocks,
+        caption_block_ids=caption_ids,
+    )
+
+
+def _is_symbolic_run(run: TextRun) -> bool:
+    """Считает ран символическим: символьная гарнитура или только небуквенные знаки.
+
+    Формулы, диапазоны и знаки (≤, ±, ×, →) Word набирает гарнитурой Symbol
+    подстановкой или отдельным ран-ом из одних знаков. Кегль и начертание у них
+    не осмысленны, поэтому правило шрифта такие раны не проверяет.
+    """
+    props = run.effective_props
+    if _is_symbolic_family(props.font_ascii) or _is_symbolic_family(props.font_hansi):
+        return True
+    return not any(char.isalnum() for char in run.visible_text)
 
 
 def _describe_bool(value: Optional[bool], enabled: str, disabled: str) -> str:
@@ -263,20 +679,34 @@ def _describe_bool(value: Optional[bool], enabled: str, disabled: str) -> str:
 def _compare_font(
     props: RunFontPropertiesEffective,
     expected: FontExpectation,
+    check_family: bool = True,
+    check_complex_script: Optional[bool] = None,
 ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], List[str], List[str]]]:
-    """Сравнивает шрифт рана с ожиданием и возвращает найденные расхождения."""
+    """Сравнивает шрифт рана с ожиданием и возвращает найденные расхождения.
+
+    ``check_family=False`` полностью отключает сверку гарнитуры (вместе с
+    complex script); ``check_complex_script=False`` отключает только сверку
+    `font_cs`. Complex script отделен потому, что в ``pdf_only`` гарнитура
+    сравнима по нормализованному имени, а `font_cs` в PDF не измеряется вовсе.
+    Кегль и начертание проверяются всегда.
+    """
     expected_values: Dict[str, Any] = {}
     found_values: Dict[str, Any] = {}
     expected_parts: List[str] = []
     found_parts: List[str] = []
 
-    if expected.family is not None:
-        if not _same_family(props.font_ascii, expected.family):
+    if check_family and expected.family is not None:
+        if not _same_family(props.font_ascii, expected.family, expected.normalize_family):
             expected_values["family"] = expected.family
             found_values["family"] = props.font_ascii
             expected_parts.append(expected.family)
             found_parts.append(props.font_ascii or "не задано")
-        if expected.check_complex_script and not _same_family(props.font_cs, expected.family):
+        wants_complex_script = (
+            expected.check_complex_script and check_complex_script is not False
+        )
+        if wants_complex_script and not _same_family(
+            props.font_cs, expected.family, expected.normalize_family
+        ):
             expected_values["font_cs"] = expected.family
             found_values["font_cs"] = props.font_cs
             expected_parts.append(f"{expected.family} (complex script)")
@@ -308,12 +738,17 @@ def _compare_font(
 
 def _compare_measures(
     expected_values: Dict[str, Optional[float]],
-    actual_values: Dict[str, float],
+    actual_values: Dict[str, Optional[float]],
     labels: Dict[str, str],
     tolerance: float,
     unit: str,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], List[str], List[str]]:
-    """Сравнивает набор однотипных размеров и собирает расхождения."""
+    """Сравнивает набор однотипных размеров и собирает расхождения.
+
+    Поле с фактическим значением ``None`` не сравнивается: это «не измерено»
+    (pdf_only без геометрии абзаца), а не «ноль». Придумывать нарушение из
+    отсутствующего измерения нельзя.
+    """
     expected_found: Dict[str, Any] = {}
     actual_found: Dict[str, Any] = {}
     expected_parts: List[str] = []
@@ -322,11 +757,13 @@ def _compare_measures(
     for field, expected_value in expected_values.items():
         if expected_value is None:
             continue
-        actual_value = float(actual_values[field])
-        if abs(actual_value - float(expected_value)) <= tolerance + EPSILON:
+        actual_value = actual_values.get(field)
+        if actual_value is None:
+            continue
+        if abs(float(actual_value) - float(expected_value)) <= tolerance + EPSILON:
             continue
         expected_found[field] = float(expected_value)
-        actual_found[field] = actual_value
+        actual_found[field] = float(actual_value)
         expected_parts.append(f"{labels[field]} {_format_measure(expected_value, unit)}")
         found_parts.append(f"{labels[field]} {_format_measure(actual_value, unit)}")
 
@@ -375,12 +812,14 @@ class RuleEngine:
         """Проверяет документ по всем правилам набора и возвращает отчет."""
         violations: List[Violation] = []
         objects_checked = 0
+        caption_ids = _caption_block_ids(document)
+        contexts = _document_contexts(document, caption_ids)
 
         for rule in self.ruleset.rules:
             if isinstance(rule, FontRule):
-                rule_violations, checked = self._check_font_rule(rule, document)
+                rule_violations, checked = self._check_font_rule(rule, document, contexts)
             elif isinstance(rule, IndentRule):
-                rule_violations, checked = self._check_indent_rule(rule, document)
+                rule_violations, checked = self._check_indent_rule(rule, document, contexts)
             elif isinstance(rule, MarginRule):
                 rule_violations, checked = self._check_margin_rule(rule, document)
             elif isinstance(rule, HeadingLevelsRule):
@@ -425,6 +864,7 @@ class RuleEngine:
         self,
         document: ParsedDocxDocument,
         target: RuleTarget,
+        contexts: Dict[str, str],
     ) -> List[ParagraphBlock]:
         """Собирает абзацы выбранной области с учетом флагов include_*."""
         if target.scope in {"body_text", "body_paragraphs"}:
@@ -460,7 +900,7 @@ class RuleEngine:
         return [
             paragraph
             for paragraph in paragraphs
-            if self._is_target_paragraph(paragraph, target, caption_ids)
+            if self._is_target_paragraph(paragraph, target, caption_ids, contexts)
         ]
 
     def _is_target_paragraph(
@@ -468,9 +908,21 @@ class RuleEngine:
         paragraph: ParagraphBlock,
         target: RuleTarget,
         caption_ids: Set[str],
+        contexts: Dict[str, str],
     ) -> bool:
-        """Проверяет, попадает ли абзац в выборку правила."""
+        """Проверяет, попадает ли абзац в выборку правила.
+
+        Контекст (титульный лист, листинг) отсекается только в абзацных областях
+        основного текста: заголовки, таблицы, сноски и оглавление идут по своим
+        правилам и контекстным фильтром не затрагиваются.
+        """
         if target.style_ids and (paragraph.style_id or "") not in target.style_ids:
+            return False
+        if (
+            target.exclude_contexts
+            and target.scope in {"body_text", "body_paragraphs"}
+            and contexts.get(paragraph.block_id) in target.exclude_contexts
+        ):
             return False
         if target.scope != "body_text":
             return True
@@ -490,10 +942,20 @@ class RuleEngine:
         self,
         rule: FontRule,
         document: ParsedDocxDocument,
+        contexts: Dict[str, str],
     ) -> Tuple[List[Violation], int]:
-        """Сравнивает эффективный шрифт видимых ранов с ожиданием правила."""
+        """Сравнивает эффективный шрифт видимых ранов с ожиданием правила.
+
+        Гарнитура сверяется в обоих режимах. В ``pdf_only`` имя приходит из PDF
+        как запись шрифта (``TimesNewRoman``, ``ABCDEF+TimesNewRoman-BoldMT``),
+        поэтому сравнение идет по нормализованному имени: запись шрифта не дает
+        шума, а настоящая другая гарнитура (``LiberationSans``,
+        ``NimbusRomNo9L``) — нарушение. Complex script (``font_cs``) в PDF не
+        измеряется и не сверяется; кегль и начертание проверяются всегда.
+        """
         violations: List[Violation] = []
-        targets = self._paragraph_targets(document, rule.target)
+        targets = self._paragraph_targets(document, rule.target, contexts)
+        pdf_only = _is_pdf_only(document)
 
         for paragraph in targets:
             mismatched = []
@@ -502,7 +964,14 @@ class RuleEngine:
                     continue
                 if run.effective_props.vanish_hidden:
                     continue
-                diff = _compare_font(run.effective_props, rule.expected)
+                if _is_symbolic_run(run):
+                    continue
+                diff = _compare_font(
+                    run.effective_props,
+                    rule.expected,
+                    check_family=True,
+                    check_complex_script=not pdf_only,
+                )
                 if diff is not None:
                     mismatched.append((run, diff))
 
@@ -533,10 +1002,22 @@ class RuleEngine:
         self,
         rule: IndentRule,
         document: ParsedDocxDocument,
+        contexts: Dict[str, str],
     ) -> Tuple[List[Violation], int]:
-        """Сравнивает эффективные отступы абзацев с ожиданием правила."""
+        """Сравнивает эффективные отступы абзацев с ожиданием правила.
+
+        В ``pdf_only`` отступы абзаца не проверяются, хотя измерение есть: парсер
+        считает красную строку как сдвиг первой строки относительно второй. Как
+        источник требования отступ ненадежен — маркер списка или выключка сдвигают
+        первую строку и дают ложные +20 мм и больше, — поэтому правило не создает
+        нарушений и не увеличивает счетчик проверенных объектов. Измеренные
+        значения остаются в разборе (`ParagraphPropertiesEffective`).
+        """
+        if _is_pdf_only(document):
+            return [], 0
+
         violations: List[Violation] = []
-        targets = self._paragraph_targets(document, rule.target)
+        targets = self._paragraph_targets(document, rule.target, contexts)
 
         for paragraph in targets:
             props = paragraph.effective_props
@@ -582,9 +1063,20 @@ class RuleEngine:
         rule: MarginRule,
         document: ParsedDocxDocument,
     ) -> Tuple[List[Violation], int]:
-        """Сравнивает поля страниц каждой секции с ожиданием правила."""
+        """Сравнивает поля страниц каждой секции с ожиданием правила.
+
+        В pdf_only поля измерены по геометрии текста, поэтому допуск правила
+        расширяется до ``PDF_ONLY_MARGIN_TOLERANCE_MM`` (±1.5 мм): сдвиг 1.5 мм —
+        погрешность оценки, а не нарушение. Поле 13.7 мм при ожидаемых 15 мм
+        (отклонение 1.3 мм) в pdf_only попадает в допуск и нарушением не
+        является; нарушением остается расхождение больше допуска (например,
+        нижнее поле 26.5 мм при ожидаемых 20 мм).
+        """
         violations: List[Violation] = []
         sections = document.sections
+        tolerance = rule.expected.tolerance_mm
+        if _is_pdf_only(document):
+            tolerance = max(tolerance, PDF_ONLY_MARGIN_TOLERANCE_MM)
 
         for section in sections:
             margins = section.margins
@@ -604,7 +1096,7 @@ class RuleEngine:
                     "gutter_mm": margins.gutter_mm,
                 },
                 labels=MARGIN_LABELS,
-                tolerance=rule.expected.tolerance_mm,
+                tolerance=tolerance,
                 unit="мм",
             )
             if not expected_values:
@@ -805,7 +1297,10 @@ class RuleEngine:
             found_parts: List[str] = []
 
             if numbers is None:
-                if record.node.semantic_role in expected.require_number_for_roles:
+                if (
+                    record.node.semantic_role in expected.require_number_for_roles
+                    and record.node.semantic_role not in NUMBERLESS_HEADING_ROLES
+                ):
                     expected_values["section_number"] = "номер раздела"
                     found_values["section_number"] = record.node.section_number
                     expected_parts.append("нумерованный заголовок")
@@ -823,14 +1318,16 @@ class RuleEngine:
                     )
                 continue
 
-            if expected.check_depth_matches_level and len(numbers) != record.node.level:
-                expected_values["number_depth"] = record.node.level
-                found_values["number_depth"] = len(numbers)
-                found_values["section_number"] = _format_section_number(numbers)
-                expected_parts.append(f"номер глубины {record.node.level}")
-                found_parts.append(
-                    f"номер '{_format_section_number(numbers)}' глубины {len(numbers)}"
-                )
+            if expected.check_depth_matches_level:
+                expected_depth = _expected_number_depth(record)
+                if expected_depth is not None and len(numbers) != expected_depth:
+                    expected_values["number_depth"] = expected_depth
+                    found_values["number_depth"] = len(numbers)
+                    found_values["section_number"] = _format_section_number(numbers)
+                    expected_parts.append(f"номер глубины {expected_depth}")
+                    found_parts.append(
+                        f"номер '{_format_section_number(numbers)}' глубины {len(numbers)}"
+                    )
 
             if expected.check_parent_number:
                 if record.parent is None:
@@ -1066,6 +1563,46 @@ class RuleEngine:
         }
         checked = 0
 
+        # Приложения: запись «ПРИЛОЖЕНИЕ А» ссылается на приложение, а не на
+        # заголовок с таким текстом. Парсер сопоставляет записи по названию и
+        # букву не учитывает, поэтому правило доводит сопоставление само.
+        appendix_evidence = _collect_appendix_evidence(document)
+        appendix_subtree_ids = _appendix_subtree_heading_ids(document)
+        appendix_matched_entries: Set[str] = set()
+        for toc in tocs:
+            for entry in toc.entries:
+                evidence = (
+                    _match_appendix_entry(entry, appendix_evidence)
+                    if appendix_evidence
+                    else None
+                )
+                if evidence is None:
+                    continue
+                appendix_matched_entries.add(entry.block_id)
+                if evidence.heading_block_id is not None:
+                    matched_ids.add(evidence.heading_block_id)
+                matched_ids.update(
+                    _appendix_covered_heading_ids(
+                        entry, appendix_subtree_ids, headings_by_block
+                    )
+                )
+
+        # Записи, которые разбор не сопоставил из-за отточия или лишних
+        # пробелов: сопоставляем по номеру и названию, чтобы существующая
+        # запись оглавления не выглядела пропуском заголовка.
+        text_matched_entries: Set[str] = set()
+        for toc in tocs:
+            for entry in toc.entries:
+                if entry.matched_heading_block_id is not None:
+                    continue
+                if entry.block_id in appendix_matched_entries:
+                    continue
+                heading_block_id = _match_entry_heading(entry, headings, matched_ids)
+                if heading_block_id is None:
+                    continue
+                text_matched_entries.add(entry.block_id)
+                matched_ids.add(heading_block_id)
+
         for toc in tocs:
             checked += len(toc.entries)
             if expected.require_automated and not toc.is_automated_field_or_sdt:
@@ -1111,12 +1648,22 @@ class RuleEngine:
                     found_parts.append(f"страница {entry.extracted_page_str}")
 
                 if expected.check_titles:
-                    if entry.matched_heading_block_id is None:
+                    is_appendix_entry = entry.block_id in appendix_matched_entries
+                    is_text_matched = entry.block_id in text_matched_entries
+                    if (
+                        entry.matched_heading_block_id is None
+                        and not is_appendix_entry
+                        and not is_text_matched
+                    ):
                         expected_values["matched_heading"] = True
                         found_values["matched_heading"] = False
                         expected_parts.append("совпадение с заголовком документа")
                         found_parts.append("заголовок не найден")
-                    elif entry.is_title_exact_match is False:
+                    elif (
+                        entry.matched_heading_block_id is not None
+                        and entry.is_title_exact_match is False
+                        and not is_appendix_entry
+                    ):
                         heading_record = headings_by_block.get(entry.matched_heading_block_id)
                         heading = (
                             heading_record.paragraph.heading_info
@@ -1138,12 +1685,6 @@ class RuleEngine:
                     found_values["dot_leader"] = False
                     expected_parts.append("отточие до номера страницы")
                     found_parts.append("без отточия")
-
-                if expected.max_depth is not None and entry.indent_level > expected.max_depth:
-                    expected_values["indent_level"] = expected.max_depth
-                    found_values["indent_level"] = entry.indent_level
-                    expected_parts.append(f"уровень записи не глубже {expected.max_depth}")
-                    found_parts.append(f"уровень записи {entry.indent_level}")
 
                 if not expected_values:
                     continue
@@ -1179,6 +1720,13 @@ class RuleEngine:
                 for record in headings:
                     if not _section_matches(spec, record):
                         continue
+                    if (
+                        expected.max_depth is not None
+                        and record.node.level > expected.max_depth
+                    ):
+                        # Оглавление сверяется до этой глубины: заголовок глубже
+                        # (например «3.1.1» при max_depth=2) пропуском не считается.
+                        continue
                     block_id = record.paragraph.block_id
                     if block_id in matched_ids or block_id in reported:
                         continue
@@ -1200,4 +1748,5 @@ class RuleEngine:
                     )
 
         return violations, checked
+
 

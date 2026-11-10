@@ -4,7 +4,10 @@
 абзацы, заголовки, списки, оглавление и таблицы восстанавливаются по координатам
 строк, шрифтам и разрывам между строками. Поэтому все измеренные свойства
 помечаются ``PropertySource="pdf_estimate"``, а номера страниц берутся из
-физической пагинации PDF и остаются точными.
+физической пагинации PDF и остаются точными. Абзацный отступ измеряется честно —
+по сдвигу первой строки абзаца относительно второй, — а там, где геометрия не
+позволяет измерить (одна строка, заголовок, список), значение равно ``None``, а
+не нулю: «не измерено» и «отступа нет» — разные факты.
 """
 from __future__ import annotations
 
@@ -12,6 +15,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
 
+from parser.core.heading_labels import is_title_page_label
 from parser.core.schema import (
     BlockUnion,
     ColorValue,
@@ -44,6 +48,12 @@ PARAGRAPH_GAP_EXTRA_MM = 1.6
 
 #: Абзацный отступ, при котором строка считается первой строкой абзаца, мм.
 FIRST_LINE_INDENT_MM = 2.5
+
+#: Шум измерения отступа первой строки: меньший сдвиг считается нулевым, мм.
+FIRST_LINE_INDENT_NOISE_MM = 0.5
+
+#: Правдоподобный предел красной строки: больший сдвиг — артефакт вёрстки, мм.
+MAX_FIRST_LINE_INDENT_MM = 30.0
 
 #: Сдвиг строки по горизонтали, при котором меняется оформление абзаца, мм.
 INDENT_SHIFT_MM = 3.0
@@ -127,14 +137,23 @@ STRUCTURAL_ROLES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("список", "использованной", "литературы"), "bibliography"),
     (("список", "использованных", "источников"), "bibliography"),
     (("список", "использованных", "источников", "литературы"), "bibliography"),
+    (("список", "используемых", "источников"), "bibliography"),
+    (("список", "источников"), "bibliography"),
     (("библиография",), "bibliography"),
     (("библиографический", "список"), "bibliography"),
+    (("источники",), "bibliography"),
     (("перечень", "сокращений"), "abbreviations"),
     (("список", "сокращений"), "abbreviations"),
+    (("список", "обозначений"), "abbreviations"),
+    (("список", "терминов"), "abbreviations"),
     (("обозначения", "и", "сокращения"), "abbreviations"),
+    (("термины", "и", "определения"), "abbreviations"),
+    (("глоссарий",), "abbreviations"),
     (("задание",), "task_sheet"),
     (("приложение",), "appendix"),
     (("приложения",), "appendix"),
+    (("продолжение", "приложения"), "appendix"),
+    (("окончание", "приложения"), "appendix"),
 )
 
 #: Слово заголовка для сопоставления со структурными ролями.
@@ -444,7 +463,7 @@ class PdfStructureBuilder:
         runs = self._build_runs(block_id, pieces)
         heading = self._heading_info(group, text)
         list_info = None if heading else self._list_info(group, text, page_start)
-        effective_props = self._effective_props(group, heading)
+        effective_props = self._effective_props(group, heading, list_info)
 
         block = ParagraphBlock(
             block_id=block_id,
@@ -507,7 +526,10 @@ class PdfStructureBuilder:
         )
 
     def _effective_props(
-        self, group: Sequence[PdfLine], heading: Optional[HeadingMetadata]
+        self,
+        group: Sequence[PdfLine],
+        heading: Optional[HeadingMetadata],
+        list_info: Optional[ListItemMetadata],
     ) -> ParagraphPropertiesEffective:
         """Оценивает свойства абзаца: выравнивание, отступы, интервалы."""
         page_num = group[0].page_num
@@ -517,26 +539,63 @@ class PdfStructureBuilder:
         right = max(line.x1_mm for line in group)
         alignment = self._alignment(group, left, right, text_left, text_right)
 
-        indent_first_line = round(max(0.0, left - text_left), 1) if len(group) > 1 else 0.0
+        indent_first_line = self._first_line_indent(group, alignment, heading, list_info)
         indent_left = round(max(0.0, min(line.x0_mm for line in group) - text_left), 1)
         if alignment in ("center", "right"):
             # У выключенного по центру или справа абзаца измеренный сдвиг — не отступ.
-            indent_first_line = 0.0
+            indent_first_line = None
             indent_left = 0.0
-        if indent_first_line <= 1.0:
-            indent_first_line = 0.0
 
         return ParagraphPropertiesEffective(
             alignment=alignment,
             alignment_source="pdf_estimate",
             indent_left_mm=indent_left,
             indent_first_line_mm=indent_first_line,
-            indent_first_line_source="pdf_estimate",
+            indent_first_line_source=(
+                "pdf_unmeasured" if indent_first_line is None else "pdf_estimate"
+            ),
             line_spacing_value=self._line_spacing(group),
             line_spacing_rule="auto",
             line_spacing_source="pdf_estimate",
             outline_lvl=(heading.level - 1) if heading is not None else None,
         )
+
+    @staticmethod
+    def _first_line_indent(
+        group: Sequence[PdfLine],
+        alignment: Literal["left", "center", "right", "both"],
+        heading: Optional[HeadingMetadata],
+        list_info: Optional[ListItemMetadata],
+    ) -> Optional[float]:
+        """Измеряет красную строку как сдвиг первой строки абзаца относительно второй.
+
+        Абзацный отступ виден только в сравнении строк одного абзаца: вторая строка
+        стоит на левой границе абзаца, первая выдвинута на красную строку, поэтому
+        разность их ``x0`` и есть отступ (отрицательная — висячий). Сдвиг
+        относительно *оцененной* левой границы текста для pdf_only недостоверен:
+        поля измерены по геометрии, и абзацы без отступа получали «0 мм» — ложное
+        нарушение. ``None`` возвращается, когда измерять нечего или нельзя: одна
+        строка, строки на разных страницах, заголовок, элемент списка, абзац по
+        центру или справа, неправдоподобно большой сдвиг (колонки, таблица).
+        Нулевой отступ — это измеренный ноль, а не отсутствие измерения.
+        """
+        if heading is not None or list_info is not None:
+            return None
+        if alignment not in ("left", "both"):
+            return None
+        if len(group) < 2:
+            return None
+        first, second = group[0], group[1]
+        if first.page_num != second.page_num:
+            # Перенос абзаца на следующую страницу: строки стоят в разных колонках.
+            return None
+        difference = first.x0_mm - second.x0_mm
+        if abs(difference) > MAX_FIRST_LINE_INDENT_MM:
+            # Сдвиг на 3 см и больше — колонки, таблица или склейка строк, не отступ.
+            return None
+        if abs(difference) < FIRST_LINE_INDENT_NOISE_MM:
+            return 0.0
+        return round(difference, 1)
 
     def _alignment(
         self,
@@ -605,7 +664,11 @@ class PdfStructureBuilder:
             return True
         if RE_CAPTION_PREFIX.match(text):
             return False
-        if self._structural_role(text) is not None:
+        # Структурный заголовок в ВКР набран с прописной буквы или целиком
+        # прописными. Строчная буква — признак обычного предложения: абзац может
+        # начинаться со слова «определения» или «источники», и разрезать по нему
+        # абзац нельзя.
+        if self._structural_role(text) is not None and text[:1].isupper():
             return True
         if RE_CHAPTER_PREFIX.match(text) or RE_SECTION_NUMBER.match(text):
             return True
@@ -617,6 +680,12 @@ class PdfStructureBuilder:
         """Распознает заголовок по кеглю, начертанию, нумерации и ключевым словам."""
         stripped = text.strip()
         if not stripped or len(stripped) > MAX_HEADING_LENGTH:
+            return None
+        if is_title_page_label(stripped):
+            # «ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА», «РАБОТА ВЫПОЛНЕНА», «ЗАДАНИЕ»:
+            # реквизит титульного листа или листа задания. В PDF крупный полужирный
+            # кегль — единственный признак заголовка, поэтому без этой проверки
+            # служебная строка становится первым «разделом» документа.
             return None
         if len(group) > MAX_HEADING_LINES:
             return None
@@ -648,9 +717,14 @@ class PdfStructureBuilder:
         )
         if not is_heading:
             return None
-        if not structural and not (stripped[:1].isupper() or numbered_rest[:1].isupper()):
+        if not (stripped[:1].isupper() or numbered_rest[:1].isupper()):
             # Обычный текст с полужирным выделением начинается со строчной буквы.
-            return None
+            # Строчными бывают и структурные заголовки («содержание»), но тогда
+            # строка должна состоять только из ключевых слов: строка «литература,
+            # ГОСТы» на листе задания — реквизит, а не раздел документа.
+            key_words = self._structural_key_words(stripped)
+            if key_words is None or tuple(RE_WORD_LIKE.findall(stripped.lower())) != key_words:
+                return None
         if numbered and not numbered_rest:
             return None
         if chapter and not stripped[chapter.end() :].strip():
@@ -703,13 +777,24 @@ class PdfStructureBuilder:
         )
 
     @staticmethod
-    def _structural_role(text: str) -> Optional[str]:
-        """Семантическая роль заголовка по первым словам ВКР или None."""
+    def _structural_key_words(text: str) -> Optional[Tuple[str, ...]]:
+        """Ключевые слова структурного заголовка, если строка начинается с них."""
         words = RE_WORD_LIKE.findall(text.lower())
         if not words:
             return None
-        for key_words, role in STRUCTURAL_ROLES:
+        for key_words, _role in STRUCTURAL_ROLES:
             if tuple(words[: len(key_words)]) == key_words:
+                return key_words
+        return None
+
+    @staticmethod
+    def _structural_role(text: str) -> Optional[str]:
+        """Семантическая роль заголовка по первым словам ВКР или None."""
+        key_words = PdfStructureBuilder._structural_key_words(text)
+        if key_words is None:
+            return None
+        for candidate, role in STRUCTURAL_ROLES:
+            if candidate == key_words:
                 return role
         return None
 
