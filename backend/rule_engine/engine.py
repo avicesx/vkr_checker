@@ -50,6 +50,16 @@ Wingdings и раны из одних небуквенных знаков (±, �
 PDF (`TimesNewRoman`, `ABCDEF+…`, `LiberationSans`) сравнивается по
 нормализованному имени, поэтому запись шрифта не шумит, а настоящая другая
 гарнитура — нарушение.
+
+Проверки, которые могут не иметь данных, возвращают явный статус
+(`RuleAssessment`): положение номера страницы требует не меньше `max(3, N // 3)`
+распознанных номеров, формат листа — хотя бы одну секцию, межстрочный
+интервал — измеримый множитель. Если данных нет, статус `not_assessed` с
+`confidence="low"`, а не выдуманный вердикт; такие проверки считаются в
+`summary.not_assessed_total` и видны в `report.not_assessed`. Типографское
+отношение «шаг / кегль» из PDF приводится к множителю Word делением на
+`PDF_SINGLE_LINE_FACTOR` (1,15), поэтому DOCX и PDF выносят одинаковый вердикт;
+оценка структуры PDF (шаг / (кегль × 1,2)) множителем Word не считается.
 """
 from __future__ import annotations
 
@@ -78,6 +88,7 @@ from ._fonts import (
 )
 from .findings import (
     DocumentRef,
+    RuleAssessment,
     RuleCheckReport,
     Violation,
     ViolationLocation,
@@ -91,7 +102,10 @@ from .rules import (
     HeadingLevelsRule,
     HeadingNumberingRule,
     IndentRule,
+    LineSpacingRule,
     MarginRule,
+    PageFormatRule,
+    PageNumberPositionRule,
     RequiredSectionsRule,
     Rule,
     RuleSet,
@@ -122,6 +136,16 @@ ALIGNMENT_LABELS: Dict[str, str] = {
     "right": "по правому краю",
     "both": "по ширине",
     "distribute": "по ширине с разрядкой",
+}
+
+ZONE_LABELS: Dict[str, str] = {
+    "header": "верхний колонтитул",
+    "footer": "нижний колонтитул",
+}
+
+ORIENTATION_LABELS: Dict[str, str] = {
+    "portrait": "книжная ориентация",
+    "landscape": "альбомная ориентация",
 }
 
 CASE_LABELS: Dict[str, str] = {
@@ -203,6 +227,14 @@ EPSILON = 1e-9
 
 #: Допуск полей страницы в pdf_only, мм: поля измерены по геометрии текста.
 PDF_ONLY_MARGIN_TOLERANCE_MM = 1.5
+
+#: Одиночная строка Word в типографской шкале «шаг / кегль»: для Times New Roman
+#: 14 pt шаг базовых линий при одинарном интервале ≈ 1,15 кегля. PDF-слой
+#: измеряет именно типографическое отношение, а expected.ratio задан множителем
+#: Word (1,5 — полуторный), поэтому перед сравнением делим на этот коэффициент.
+#: Для других гарнитур коэффициент отличается: он зависит от встроенного
+#: межстрочного расстояния шрифта (у Times New Roman ≈1,15 em, у Arial ≈1,2 em).
+PDF_SINGLE_LINE_FACTOR = 1.15
 
 
 @dataclass(frozen=True)
@@ -594,6 +626,30 @@ def _format_measure(value: Optional[float], unit: str) -> str:
     return f"{number} {unit}"
 
 
+def _format_number(value: float, digits: int = 1) -> str:
+    """Форматирует число с русской запятой и без лишних нулей."""
+    text = f"{value:.{digits}f}".rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
+def _format_ratio(value: Optional[float]) -> str:
+    """Форматирует множитель межстрочного интервала."""
+    if value is None:
+        return "не определен"
+    return _format_number(float(value), digits=2)
+
+
+def _median(values: Iterable[float]) -> Optional[float]:
+    """Считает медиану набора чисел, не меняя порядок исходных данных."""
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return None
+    middle = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
 def _iter_paragraphs(blocks: Iterable[BlockUnion]) -> List[ParagraphBlock]:
     """Собирает абзацы рекурсивно по таблицам, пропуская строки оглавления."""
     collected: List[ParagraphBlock] = []
@@ -811,6 +867,7 @@ class RuleEngine:
     def check(self, document: ParsedDocxDocument) -> RuleCheckReport:
         """Проверяет документ по всем правилам набора и возвращает отчет."""
         violations: List[Violation] = []
+        assessments: List[RuleAssessment] = []
         objects_checked = 0
         caption_ids = _caption_block_ids(document)
         contexts = _document_contexts(document, caption_ids)
@@ -832,6 +889,21 @@ class RuleEngine:
                 rule_violations, checked = self._check_required_sections_rule(rule, document)
             elif isinstance(rule, TocRule):
                 rule_violations, checked = self._check_toc_rule(rule, document)
+            elif isinstance(rule, PageNumberPositionRule):
+                rule_violations, checked, assessment = self._check_page_number_position_rule(
+                    rule, document
+                )
+                assessments.append(assessment)
+            elif isinstance(rule, PageFormatRule):
+                rule_violations, checked, assessment = self._check_page_format_rule(
+                    rule, document
+                )
+                assessments.append(assessment)
+            elif isinstance(rule, LineSpacingRule):
+                rule_violations, checked, assessment = self._check_line_spacing_rule(
+                    rule, document, contexts
+                )
+                assessments.append(assessment)
             else:
                 continue
             violations.extend(rule_violations)
@@ -850,8 +922,16 @@ class RuleEngine:
                 pagination_source=meta.pagination_source,
                 total_pages_est=total_pages,
             ),
-            summary=build_summary(violations, len(self.ruleset.rules), objects_checked),
+            summary=build_summary(
+                violations,
+                len(self.ruleset.rules),
+                objects_checked,
+                not_assessed_total=sum(
+                    1 for assessment in assessments if assessment.status == "not_assessed"
+                ),
+            ),
             violations=violations,
+            assessments=assessments,
             passed=not any(violation.severity == "error" for violation in violations),
         )
 
@@ -1128,6 +1208,517 @@ class RuleEngine:
             )
 
         return violations, len(sections)
+
+    def _check_page_number_position_rule(
+        self,
+        rule: PageNumberPositionRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
+        """Сверяет преобладающее положение номера страницы с ожиданием правила.
+
+        Для PDF положение берется из `pdf_pages_audit`, и проверка включается
+        только при достаточном числе распознанных номеров: порог `max(3, N // 3)`
+        перенесен из `pdf_norm_control_parser`. Для DOCX источником служат
+        колонтитулы секций: номер объявлен один раз на секцию, поэтому порог
+        по страницам к ним не применяется.
+        """
+        expected_text = (
+            f"{ZONE_LABELS[rule.expected.zone]}, "
+            f"{ALIGNMENT_LABELS.get(rule.expected.alignment, rule.expected.alignment)}"
+        )
+        expected_values = {
+            "zone": rule.expected.zone,
+            "alignment": rule.expected.alignment,
+        }
+
+        if document.pdf_pages_audit:
+            counts, total_pages, unknown_alignment = self._pdf_page_number_counts(document)
+            number_count = sum(counts.values())
+            source = "pdf_pages_audit"
+            threshold = max(3, total_pages // 3)
+            if number_count < threshold:
+                return (
+                    [],
+                    number_count,
+                    RuleAssessment(
+                        rule_id=rule.rule_id,
+                        kind=rule.kind,
+                        status="not_assessed",
+                        expected_text=expected_text,
+                        observed_text=(
+                            f"распознано номеров страниц: {number_count} из {total_pages}; "
+                            f"для оценки положения нужно не меньше {threshold}"
+                        ),
+                        confidence="low",
+                        details={
+                            "source": source,
+                            "pages_with_number": number_count,
+                            "pages_total": total_pages,
+                            "threshold": threshold,
+                            "unknown_alignment": unknown_alignment,
+                        },
+                        note=(
+                            "Положение номера проверяется только при достаточном числе "
+                            "распознанных номеров страниц"
+                        ),
+                    ),
+                )
+            confidence = "medium"
+        else:
+            counts, total_pages, unknown_alignment = self._docx_page_number_counts(document)
+            number_count = sum(counts.values())
+            source = "docx_headers_footers"
+            if not counts:
+                reason = (
+                    "номер страницы найден в колонтитулах, но выравнивание не определено"
+                    if unknown_alignment
+                    else "в колонтитулах DOCX не найден номер страницы"
+                )
+                return (
+                    [],
+                    0,
+                    RuleAssessment(
+                        rule_id=rule.rule_id,
+                        kind=rule.kind,
+                        status="not_assessed",
+                        expected_text=expected_text,
+                        observed_text=reason,
+                        confidence="low",
+                        details={
+                            "source": source,
+                            "pages_total": total_pages,
+                            "unknown_alignment": unknown_alignment,
+                        },
+                    ),
+                )
+            confidence = "high"
+
+        detected_key = sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )[0][0]
+        detected_values = {"zone": detected_key[0], "alignment": detected_key[1]}
+        observed_text = (
+            f"{ZONE_LABELS.get(detected_key[0], detected_key[0])}, "
+            f"{ALIGNMENT_LABELS.get(detected_key[1], detected_key[1])} "
+            f"({number_count} из {total_pages} страниц)"
+        )
+        details: Dict[str, Any] = {
+            "source": source,
+            "pages_with_number": number_count,
+            "pages_total": total_pages,
+            "unknown_alignment": unknown_alignment,
+            "distribution": {
+                f"{zone}:{alignment}": count
+                for (zone, alignment), count in sorted(counts.items())
+            },
+        }
+
+        if detected_values == expected_values:
+            return (
+                [],
+                number_count,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="pass",
+                    expected_text=expected_text,
+                    observed_text=observed_text,
+                    confidence=confidence,
+                    details=details,
+                ),
+            )
+
+        violation = Violation(
+            violation_id=f"{rule.rule_id}:document",
+            rule_id=rule.rule_id,
+            kind=rule.kind,
+            severity=rule.severity,
+            message=rule.message,
+            requirement_ref=rule.requirement_ref,
+            location=ViolationLocation(snippet="положение номера страницы"),
+            expected=expected_values,
+            found={
+                **detected_values,
+                "pages_with_number": number_count,
+                "pages_total": total_pages,
+            },
+            expected_text=expected_text,
+            found_text=observed_text,
+            occurrences=number_count,
+            confidence=confidence,
+        )
+        return (
+            [violation],
+            number_count,
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status="fail",
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence=confidence,
+                details=details,
+            ),
+        )
+
+    @staticmethod
+    def _pdf_page_number_counts(
+        document: ParsedDocxDocument,
+    ) -> Tuple[Dict[Tuple[str, str], int], int, int]:
+        """Считает положения номеров страниц по PDF-аудиту и число страниц."""
+        counts: Dict[Tuple[str, str], int] = {}
+        unknown_alignment = 0
+        for page in document.pdf_pages_audit:
+            if page.page_number_location == "none":
+                continue
+            if page.page_number_alignment == "none":
+                unknown_alignment += 1
+                continue
+            key = (page.page_number_location, page.page_number_alignment)
+            counts[key] = counts.get(key, 0) + 1
+        return counts, len(document.pdf_pages_audit), unknown_alignment
+
+    @staticmethod
+    def _docx_page_number_counts(
+        document: ParsedDocxDocument,
+    ) -> Tuple[Dict[Tuple[str, str], int], int, int]:
+        """Считает положения номеров в колонтитулах секций DOCX."""
+        counts: Dict[Tuple[str, str], int] = {}
+        unknown_alignment = 0
+        for section in document.sections:
+            for zone, container in (
+                ("header", section.headers),
+                ("footer", section.footers),
+            ):
+                for content in container.values():
+                    if not (content.has_page_field or content.has_hardcoded_number):
+                        continue
+                    if content.page_number_alignment is None:
+                        unknown_alignment += 1
+                        continue
+                    key = (zone, content.page_number_alignment)
+                    counts[key] = counts.get(key, 0) + 1
+        total_pages = sum(
+            max(0, section.page_end_est - section.page_start_est + 1)
+            for section in document.sections
+        )
+        return counts, total_pages, unknown_alignment
+
+    def _check_page_format_rule(
+        self,
+        rule: PageFormatRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
+        """Сверяет размеры и ориентацию каждой секции с ожидаемым форматом листа.
+
+        `is_a4_standard` — только контекст: он попадает в `found`, но вердикт
+        выносится по числовому сравнению сторон с `tolerance_mm` и по
+        ориентации. Флаг парсера считает A4 с собственным допуском (±2 мм), и
+        при допуске правила ±1 мм он не должен подменять измерение.
+        """
+        expected = rule.expected
+        sections = document.sections
+        expected_size_text = (
+            f"{_format_number(expected.width_mm)} × {_format_number(expected.height_mm)} мм"
+        )
+        expected_parts = [
+            expected_size_text,
+            f"допуск ±{_format_number(expected.tolerance_mm)} мм",
+        ]
+        if expected.orientation != "any":
+            expected_parts.append(ORIENTATION_LABELS[expected.orientation])
+        expected_text = ", ".join(expected_parts)
+
+        if not sections:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text="секции в документе не найдены",
+                    confidence="low",
+                    details={"source": "sections"},
+                ),
+            )
+
+        violations: List[Violation] = []
+        descriptions: List[str] = []
+        checked = 0
+        for section in sections:
+            checked += 1
+            width_ok = (
+                abs(section.page_width_mm - expected.width_mm)
+                <= expected.tolerance_mm + EPSILON
+            )
+            height_ok = (
+                abs(section.page_height_mm - expected.height_mm)
+                <= expected.tolerance_mm + EPSILON
+            )
+            orientation_ok = (
+                expected.orientation == "any"
+                or section.orientation == expected.orientation
+            )
+            section_text = (
+                f"секция {section.section_idx + 1}: "
+                f"{_format_number(section.page_width_mm)} × "
+                f"{_format_number(section.page_height_mm)} мм, "
+                f"{ORIENTATION_LABELS.get(section.orientation, section.orientation)}"
+            )
+            descriptions.append(section_text)
+            if width_ok and height_ok and orientation_ok:
+                continue
+
+            expected_values: Dict[str, Any] = {}
+            found_values: Dict[str, Any] = {}
+            if not width_ok:
+                expected_values["width_mm"] = expected.width_mm
+                found_values["width_mm"] = section.page_width_mm
+            if not height_ok:
+                expected_values["height_mm"] = expected.height_mm
+                found_values["height_mm"] = section.page_height_mm
+            if not orientation_ok:
+                expected_values["orientation"] = expected.orientation
+                found_values["orientation"] = section.orientation
+            found_values["is_a4_standard"] = section.is_a4_standard
+
+            violations.append(
+                Violation(
+                    violation_id=f"{rule.rule_id}:section:{section.section_idx}",
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=ViolationLocation(
+                        section_idx=section.section_idx,
+                        page_start_est=section.page_start_est,
+                        page_end_est=section.page_end_est,
+                        snippet=section_text,
+                    ),
+                    expected=expected_values,
+                    found=found_values,
+                    expected_text=expected_text,
+                    found_text=(
+                        f"{_format_number(section.page_width_mm)} × "
+                        f"{_format_number(section.page_height_mm)} мм, "
+                        f"{ORIENTATION_LABELS.get(section.orientation, section.orientation)}, "
+                        f"A4 по парсеру: "
+                        f"{'да' if section.is_a4_standard else 'нет'}"
+                    ),
+                    confidence="high",
+                )
+            )
+
+        observed_text = "; ".join(descriptions)
+        details: Dict[str, Any] = {
+            "source": "sections",
+            "sections_checked": checked,
+            "violations": len(violations),
+        }
+        if violations:
+            return (
+                violations,
+                checked,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="fail",
+                    expected_text=expected_text,
+                    observed_text=observed_text,
+                    confidence="high",
+                    details=details,
+                ),
+            )
+        return (
+            [],
+            checked,
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status="pass",
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence="high",
+                details=details,
+            ),
+        )
+
+    def _check_line_spacing_rule(
+        self,
+        rule: LineSpacingRule,
+        document: ParsedDocxDocument,
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
+        """Сверяет медианный множитель межстрочного интервала с ожиданием.
+
+        Для DOCX берутся абзацы основного текста с множительным интервалом
+        (`lineRule="auto"`); интервал в пунктах (`exact`/`atLeast`) в множитель
+        не переводится. Абзацы PDF-структуры (`line_spacing_source ==
+        "pdf_estimate"`) исключаются: там оценка структуры PDF вида
+        шаг / (кегль × 1,2), а не множитель Word.
+
+        Для pdf_only используется агрегат t2-оценки `meta.pdf_median_leading_ratio`,
+        а при его отсутствии — медиана постраничных оценок из `pdf_pages_audit`.
+        Обе оценки типографические: шаг / кегль. Семантика `expected.ratio`
+        едина для DOCX и PDF — множитель Word, поэтому измеренное отношение
+        делится на `PDF_SINGLE_LINE_FACTOR` (одиночная строка ≈ 1,15 кегля).
+        В `details` и `found` попадают оба значения: исходное типографическое
+        (`median_ratio`) и приведенное к шкале Word (`word_multiplier`).
+        """
+        expected = rule.expected
+        expected_text = (
+            f"множитель {_format_ratio(expected.ratio)}, "
+            f"допуск ±{_format_ratio(expected.tolerance)}"
+        )
+        paragraphs = self._paragraph_targets(document, rule.target, contexts)
+        docx_ratios: List[float] = []
+        fixed_spacing_count = 0
+        pdf_estimate_paragraphs = 0
+        for paragraph in paragraphs:
+            props = paragraph.effective_props
+            if props.line_spacing_source == "pdf_estimate":
+                pdf_estimate_paragraphs += 1
+                continue
+            if props.line_spacing_rule == "auto":
+                docx_ratios.append(float(props.line_spacing_value))
+            else:
+                fixed_spacing_count += 1
+
+        source = "docx_paragraphs"
+        median_ratio = _median(docx_ratios)
+        sample_count = len(docx_ratios)
+        confidence = "high"
+        unit_text = "абзацам"
+        typographic_ratio: Optional[float] = None
+        if median_ratio is None:
+            source = "pdf_leading"
+            unit_text = "парам строк"
+            sample_count = document.meta.pdf_leading_sample_count
+            median_ratio = document.meta.pdf_median_leading_ratio
+            confidence = "medium"
+            if median_ratio is None:
+                page_ratios = [
+                    float(page.leading_ratio)
+                    for page in document.pdf_pages_audit
+                    if page.leading_ratio is not None
+                ]
+                median_ratio = _median(page_ratios)
+                sample_count = len(page_ratios)
+            if sample_count <= 0:
+                sample_count = sum(
+                    1
+                    for page in document.pdf_pages_audit
+                    if page.leading_ratio is not None
+                )
+            if median_ratio is None:
+                return (
+                    [],
+                    0,
+                    RuleAssessment(
+                        rule_id=rule.rule_id,
+                        kind=rule.kind,
+                        status="not_assessed",
+                        expected_text=expected_text,
+                        observed_text=(
+                            "нет данных об интервале: в DOCX не найдены абзацы "
+                            "с множительным интервалом, в PDF интервал не оценен"
+                        ),
+                        confidence="low",
+                        details={
+                            "source": "none",
+                            "paragraphs_considered": len(paragraphs),
+                            "fixed_spacing_paragraphs": fixed_spacing_count,
+                            "pdf_estimate_paragraphs": pdf_estimate_paragraphs,
+                        },
+                        note=(
+                            "Интервал в пунктах (exact/atLeast) в множитель не переводится"
+                        ),
+                    ),
+                )
+            # t2 измеряет типографское отношение шаг / кегль, а expected.ratio
+            # задан множителем Word: приводим измерение к общей шкале.
+            typographic_ratio = float(median_ratio)
+            median_ratio = typographic_ratio / PDF_SINGLE_LINE_FACTOR
+
+        difference = abs(float(median_ratio) - expected.ratio)
+        if typographic_ratio is None:
+            observed_text = (
+                f"медианный множитель {_format_ratio(median_ratio)} "
+                f"по {sample_count} {unit_text}"
+            )
+        else:
+            observed_text = (
+                f"множитель {_format_ratio(median_ratio)} "
+                f"(типографское отношение шаг/кегль "
+                f"{_format_ratio(typographic_ratio)} при одиночной строке "
+                f"{_format_ratio(PDF_SINGLE_LINE_FACTOR)}) "
+                f"по {sample_count} {unit_text}"
+            )
+        details: Dict[str, Any] = {
+            "source": source,
+            "median_ratio": (
+                round(float(typographic_ratio), 4)
+                if typographic_ratio is not None
+                else round(float(median_ratio), 4)
+            ),
+            "sample_count": sample_count,
+            "paragraphs_considered": len(paragraphs),
+            "fixed_spacing_paragraphs": fixed_spacing_count,
+            "pdf_estimate_paragraphs": pdf_estimate_paragraphs,
+        }
+        if typographic_ratio is not None:
+            details["word_multiplier"] = round(float(median_ratio), 4)
+            details["pdf_single_line_factor"] = PDF_SINGLE_LINE_FACTOR
+
+        status = "pass" if difference <= expected.tolerance + EPSILON else "fail"
+        violations: List[Violation] = []
+        if status == "fail":
+            found_values: Dict[str, Any] = {
+                "ratio": (
+                    round(float(typographic_ratio), 4)
+                    if typographic_ratio is not None
+                    else round(float(median_ratio), 4)
+                ),
+                "sample_count": sample_count,
+                "source": source,
+            }
+            if typographic_ratio is not None:
+                found_values["word_multiplier"] = round(float(median_ratio), 4)
+                found_values["pdf_single_line_factor"] = PDF_SINGLE_LINE_FACTOR
+            violations.append(
+                Violation(
+                    violation_id=f"{rule.rule_id}:document",
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=ViolationLocation(snippet="межстрочный интервал основного текста"),
+                    expected={"ratio": expected.ratio, "tolerance": expected.tolerance},
+                    found=found_values,
+                    expected_text=expected_text,
+                    found_text=observed_text,
+                    occurrences=max(1, sample_count),
+                    confidence=confidence,
+                )
+            )
+        return (
+            violations,
+            sample_count,
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence=confidence,
+                details=details,
+            ),
+        )
 
     def _heading_records(
         self,

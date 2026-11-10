@@ -2,17 +2,19 @@
 
 Модуль восстанавливает то, что в DOCX задано в ``w:sectPr`` и колонтитулах:
 границы текстовой области, зоны верхнего и нижнего колонтитула, наличие и
-положение напечатанного номера страницы, свободное место внизу листа и группы
-страниц одного размера. Все значения измерены по координатам текста, поэтому
-поля и зоны считаются оценкой: точными остаются только номера листов.
+положение напечатанного номера страницы, межстрочный интервал, свободное место
+внизу листа и группы страниц одного размера. Все значения измерены по
+координатам текста, поэтому поля, зоны и интервал считаются оценкой: точными
+остаются только номера листов.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
 
 from parser.core.schema import PageMarginsMm, PdfPageAudit, SectionProperties
-from parser.docx.pdf_text_utils import parse_page_number
+from parser.docx.pdf_text_utils import parse_page_number, pt_to_mm
 
 from .extractor import PdfDocument, PdfLine, PdfPage
 
@@ -48,6 +50,18 @@ MIN_PAGE_NUMBER_FONT_SIZE_PT = 7.5
 
 #: Значение поля по умолчанию, если текста на листах нет вовсе.
 DEFAULT_MARGINS_MM = PageMarginsMm()
+
+#: Напечатанный номер страницы: такие строки не участвуют в оценке интервала.
+PAGE_NUMBER_TEXT_RE = re.compile(r"^\d{1,4}$")
+
+#: Окно допустимых значений межстрочного интервала: отношение шага верхних
+#: краев соседних строк к кеглю. Значения вне окна — следствие отбивок
+#: заголовков, врезок, пустот перед таблицами и разрывов страниц.
+MIN_LEADING_RATIO = 0.8
+MAX_LEADING_RATIO = 2.5
+
+#: Допуск сравнения кеглей при отборе строк одного размера, pt.
+LEADING_FONT_SIZE_TOLERANCE_PT = 0.5
 
 
 def _percentile(values: Sequence[float], fraction: float) -> float:
@@ -172,6 +186,27 @@ class SectionLayout:
 
 
 @dataclass
+class PageLeadingMetrics:
+    """Оценка межстрочного интервала одного листа.
+
+    Шаг измеряется между верхними краями соседних строк одного кегля: при
+    равном кегле он равен шагу базовых линий (единицы — пункты и миллиметры).
+    Интервал выражается типографским отношением шага к кеглю, а не множителем
+    Word: одиночная строка Word занимает около 1,15 кегля (зависит от
+    гарнитуры), поэтому полуторному интервалу Word соответствует ≈1,72.
+    Приведение к шкале множителя Word выполняет `rule_engine`
+    (`PDF_SINGLE_LINE_FACTOR = 1.15`), чтобы `expected.ratio` имел один смысл
+    в обоих режимах разбора.
+    """
+
+    page_num: int
+    dominant_font_size_pt: Optional[float] = None
+    median_pitch_mm: Optional[float] = None
+    leading_ratio: Optional[float] = None
+    sample_count: int = 0
+
+
+@dataclass
 class PdfLayout:
     """Итог оценки вёрстки: зоны листов, группы страниц, аудит и секции."""
 
@@ -181,6 +216,11 @@ class PdfLayout:
     sections: List[SectionProperties]
     rendered_page_numbers_present: bool
     median_line_gap_mm: float
+    dominant_font_size_pt: Optional[float] = None
+    median_leading_ratio: Optional[float] = None
+    median_line_pitch_mm: Optional[float] = None
+    leading_sample_count: int = 0
+    page_leading: Dict[int, PageLeadingMetrics] = field(default_factory=dict)
 
     def section_idx_for_page(self, page_num: int) -> int:
         """Возвращает индекс секции, к которой относится физическая страница."""
@@ -223,6 +263,10 @@ class PdfLayoutEstimator:
             )
             for page in self.document.pages
         }
+        dominant_font_size = self._dominant_font_size()
+        page_leading, leading_pitches, leading_ratios = self._leading_metrics(
+            zones, dominant_font_size
+        )
 
         groups = self._group_pages(zones)
         page_offset = self._page_number_offset(zones.values())
@@ -239,7 +283,12 @@ class PdfLayoutEstimator:
                 section_by_page[page_num] = section
 
         pages_audit = [
-            self._build_audit(zones[page.page_num], section_by_page[page.page_num], page_offset)
+            self._build_audit(
+                zones[page.page_num],
+                section_by_page[page.page_num],
+                page_offset,
+                page_leading[page.page_num],
+            )
             for page in self.document.pages
         ]
 
@@ -252,6 +301,11 @@ class PdfLayoutEstimator:
                 zone.has_rendered_page_number for zone in zones.values()
             ),
             median_line_gap_mm=self._median_line_gap(zones.values()),
+            dominant_font_size_pt=dominant_font_size,
+            median_leading_ratio=_median(leading_ratios),
+            median_line_pitch_mm=_median(leading_pitches),
+            leading_sample_count=len(leading_ratios),
+            page_leading=page_leading,
         )
 
     # -----------------------------------------------------------------
@@ -507,6 +561,101 @@ class PdfLayoutEstimator:
         )
 
     # -----------------------------------------------------------------
+    # Межстрочный интервал
+    # -----------------------------------------------------------------
+
+    def _dominant_font_size(self) -> Optional[float]:
+        """Доминирующий кегль документа: размер, которым набрано больше символов.
+
+        Считаются символы непустых строк, кроме строк таблиц и напечатанных
+        номеров страниц: колонцифры и подписи не должны смещать оценку. Кегль
+        округляется до 0.1 pt, чтобы дрожание метрик PyMuPDF не дробило счет.
+        """
+        counts: Dict[float, int] = {}
+        for page in self.document.pages:
+            for line in page.lines:
+                if not line.text or line.in_table:
+                    continue
+                if PAGE_NUMBER_TEXT_RE.fullmatch(line.text):
+                    continue
+                size_pt = round(line.font_size_pt, 1)
+                if size_pt <= 0.0:
+                    continue
+                counts[size_pt] = counts.get(size_pt, 0) + len(line.text)
+        if not counts:
+            return None
+        return float(max(counts.items(), key=lambda item: item[1])[0])
+
+    def _leading_metrics(
+        self,
+        zones: Dict[int, PageZones],
+        dominant_font_size_pt: Optional[float],
+    ) -> Tuple[Dict[int, PageLeadingMetrics], List[float], List[float]]:
+        """Считает интервал постранично и собирает общий пул измерений документа.
+
+        Сводная оценка документа — медиана по всем парам строк (а не медиана
+        медиан листов): короткая страница с двумя строками не должна весить
+        столько же, сколько заполненный лист.
+        """
+        page_leading: Dict[int, PageLeadingMetrics] = {}
+        all_pitches: List[float] = []
+        all_ratios: List[float] = []
+        for page_num in sorted(zones):
+            pitches, ratios = self._leading_samples(zones[page_num], dominant_font_size_pt)
+            page_leading[page_num] = PageLeadingMetrics(
+                page_num=page_num,
+                dominant_font_size_pt=dominant_font_size_pt,
+                median_pitch_mm=_median(pitches),
+                leading_ratio=_median(ratios),
+                sample_count=len(ratios),
+            )
+            all_pitches.extend(pitches)
+            all_ratios.extend(ratios)
+        return page_leading, all_pitches, all_ratios
+
+    def _leading_samples(
+        self,
+        zone: PageZones,
+        dominant_font_size_pt: Optional[float],
+    ) -> Tuple[List[float], List[float]]:
+        """Возвращает шаги строк (мм) и их отношения к кеглю для одного листа.
+
+        Участвуют только строки тела доминирующего кегля (допуск 0.5 pt):
+        заголовки другого размера и строки таблиц шаг абзаца не задают.
+        Пары с номером страницы (`^\\d{1,4}$`) отбрасываются, как и значения
+        вне окна 0.8–2.5 — это отбивки и пустоты, а не межстрочный интервал.
+        """
+        if dominant_font_size_pt is None:
+            return [], []
+        lines = sorted(
+            (
+                line
+                for line in zone.body_lines
+                if line.text
+                and not line.in_table
+                and not PAGE_NUMBER_TEXT_RE.fullmatch(line.text)
+            ),
+            key=lambda line: (line.y0_mm, line.x0_mm),
+        )
+        pitches: List[float] = []
+        ratios: List[float] = []
+        for previous, current in zip(lines, lines[1:]):
+            if abs(previous.font_size_pt - dominant_font_size_pt) > LEADING_FONT_SIZE_TOLERANCE_PT:
+                continue
+            if abs(current.font_size_pt - dominant_font_size_pt) > LEADING_FONT_SIZE_TOLERANCE_PT:
+                continue
+            size_pt = (previous.font_size_pt + current.font_size_pt) / 2.0
+            if size_pt <= 0.0:
+                continue
+            pitch_mm = current.y0_mm - previous.y0_mm
+            ratio = pitch_mm / pt_to_mm(size_pt)
+            if not (MIN_LEADING_RATIO <= ratio <= MAX_LEADING_RATIO):
+                continue
+            pitches.append(pitch_mm)
+            ratios.append(ratio)
+        return pitches, ratios
+
+    # -----------------------------------------------------------------
     # Аудит листов
     # -----------------------------------------------------------------
 
@@ -530,8 +679,9 @@ class PdfLayoutEstimator:
         zone: PageZones,
         section: SectionProperties,
         page_offset: int,
+        leading: Optional[PageLeadingMetrics] = None,
     ) -> PdfPageAudit:
-        """Собирает PdfPageAudit по зонам листа и оцененным полям секции."""
+        """Собирает PdfPageAudit по зонам листа, полям секции и интервалу строк."""
         page_number = zone.page_number
         body_bottom = zone.body_bottom_mm
         free_bottom: Optional[float] = None
@@ -564,6 +714,10 @@ class PdfLayoutEstimator:
             body_left_x_mm=zone.body_left_mm,
             body_right_x_mm=zone.body_right_mm,
             bottom_free_space_mm=free_bottom,
+            dominant_font_size_pt=leading.dominant_font_size_pt if leading else None,
+            line_pitch_mm=leading.median_pitch_mm if leading else None,
+            leading_ratio=leading.leading_ratio if leading else None,
+            leading_sample_count=leading.sample_count if leading else 0,
         )
 
     @staticmethod

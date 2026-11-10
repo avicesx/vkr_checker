@@ -16,6 +16,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from .rules import RuleKind, RuleSeverity
 
 
+CheckStatus = Literal["pass", "fail", "not_assessed"]
+Confidence = Literal["high", "medium", "low"]
+
+
 class DocumentRef(BaseModel):
     """Краткая ссылка на проверенный документ и его пагинацию."""
 
@@ -72,6 +76,34 @@ class Violation(BaseModel):
         ge=1,
         description="Сколько объектов внутри адреса не соответствует правилу (раны абзаца)",
     )
+    confidence: Optional[Confidence] = Field(
+        default=None,
+        description="Насколько проверка надежна: high — точные данные, low — оценка по косвенным признакам",
+    )
+
+
+class RuleAssessment(BaseModel):
+    """Результат проверки, который не всегда выражается нарушением.
+
+    Для проверок, которые могут не иметь данных (положение номера страницы,
+    формат листа, межстрочный интервал), нужен явный статус: `pass` — требование
+    выполнено, `fail` — есть нарушение (оно же попадает в `violations`),
+    `not_assessed` — данных недостаточно, и движок не выдумывает вердикт.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str = Field(description="Идентификатор правила")
+    kind: RuleKind
+    status: CheckStatus = Field(description="pass, fail или not_assessed")
+    expected_text: str = Field(default="", description="Ожидание словами")
+    observed_text: str = Field(default="", description="Факт или причина, почему проверка не выполнена")
+    confidence: Confidence = Field(
+        default="medium",
+        description="high — точные данные, medium — оценка, low — почти нет данных",
+    )
+    details: Dict[str, Any] = Field(default_factory=dict, description="Машинно-читаемые подробности")
+    note: Optional[str] = Field(default=None, description="Пояснение для человека, если оно нужно")
 
 
 class RuleCheckSummary(BaseModel):
@@ -85,6 +117,11 @@ class RuleCheckSummary(BaseModel):
     by_severity: Dict[str, int] = Field(default_factory=dict)
     by_kind: Dict[str, int] = Field(default_factory=dict)
     by_rule: Dict[str, int] = Field(default_factory=dict)
+    not_assessed_total: int = Field(
+        default=0,
+        ge=0,
+        description="Сколько правил не удалось проверить из-за нехватки данных",
+    )
 
 
 class RuleCheckReport(BaseModel):
@@ -100,13 +137,27 @@ class RuleCheckReport(BaseModel):
     document: DocumentRef
     summary: RuleCheckSummary = Field(default_factory=RuleCheckSummary)
     violations: List[Violation] = Field(default_factory=list)
+    assessments: List[RuleAssessment] = Field(
+        default_factory=list,
+        description="Статусы проверок, которые могут быть не оценены: pass, fail, not_assessed",
+    )
     passed: bool = Field(description="True, если нет нарушений уровня error")
+
+    @property
+    def not_assessed(self) -> List[RuleAssessment]:
+        """Проверки, которые не удалось выполнить: не хватило данных парсера."""
+        return [
+            assessment
+            for assessment in self.assessments
+            if assessment.status == "not_assessed"
+        ]
 
 
 def build_summary(
     violations: List[Violation],
     rules_applied: int,
     objects_checked: int,
+    not_assessed_total: int = 0,
 ) -> RuleCheckSummary:
     """Собирает сводку отчета по списку нарушений."""
     by_severity: Dict[str, int] = {}
@@ -124,4 +175,5 @@ def build_summary(
         by_severity=dict(sorted(by_severity.items())),
         by_kind=dict(sorted(by_kind.items())),
         by_rule=dict(sorted(by_rule.items())),
+        not_assessed_total=not_assessed_total,
     )

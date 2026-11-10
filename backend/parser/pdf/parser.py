@@ -153,6 +153,10 @@ class PdfDocumentParser:
             word_stat_words=words,
             word_stat_chars_with_spaces=chars_with_spaces,
             word_stat_chars_no_spaces=chars_no_spaces,
+            pdf_dominant_font_size_pt=layout.dominant_font_size_pt,
+            pdf_median_leading_ratio=layout.median_leading_ratio,
+            pdf_median_line_pitch_mm=layout.median_line_pitch_mm,
+            pdf_leading_sample_count=layout.leading_sample_count,
         )
 
 

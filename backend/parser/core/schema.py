@@ -195,6 +195,22 @@ class DocumentMeta(BaseModel):
         default=None,
         description="Доля совпадения текста между DOCX и PDF (0.0..1.0) для защиты от загрузки разных версий"
     )
+    pdf_dominant_font_size_pt: Optional[float] = Field(
+        default=None,
+        description="Доминирующий кегль тела PDF по числу символов, pt (заполняет только автономный PDF-парсер)"
+    )
+    pdf_median_leading_ratio: Optional[float] = Field(
+        default=None,
+        description="Медианный межстрочный интервал PDF: шаг верхних краев соседних строк одного кегля / кегль (pdf_only)"
+    )
+    pdf_median_line_pitch_mm: Optional[float] = Field(
+        default=None,
+        description="Медианный шаг верхних краев соседних строк тела одного кегля, мм (pdf_only)"
+    )
+    pdf_leading_sample_count: int = Field(
+        default=0,
+        description="Число пар соседних строк, по которым оценен межстрочный интервал PDF"
+    )
     author: Optional[str] = None
     last_modified_by: Optional[str] = None
     created_iso: Optional[str] = None
@@ -251,6 +267,26 @@ class PdfPageAudit(BaseModel):
     bottom_free_space_mm: Optional[float] = Field(
         default=None,
         description="Свободное место от нижней строки текста до начала нижнего поля в мм"
+    )
+
+    # Межстрочный интервал листа: шаг строк одного кегля и его отношение к кеглю.
+    # Поля заполняет только автономный PDF-парсер (pdf_only); в docx_pdf аудит
+    # строит выравнивание DOCX↔PDF и оставляет их пустыми.
+    dominant_font_size_pt: Optional[float] = Field(
+        default=None,
+        description="Доминирующий кегль тела PDF по числу символов, pt"
+    )
+    line_pitch_mm: Optional[float] = Field(
+        default=None,
+        description="Медианный шаг верхних краев соседних строк тела одного кегля на листе, мм"
+    )
+    leading_ratio: Optional[float] = Field(
+        default=None,
+        description="Межстрочный интервал листа как отношение шага строк к кеглю (одинарный ≈ 1.15–1.2)"
+    )
+    leading_sample_count: int = Field(
+        default=0,
+        description="Число пар соседних строк, по которым измерен интервал листа"
     )
 
 

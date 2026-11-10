@@ -203,6 +203,8 @@ services (оркестрация)
 |---|---|---|
 | `meta` | `pagination_source` | `"pdf_exact"`, `"docx_native_breaks"`, `"geometric_fallback"` |
 | `meta` | `pdf_filename`, `pdf_sha256`, `rendered_page_numbers_present`, `pdf_docx_sync_score` | Заполняются только с PDF |
+| `meta` | `pdf_dominant_font_size_pt`, `pdf_median_leading_ratio`, `pdf_median_line_pitch_mm`, `pdf_leading_sample_count` | Межстрочный интервал PDF: кегль (pt), отношение шага строк к кеглю, шаг (мм), число пар строк; заполняет только автономный PDF-парсер |
+| `PdfPageAudit` | `dominant_font_size_pt`, `line_pitch_mm`, `leading_ratio`, `leading_sample_count` | Интервал одного листа; заполняет только `pdf_only` |
 | `PdfPageAudit` | `page_number_location` | `"header"`, `"footer"`, `"none"` |
 | `PdfPageAudit` | `page_number_alignment` | `"left"`, `"center"`, `"right"`, `"none"` |
 | блоки | `pdf_*_mm`, `pdf_lines_count_*`, `pdf_has_hyphenated_break`, `pdf_repeated_header_above` | Только с PDF |
@@ -228,6 +230,7 @@ services (оркестрация)
 | `meta.pdf_filename`, `pdf_sha256` | `None`, ключи удаляются | по желанию (на сериализацию не влияет) | да |
 | `meta.pagination_source` | `"geometric_fallback"` или `"docx_native_breaks"` | `"pdf_exact"` | `"pdf_exact"` при успешной сверке; иначе `"docx_native_breaks"`/`"geometric_fallback"` |
 | `meta.pdf_docx_sync_score` | `None`, ключ удаляется | `None` | да (0.0…1.0) |
+| `meta.pdf_dominant_font_size_pt`, `pdf_median_leading_ratio`, `pdf_median_line_pitch_mm`, `pdf_leading_sample_count` | `None`/`0`, ключи удаляются | да: оценка межстрочного интервала по парам строк одного кегля | пусто (`None`/`0`) |
 | `settings` | да | дефолты модели | да |
 | `theme` | да | дефолты модели | да |
 | `styles` | да | `{}` | да |
@@ -290,7 +293,10 @@ services (оркестрация)
   `PropertySource="pdf_estimate"`;
 - `sections`/`visuals` в `pdf_only` нельзя использовать как доказательство
   `sections_parsed`/`visual_registry`: матрица 4.2 описывает происхождение
-  данных, а не непустоту полей.
+  данных, а не непустоту полей;
+- поля интервала (`PdfPageAudit.leading_ratio`, `line_pitch_mm` и `meta.pdf_*`)
+  заполняет только `pdf_only`; в `docx_pdf` аудит строится выравниванием
+  DOCX↔PDF, поэтому интервал там пуст — это оценка PDF-слоя, а не DOCX.
 
 Сервис (`services/document_parsing.py`) явно выставляет эти флаги по матрице и
 не переопределяет их по непустоте коллекций.
@@ -368,6 +374,7 @@ DOCX-ветка `rule_engine` не меняется.
       ├─ sections: SectionProperties по группам страниц одного размера (оценка PDF)
       ├─ visuals: растровые изображения PDF (visual_kind="raster_image")
       ├─ pdf_pages_audit: PdfPageAudit по каждой странице
+      ├─ интервал: медианный leading по парам строк тела одного кегля (оценка)
       ├─ document_tree: по найденным заголовкам
       └─ page_count = PageCountInfo(total_pages=len(pages), method="pdf_exact", confidence="high")
           └─ ParsedDocument(parse_mode="pdf_only",
@@ -406,6 +413,10 @@ DOCX (см. 4.2.1). `styles={}`, `footnotes=[]`, `cross_ref_index` пустой,
 | `rendered_page_numbers_present` | `True`/`False` | аудит колонтитулов `layout.py` |
 | `pagination_source` | `"pdf_exact"` | страницы измерены по PDF |
 | `pdf_docx_sync_score` | `None` | DOCX в режиме нет |
+| `pdf_dominant_font_size_pt` | доминирующий кегль тела, pt | `layout.py`: размер, которым набрано больше символов (без таблиц и номеров) |
+| `pdf_median_leading_ratio` | медианный интервал (шаг строк / кегль) | `layout.py`: пары соседних строк одного кегля, окно 0.8–2.5 |
+| `pdf_median_line_pitch_mm` | медианный шаг верхних краев строк, мм | `layout.py`: те же пары |
+| `pdf_leading_sample_count` | число измеренных пар строк | `layout.py` |
 | `word_stat_pages` | число страниц PDF | физические листы |
 | `word_stat_words`, `word_stat_chars_with_spaces`, `word_stat_chars_no_spaces` | статистика по тексту PDF | текстовый слой (`structure.full_text`) |
 | `author`, `last_modified_by`, `created_iso`, `modified_iso`, `template_name`, `application` | `None` | DOCX-метаданные `docProps` недоступны |
@@ -413,6 +424,24 @@ DOCX (см. 4.2.1). `styles={}`, `footnotes=[]`, `cross_ref_index` пустой,
 `meta.pdf_docx_sync_score` в `pdf_only` остаётся `None` (в JSON ключ сохраняется,
 потому что `source.has_pdf=True`), а `word_stat_pages` совпадает с
 `page_count.total_pages`.
+
+Межстрочный интервал оценивается по PDF-слою: шаг — разность верхних краев
+соседних строк тела одного кегля (при равном кегле он равен шагу базовых линий),
+отношение — шаг в pt, делённый на кегль. Участвуют только строки доминирующего
+кегля, без строк таблиц и номеров страниц (`^\d{1,4}$`); пары вне окна 0.8–2.5
+отбрасываются как отбивки и пустоты. Сводное значение — медиана по пулу пар
+всего документа, поэтому короткий лист не перевешивает заполненный. Это
+**типографское отношение** шага к кеглю, а не множитель Word: одиночная строка
+Word для Times New Roman занимает ≈1.15 кегля (зависит от гарнитуры), поэтому
+полуторному интервалу Word соответствует ≈1.72. Приведение к шкале множителя
+Word выполняет `rule_engine` делением на `PDF_SINGLE_LINE_FACTOR = 1.15`, чтобы
+`expected.ratio` имел один смысл в DOCX и PDF.
+
+Не путать с оценкой структуры PDF: `blocks[].effective_props.line_spacing_value`
+в `pdf_only` считает `structure.py` как шаг/(кегль×1.2) с отсечением 0.8–3.0 —
+это грубая оценка множителя для одного абзаца, а не «шкала Word» и не
+`leading_ratio` из `layout.py`. Новые поля добавлены в `schema_version 3.0.0`
+аддитивно (опциональные поля с дефолтами), версия не менялась.
 
 ### 5.3. `docx_pdf`
 

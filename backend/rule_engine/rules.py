@@ -23,6 +23,12 @@
 Структурные правила (уровни и нумерация заголовков, обязательные разделы,
 оглавление) работают по document_tree и TocContainerBlock, которые готовит
 `parser.docx`: роли разделов и номера уже вычислены на этапе разбора.
+
+Геометрические правила (`page_number_position`, `page_format`) и межстрочный
+интервал (`line_spacing`) добавлены для вузовских профилей оформления: наборы
+`rules/mpgu.json`, `rules/urgpu.json`, `rules/urfu.json` загружаются по
+идентификатору вуза через `load_profile_ruleset()`. Набор по умолчанию
+(`rules/vkr_test_rules.json`) от этих правил не зависит.
 """
 from __future__ import annotations
 
@@ -42,6 +48,9 @@ RuleKind = Literal[
     "heading_format",
     "required_sections",
     "toc",
+    "page_number_position",
+    "page_format",
+    "line_spacing",
 ]
 RuleSeverity = Literal["error", "warning", "info"]
 
@@ -132,6 +141,13 @@ SCOPE_LABELS: dict[str, str] = {
 }
 
 DEFAULT_RULESET_PATH = Path(__file__).resolve().parent / "rules" / "vkr_test_rules.json"
+
+PROFILE_RULESET_PATHS: dict[str, Path] = {
+    "mpgu": Path(__file__).resolve().parent / "rules" / "mpgu.json",
+    "urgpu": Path(__file__).resolve().parent / "rules" / "urgpu.json",
+    "urfu": Path(__file__).resolve().parent / "rules" / "urfu.json",
+}
+"""Наборы правил профилей вузов: идентификатор вуза → файл правил."""
 
 
 class RuleTarget(BaseModel):
@@ -564,6 +580,87 @@ class TocExpectation(BaseModel):
         return self
 
 
+class PageNumberPositionExpectation(BaseModel):
+    """Ожидаемое положение печатного номера страницы.
+
+    В DOCX номер страницы живет в колонтитуле, поэтому проверяются две
+    наблюдаемые вещи: в каком колонтитуле напечатан номер (верхний или нижний)
+    и как выровнен абзац с номером. Положение ``top_center`` из профилей
+    вузов соответствует паре ``zone="header"`` и ``alignment="center"``,
+    ``bottom_center`` — паре ``zone="footer"`` и ``alignment="center"``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    zone: Literal["header", "footer"] = Field(
+        description="Колонтитул с номером: 'header' — верхний, 'footer' — нижний",
+    )
+    alignment: Literal["left", "center", "right", "both", "distribute"] = Field(
+        default="center",
+        description="Ожидаемое выравнивание абзаца с номером страницы",
+    )
+
+
+class PageFormatExpectation(BaseModel):
+    """Ожидаемый формат листа в миллиметрах.
+
+    Значения по умолчанию описывают A4 в книжной ориентации; допуск задается
+    отдельно и по умолчанию равен ±1 мм на каждую сторону.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    width_mm: float = Field(default=210.0, gt=0.0, le=2000.0, description="Ширина листа, мм")
+    height_mm: float = Field(default=297.0, gt=0.0, le=2000.0, description="Высота листа, мм")
+    tolerance_mm: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Допуск к ширине и высоте листа, мм",
+    )
+    orientation: Literal["portrait", "landscape", "any"] = Field(
+        default="portrait",
+        description="Ориентация листа: книжная, альбомная или любая",
+    )
+
+    @model_validator(mode="after")
+    def _validate_orientation(self) -> "PageFormatExpectation":
+        """Проверяет, что размеры листа согласуются с заявленной ориентацией."""
+        if self.orientation == "portrait" and self.width_mm >= self.height_mm:
+            raise ValueError(
+                "PageFormatExpectation: для книжной ориентации ширина должна быть "
+                "меньше высоты"
+            )
+        if self.orientation == "landscape" and self.width_mm <= self.height_mm:
+            raise ValueError(
+                "PageFormatExpectation: для альбомной ориентации ширина должна быть "
+                "больше высоты"
+            )
+        return self
+
+
+class LineSpacingExpectation(BaseModel):
+    """Ожидаемый межстрочный интервал как множитель кегля.
+
+    Множитель 1.5 означает полуторный интервал, 1.0 — одинарный. Допуск
+    задается в тех же единицах, что и множитель: профили вузов берут ±0.25.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ratio: float = Field(
+        default=1.5,
+        gt=0.0,
+        le=10.0,
+        description="Множитель межстрочного интервала: 1.5 — полуторный",
+    )
+    tolerance: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=5.0,
+        description="Допуск по множителю интервала",
+    )
+
+
 class _RuleBase(BaseModel):
     """Общие поля правила: идентификатор, важность, сообщение и область."""
 
@@ -658,6 +755,31 @@ class TocRule(_RuleBase):
     expected: TocExpectation
 
 
+class PageNumberPositionRule(_RuleBase):
+    """Правило положения печатного номера страницы в колонтитуле."""
+
+    kind: Literal["page_number_position"] = "page_number_position"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="headers_footers")
+    )
+    expected: PageNumberPositionExpectation
+
+
+class PageFormatRule(_RuleBase):
+    """Правило формата листа секции."""
+
+    kind: Literal["page_format"] = "page_format"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="sections"))
+    expected: PageFormatExpectation
+
+
+class LineSpacingRule(_RuleBase):
+    """Правило межстрочного интервала абзаца."""
+
+    kind: Literal["line_spacing"] = "line_spacing"
+    expected: LineSpacingExpectation
+
+
 Rule = Annotated[
     Union[
         FontRule,
@@ -668,6 +790,9 @@ Rule = Annotated[
         HeadingFormatRule,
         RequiredSectionsRule,
         TocRule,
+        PageNumberPositionRule,
+        PageFormatRule,
+        LineSpacingRule,
     ],
     Field(discriminator="kind"),
 ]
@@ -681,6 +806,9 @@ KIND_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "heading_format": HEADING_SCOPES,
     "required_sections": STRUCTURE_SCOPES,
     "toc": TOC_SCOPES,
+    "page_number_position": frozenset({"headers_footers"}),
+    "page_format": frozenset({"sections"}),
+    "line_spacing": PARAGRAPH_SCOPES | HEADING_SCOPES,
 }
 """Какие scope допустимы для каждого вида правила (проверяется при загрузке набора)."""
 
@@ -765,3 +893,27 @@ def load_ruleset(path: str | Path) -> RuleSet:
 def load_default_ruleset() -> RuleSet:
     """Загружает тестовый набор правил, поставляемый вместе с пакетом."""
     return load_ruleset(DEFAULT_RULESET_PATH)
+
+
+def available_profiles() -> tuple[str, ...]:
+    """Возвращает идентификаторы вузовских профилей оформления."""
+    return tuple(PROFILE_RULESET_PATHS)
+
+
+def load_profile_ruleset(profile_id: str) -> RuleSet:
+    """Загружает набор правил профиля вуза по его идентификатору.
+
+    Идентификатор сравнивается без учета регистра и пробелов по краям.
+    Неизвестный профиль — ошибка, а не молчаливый переход к набору по
+    умолчанию: проверять работу чужими требованиями опаснее, чем упасть.
+    """
+    if not isinstance(profile_id, str):
+        raise ValueError(f"Идентификатор профиля должен быть строкой: {profile_id!r}")
+    normalized = profile_id.strip().casefold()
+    ruleset_path = PROFILE_RULESET_PATHS.get(normalized)
+    if ruleset_path is None:
+        known = ", ".join(sorted(PROFILE_RULESET_PATHS))
+        raise ValueError(
+            f"Неизвестный профиль оформления: {profile_id!r}; доступны: {known}"
+        )
+    return load_ruleset(ruleset_path)

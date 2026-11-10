@@ -24,6 +24,14 @@ from rule_engine import (
     load_default_ruleset,
     load_ruleset,
 )
+from rule_engine.rules import (
+    PROFILE_RULESET_PATHS,
+    LineSpacingRule,
+    PageFormatRule,
+    PageNumberPositionRule,
+    available_profiles,
+    load_profile_ruleset,
+)
 
 
 def _font_rule(**overrides: object) -> dict:
@@ -84,6 +92,42 @@ def _ruleset(*rules: dict) -> dict:
         "ruleset_version": "1.0.0",
         "rules": list(rules),
     }
+
+
+def _line_spacing_rule(**overrides: object) -> dict:
+    rule = {
+        "rule_id": "line_spacing_body",
+        "kind": "line_spacing",
+        "message": "Полуторный межстрочный интервал",
+        "target": {"scope": "body_text"},
+        "expected": {"ratio": 1.5, "tolerance": 0.25},
+    }
+    rule.update(overrides)
+    return rule
+
+
+def _page_number_rule(**overrides: object) -> dict:
+    rule = {
+        "rule_id": "page_number_position",
+        "kind": "page_number_position",
+        "message": "Номер страницы в нижнем колонтитуле по центру",
+        "target": {"scope": "headers_footers"},
+        "expected": {"zone": "footer", "alignment": "center"},
+    }
+    rule.update(overrides)
+    return rule
+
+
+def _page_format_rule(**overrides: object) -> dict:
+    rule = {
+        "rule_id": "page_format",
+        "kind": "page_format",
+        "message": "Лист A4",
+        "target": {"scope": "sections"},
+        "expected": {"width_mm": 210.0, "height_mm": 297.0, "tolerance_mm": 1.0},
+    }
+    rule.update(overrides)
+    return rule
 
 
 def test_default_ruleset_describes_nine_checks() -> None:
@@ -394,3 +438,241 @@ def test_get_rule_unknown_id_raises_key_error() -> None:
 
     with pytest.raises(KeyError):
         ruleset.get_rule("absent_rule")
+
+
+def test_line_spacing_rule_describes_multiplier() -> None:
+    """Интервал задается множителем и допуском в тех же единицах."""
+    ruleset = RuleSet.model_validate(_ruleset(_line_spacing_rule()))
+    rule = ruleset.rules[0]
+
+    assert isinstance(rule, LineSpacingRule)
+    assert rule.target.scope == "body_text"
+    assert rule.expected.ratio == 1.5
+    assert rule.expected.tolerance == 0.25
+
+
+def test_line_spacing_rule_accepts_heading_scope() -> None:
+    """Заголовки тоже абзацы, поэтому интервал для них задается тем же правилом."""
+    payload = _ruleset(_line_spacing_rule(target={"scope": "headings"}))
+
+    assert isinstance(RuleSet.model_validate(payload).rules[0], LineSpacingRule)
+
+
+def test_line_spacing_rule_rejects_sections_scope() -> None:
+    """Межстрочный интервал не является свойством секции."""
+    payload = _ruleset(_line_spacing_rule(target={"scope": "sections"}))
+
+    with pytest.raises(ValueError, match="scope должен быть одним из"):
+        RuleSet.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "expected",
+    [
+        {"ratio": 0.0},
+        {"ratio": -1.5},
+        {"ratio": 20.0},
+        {"ratio": 1.5, "tolerance": -0.1},
+    ],
+)
+def test_line_spacing_rule_rejects_impossible_values(expected: dict) -> None:
+    """Нулевой, отрицательный и чрезмерный множитель не имеют смысла."""
+    payload = _ruleset(_line_spacing_rule(expected=expected))
+
+    with pytest.raises(ValueError):
+        RuleSet.model_validate(payload)
+
+
+def test_page_number_position_rule_defaults_to_footer() -> None:
+    """Номер страницы по умолчанию ожидается снизу по центру."""
+    ruleset = RuleSet.model_validate(_ruleset(_page_number_rule()))
+    rule = ruleset.rules[0]
+
+    assert isinstance(rule, PageNumberPositionRule)
+    assert rule.target.scope == "headers_footers"
+    assert rule.expected.zone == "footer"
+    assert rule.expected.alignment == "center"
+
+
+def test_page_number_position_rule_accepts_header_and_alignment() -> None:
+    """Профиль МПГУ ставит номер сверху; выравнивание можно задать явно."""
+    payload = _ruleset(
+        _page_number_rule(expected={"zone": "header", "alignment": "right"})
+    )
+    rule = RuleSet.model_validate(payload).rules[0]
+
+    assert rule.expected.zone == "header"
+    assert rule.expected.alignment == "right"
+
+
+def test_page_number_position_rule_requires_zone() -> None:
+    """Без указания колонтитула правило ничего не проверяет."""
+    payload = _ruleset(_page_number_rule(expected={"alignment": "center"}))
+
+    with pytest.raises(ValueError, match="zone"):
+        RuleSet.model_validate(payload)
+
+
+def test_page_number_position_rejects_pdf_location_names() -> None:
+    """Названия положений из PDF-профилей не являются схемой DOCX-правила."""
+    payload = _ruleset(_page_number_rule(expected={"zone": "top_center"}))
+
+    with pytest.raises(ValueError):
+        RuleSet.model_validate(payload)
+
+
+def test_page_number_position_requires_headers_footers_scope() -> None:
+    """Номер страницы живет в колонтитуле, а не в основном тексте."""
+    payload = _ruleset(_page_number_rule(target={"scope": "body_text"}))
+
+    with pytest.raises(ValueError, match="scope должен быть одним из"):
+        RuleSet.model_validate(payload)
+
+
+def test_page_format_rule_defaults_to_a4_portrait() -> None:
+    """Формат по умолчанию — A4 книжной ориентации с допуском ±1 мм."""
+    ruleset = RuleSet.model_validate(_ruleset(_page_format_rule(expected={})))
+    rule = ruleset.rules[0]
+
+    assert isinstance(rule, PageFormatRule)
+    assert rule.target.scope == "sections"
+    assert rule.expected.width_mm == 210.0
+    assert rule.expected.height_mm == 297.0
+    assert rule.expected.tolerance_mm == 1.0
+    assert rule.expected.orientation == "portrait"
+
+
+def test_page_format_rule_accepts_landscape() -> None:
+    """Альбомный лист описывается теми же полями с переставленными сторонами."""
+    payload = _ruleset(
+        _page_format_rule(
+            expected={
+                "width_mm": 297.0,
+                "height_mm": 210.0,
+                "orientation": "landscape",
+            }
+        )
+    )
+    rule = RuleSet.model_validate(payload).rules[0]
+
+    assert rule.expected.orientation == "landscape"
+    assert rule.expected.width_mm == 297.0
+
+
+@pytest.mark.parametrize(
+    "expected",
+    [
+        {"width_mm": 297.0, "height_mm": 210.0},
+        {"width_mm": 210.0, "height_mm": 297.0, "orientation": "landscape"},
+        {"width_mm": 210.0, "height_mm": 297.0, "tolerance_mm": -1.0},
+        {"width_mm": 0.0, "height_mm": 297.0},
+    ],
+)
+def test_page_format_rule_rejects_impossible_sheet(expected: dict) -> None:
+    """Размеры должны согласовываться с ориентацией, допуск — быть неотрицательным."""
+    payload = _ruleset(_page_format_rule(expected=expected))
+
+    with pytest.raises(ValueError):
+        RuleSet.model_validate(payload)
+
+
+def test_page_format_rule_requires_sections_scope() -> None:
+    """Формат листа — свойство секции."""
+    payload = _ruleset(_page_format_rule(target={"scope": "headers_footers"}))
+
+    with pytest.raises(ValueError, match="scope должен быть одним из"):
+        RuleSet.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("profile_id", "margins_mm", "zone"),
+    [
+        ("mpgu", (30.0, 15.0, 20.0, 20.0), "header"),
+        ("urgpu", (30.0, 20.0, 25.0, 25.0), "footer"),
+        ("urfu", (30.0, 15.0, 20.0, 20.0), "footer"),
+    ],
+)
+def test_profile_rulesets_load(
+    profile_id: str,
+    margins_mm: tuple[float, float, float, float],
+    zone: str,
+) -> None:
+    """Профиль вуза загружается по id и содержит поля и положение номера."""
+    ruleset = load_profile_ruleset(profile_id)
+
+    assert ruleset.ruleset_id == f"{profile_id}-vkr-profile"
+    margin_rule = ruleset.get_rule("page_margins")
+    assert isinstance(margin_rule, MarginRule)
+    observed = (
+        margin_rule.expected.left_mm,
+        margin_rule.expected.right_mm,
+        margin_rule.expected.top_mm,
+        margin_rule.expected.bottom_mm,
+    )
+    assert observed == margins_mm
+    assert margin_rule.expected.tolerance_mm == 3.0
+
+    number_rule = ruleset.get_rule("page_number_position")
+    assert isinstance(number_rule, PageNumberPositionRule)
+    assert number_rule.expected.zone == zone
+    assert number_rule.expected.alignment == "center"
+
+
+def test_profile_common_thresholds_match_methodical_guides() -> None:
+    """Общие пороги профилей: шрифт, отступ и интервал из методичек."""
+    for profile_id in available_profiles():
+        ruleset = load_profile_ruleset(profile_id)
+        font_expectation = ruleset.get_rule("font_body_text").expected
+        indent_expectation = ruleset.get_rule("indent_first_line").expected
+        spacing_expectation = ruleset.get_rule("line_spacing_body").expected
+
+        assert font_expectation.family == "Times New Roman"
+        assert font_expectation.size_pt == 14.0
+        assert font_expectation.size_tolerance_pt == 0.5
+        assert indent_expectation.first_line_mm == 12.5
+        assert indent_expectation.tolerance_mm == 2.5
+        assert spacing_expectation.ratio == 1.5
+        assert spacing_expectation.tolerance == 0.25
+
+
+def test_only_urfu_profile_requires_a4() -> None:
+    """Формат листа обязателен только в профиле УрФУ."""
+    format_rule = load_profile_ruleset("urfu").get_rule("page_format")
+    assert isinstance(format_rule, PageFormatRule)
+    assert format_rule.expected.height_mm == 297.0
+
+    for profile_id in ("mpgu", "urgpu"):
+        with pytest.raises(KeyError):
+            load_profile_ruleset(profile_id).get_rule("page_format")
+
+
+def test_available_profiles_point_to_existing_files() -> None:
+    """Каждый профиль поставляется отдельным файлом в каталоге rules."""
+    assert available_profiles() == ("mpgu", "urgpu", "urfu")
+    for profile_id in available_profiles():
+        path = PROFILE_RULESET_PATHS[profile_id]
+        assert path.is_file()
+        assert path.name == f"{profile_id}.json"
+        assert path.parent.name == "rules"
+
+
+def test_profile_id_is_normalized() -> None:
+    """Регистр и пробелы по краям идентификатора профиля не важны."""
+    assert load_profile_ruleset(" UrFU ").ruleset_id == "urfu-vkr-profile"
+
+
+def test_unknown_profile_is_rejected() -> None:
+    """Опечатка в id вуза не должна молча подменяться набором по умолчанию."""
+    with pytest.raises(ValueError, match="Неизвестный профиль"):
+        load_profile_ruleset("mgu")
+
+
+def test_profile_rulesets_do_not_change_default_ruleset() -> None:
+    """Набор по умолчанию остается прежним и не подмешивает профильные правила."""
+    default_ruleset = load_default_ruleset()
+    default_kinds = {rule.kind for rule in default_ruleset.rules}
+
+    assert "page_number_position" not in default_kinds
+    assert "page_format" not in default_kinds
+    assert "line_spacing" not in default_kinds
+    assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
