@@ -95,7 +95,7 @@ MODE_CAPABILITIES: Dict[ParseMode, DocumentCapabilities] = {
         pdf_layout_coordinates=True,
         visual_registry=False,
         footnotes_parsed=False,
-        cross_references=False,
+        cross_references=True,
         word_metadata=False,
         page_count_estimated=False,
     ),
@@ -352,8 +352,10 @@ def _apply_mode_contract(
 
     capabilities = MODE_CAPABILITIES[mode].model_copy(deep=True)
     # Флаги описывают наличие DOCX-производных данных, а не непустоту коллекций:
-    # в pdf_only sections/visuals могут содержать оценку по геометрии PDF, но
-    # sections_parsed/visual_registry остаются False по матрице ARCHITECTURE 4.2.
+    # в pdf_only sections могут содержать оценку по геометрии PDF, но
+    # sections_parsed остаётся False по матрице ARCHITECTURE 4.2. Исключения —
+    # cross_references (индекс заполняет общий слой enrichment) и visual_registry
+    # (True, только если подпись рисунка связалась с визуальным объектом).
     capabilities.page_count_estimated = page_count.method not in (
         "pdf_exact",
         "docx_native_breaks",
@@ -364,6 +366,7 @@ def _apply_mode_contract(
         capabilities.pdf_layout_coordinates = alignment_applied
     elif mode == "pdf_only":
         capabilities.exact_pagination = page_count.method == "pdf_exact"
+        capabilities.visual_registry = document.capabilities.visual_registry
     else:
         capabilities.exact_pagination = False
         capabilities.pdf_layout_coordinates = False
