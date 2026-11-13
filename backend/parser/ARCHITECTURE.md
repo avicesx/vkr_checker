@@ -598,6 +598,7 @@ PDF и сервис. Точки входа — сервис (`services`), CLI в
 | `docx_only`: DOCX-конвейер без PDF, оценка страниц (`docx_native_breaks`/`geometric_estimation`), `meta.pdf_* = None` | `parser/docx/pipeline.py` |
 | сервис `parse_document`/`parse_to_json_file`, коды ошибок, CLI | `services/document_parsing.py` |
 | общее извлечение PDF (`pdf_page_text.py`, `pdf_text_utils.py`), сквозная интеграция трёх режимов | `parser/docx/pdf_page_text.py`, `tests/test_integration_modes.py` |
+| отчёт о ссылках на источники `citations.json` поверх `ParsedDocument` (все три режима) | `citations/`, `services/references.py` |
 
 Что проверяется автоматически:
 
@@ -632,3 +633,16 @@ python -m pytest tests -q -m integration
 (сервис), `tests/test_import_boundaries.py` (границы импорта),
 `tests/test_integration_modes.py` (сквозные сценарии, legacy-JSON, обратная
 совместимость).
+
+## 9. Производные артефакты: ссылки на источники
+
+`backend/citations/` считает отдельный отчёт `citations.json` поверх готового
+`ParsedDocument`: парсер не меняется, сканер работает по `blocks` и поэтому
+одинаково применим к `docx_only`, `pdf_only` и `docx_pdf`. Раздел литературы
+исключается из поиска по `document_tree` (`semantic_role="bibliography"`), а
+записи `cross_ref_index.bibliography` используются для сопоставления ссылок.
+Для `pdf_only` записи списка литературы парсером не извлекаются, поэтому ссылки
+находятся и получают место в документе, но остаются `unresolved` — причина
+пишется в `not_extracted`. Отчёт не входит в `ParsedDocument` и не влияет на
+`capabilities`: это потребитель модели, а не её часть. Подробности — в
+`backend/citations/README.md`.
