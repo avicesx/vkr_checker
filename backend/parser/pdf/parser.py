@@ -9,19 +9,23 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Sequence, Set
 
 from parser.core.schema import (
+    BibliographyEntry,
     CrossReferenceIndex,
     DocumentAnomalies,
     DocumentCapabilities,
     DocumentMeta,
     GlobalSettings,
+    NumberedCaptionEntity,
     PageCountInfo,
     ParsedDocument,
     SourceInfo,
+    TextCrossReferenceMention,
     ThemeData,
 )
+from parser.enrichment import extract_bibliography, extract_captions, extract_mentions
 
 from .extractor import PdfDocument, PdfExtractor
 from .layout import PdfLayout, PdfLayoutEstimator
@@ -86,7 +90,7 @@ class PdfDocumentParser:
         )
         meta = self._build_meta(document, layout, structure, total_pages)
         capabilities = self._build_capabilities()
-        return ParsedDocument(
+        result = ParsedDocument(
             parse_mode=PARSE_MODE,
             source=SourceInfo(
                 mode=PARSE_MODE,
@@ -110,10 +114,51 @@ class PdfDocumentParser:
             cross_ref_index=CrossReferenceIndex(),
             anomalies=DocumentAnomalies(),
         )
+        self._enrich(result)
+        return result
+
+    # -----------------------------------------------------------------
+    # Обогащение: общий слой parser.enrichment
+    # -----------------------------------------------------------------
+
+    @staticmethod
+    def _enrich(result: ParsedDocument) -> None:
+        """Заполняет cross_ref_index общим слоем enrichment и правит capabilities.
+
+        Слой формат-независим: библиография, подписи и упоминания извлекаются
+        эвристически по блокам PDF и document_tree, поэтому в pdf_only индекс
+        перекрестных ссылок больше не пустой (см. ARCHITECTURE.md, 4.2.1).
+        """
+        bibliography = extract_bibliography(result)
+        captions = extract_captions(result)
+        mentions = extract_mentions(result, bibliography=bibliography, captions=captions)
+        result.cross_ref_index = CrossReferenceIndex(
+            figures=[caption for caption in captions if caption.entity_type == "figure"],
+            tables=[caption for caption in captions if caption.entity_type == "table"],
+            Apps=[caption for caption in captions if caption.entity_type == "appendix"],
+            bibliography=bibliography,
+            mentions=mentions,
+        )
+        _mark_cited_bibliography(bibliography, mentions)
+        _mark_mentioned_captions(captions, mentions, _block_order(result))
+        # Флаг описывает наличие слоя, а не непустоту коллекций: обогащение
+        # отработало, поэтому перекрестные ссылки считаются разобранными.
+        result.capabilities.cross_references = True
+        # Визуальный реестр появляется только там, где подпись рисунка связалась
+        # с растровым изображением PDF (у остальных фигур target_object_id пуст).
+        result.capabilities.visual_registry = any(
+            caption.target_object_id
+            for caption in captions
+            if caption.entity_type == "figure"
+        )
 
     @staticmethod
     def _build_capabilities() -> DocumentCapabilities:
-        """Матрица возможностей pdf_only: точные страницы, структура DOCX недоступна."""
+        """Базовая матрица pdf_only: DOCX-производных данных в режиме нет.
+
+        Флаги cross_references/visual_registry поднимает слой обогащения
+        (``_enrich``), когда он действительно заполнил индекс.
+        """
         return DocumentCapabilities(
             styles_parsed=False,
             numbering_parsed=False,
@@ -158,6 +203,50 @@ class PdfDocumentParser:
             pdf_median_line_pitch_mm=layout.median_line_pitch_mm,
             pdf_leading_sample_count=layout.leading_sample_count,
         )
+
+
+def _block_order(document: ParsedDocument) -> Dict[str, int]:
+    """Порядковый номер блока в потоке документа: нужен для сравнения «до/после»."""
+    return {block.block_id: index for index, block in enumerate(document.blocks)}
+
+
+def _mark_cited_bibliography(
+    bibliography: Sequence[BibliographyEntry],
+    mentions: Sequence[TextCrossReferenceMention],
+) -> None:
+    """Проставляет is_cited_in_text записям, на которые ссылается текст."""
+    cited: Set[str] = set()
+    for mention in mentions:
+        if mention.ref_type == "bibliography":
+            cited.update(mention.resolved_entity_ids)
+    for entry in bibliography:
+        if entry.bib_id in cited:
+            entry.is_cited_in_text = True
+
+
+def _mark_mentioned_captions(
+    captions: Sequence[NumberedCaptionEntity],
+    mentions: Sequence[TextCrossReferenceMention],
+    block_order: Dict[str, int],
+) -> None:
+    """Проставляет подписям признаки упоминания в тексте, как в DOCX-конвейере."""
+    by_entity: Dict[str, List[TextCrossReferenceMention]] = {}
+    for mention in mentions:
+        for entity_id in mention.resolved_entity_ids:
+            by_entity.setdefault(entity_id, []).append(mention)
+    for caption in captions:
+        related = by_entity.get(caption.entity_id)
+        if not related:
+            continue
+        first = related[0]
+        caption.is_mentioned_in_text = True
+        caption.first_mention_block_id = first.block_id
+        caption.first_mention_page_est = first.page_est
+        caption.all_mention_ids = [mention.mention_id for mention in related]
+        caption_order = block_order.get(caption.caption_block_id or "")
+        mention_order = block_order.get(first.block_id)
+        if caption_order is not None and mention_order is not None:
+            caption.is_mentioned_before_appearance = mention_order < caption_order
 
 
 def parse_pdf(

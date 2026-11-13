@@ -18,7 +18,7 @@
 | Режим (`ParseMode`) | Что является источником структуры | Что является источником страниц | Назначение |
 |---|---|---|---|
 | `docx_only` | DOCX (стили, нумерация, секции, сноски, перекрестные ссылки) | Оценка по геометрии DOCX, нативные `lastRenderedPageBreak` или `docProps/app.xml` | Нормоконтроль оформления без PDF; работает всегда, когда есть DOCX |
-| `pdf_only` | PDF (эвристическое восстановление абзацев по геометрии) | Сам PDF (число страниц точное) | Проверка готового PDF без исходника: пагинация, номера страниц, границы текста |
+| `pdf_only` | PDF (эвристическое восстановление абзацев по геометрии; библиография, подписи и упоминания — эвристически) | Сам PDF (число страниц точное) | Проверка готового PDF без исходника: пагинация, номера страниц, границы текста |
 | `docx_pdf` | DOCX | Эталонный PDF, сверенный с DOCX | Полный нормоконтроль: форматирование из DOCX + физические страницы из PDF |
 
 Ключевая идея: **режим определяет не набор файлов, а источник истины**.
@@ -66,6 +66,10 @@ services (оркестрация)
  ├──────────────► parser.core
  │                  schema.py          — единственный JSON-контракт
  │                  mode.py            — контракт режимов
+ ├──────────────► parser.enrichment
+ │                  bibliography.py    — список литературы -> cross_ref_index
+ │                  captions.py        — подписи рисунков/таблиц/приложений
+ │                  mentions.py        — упоминания объектов и ссылок в тексте
  ├──────────────► parser.docx
  │                  pipeline.py        — DOCX -> ParsedDocument (docx_only/docx_pdf)
  │                  pdf_page_aligner.py — обогащение страниц из PDF (docx_pdf)
@@ -88,7 +92,16 @@ services (оркестрация)
   `parser.docx.pdf_page_text` / `parser.docx.pdf_text_utils`, чтобы складывать
   результат в те же модели и читать PDF так же, как `pdf_page_aligner`. При этом
   он **не** импортирует `parser.docx.pipeline` (иначе цикл и дублирование
-  DOCX-конвейера).
+  DOCX-конвейера). После сборки модели парсер вызывает `parser.enrichment` и
+  заполняет `cross_ref_index` (см. 5.2).
+- `parser.enrichment` — формат-независимый пост-процессор над готовым
+  `ParsedDocument`: получает модель, извлекает библиографию, подписи и
+  упоминания и заполняет `cross_ref_index`. Импортирует `parser.core.schema` и
+  пакет `citations` (регулярные выражения берутся из `citations.patterns`; при
+  импорте пакета исполняется его `__init__`, то есть подгружаются также
+  `citations.extract` и `citations.schema`); конвейеры
+  `parser.docx`/`parser.pdf` он не импортирует. `parser.docx` заполняет
+  `cross_ref_index` собственным конвейером и слой не вызывает.
 - `parser/__init__.py` не импортирует слои, а `parser/docx/__init__.py` использует
   ленивые импорты (PEP 562 `__getattr__`): `import parser` и `import parser.docx`
   не поднимают `pipeline.py`, `converter.py`, lxml, pydantic и pymupdf, пока не
@@ -130,7 +143,7 @@ services (оркестрация)
 | `visuals` | `Dict[str, VisualObject]` | `{}` | Визуальные объекты |
 | `footnotes` | `List[FootnoteItem]` | `[]` | Сноски и концевые сноски |
 | `document_tree` | `List[DocumentTreeNode]` | `[]` | Дерево документа |
-| `cross_ref_index` | `CrossReferenceIndex` | пустой | Оглавление, подписи, ссылки |
+| `cross_ref_index` | `CrossReferenceIndex` | пустой | Оглавление, подписи, ссылки; в `pdf_only` заполняется `parser.enrichment` |
 | `anomalies` | `DocumentAnomalies` | пустой | Аномалии оформления |
 
 `ParsedDocxDocument = ParsedDocument` — алиас того же класса, сохраняется для
@@ -166,7 +179,7 @@ services (оркестрация)
 | `pdf_layout_coordinates` | Есть координаты вёрстки из PDF |
 | `visual_registry` | Реестр визуальных объектов DOCX заполнен |
 | `footnotes_parsed` | Сноски и концевые сноски разобраны |
-| `cross_references` | Оглавление, подписи и перекрестные ссылки разобраны |
+| `cross_references` | Оглавление, подписи и перекрёстные ссылки разобраны (в `pdf_only` — эвристически слоем `parser.enrichment`) |
 | `word_metadata` | Метаданные `docProps` и статистика Word разобраны |
 | `page_count_estimated` | Число страниц оценочное, а не измерено |
 
@@ -240,7 +253,7 @@ services (оркестрация)
 | `visuals` | да | да: только растровые изображения, извлечённые из PDF | да |
 | `footnotes` | да | пусто | да |
 | `document_tree` | да | оценка (по заголовкам из PDF) | да |
-| `cross_ref_index` | да | пусто (дефолт модели; перекрёстные ссылки DOCX недоступны) | да |
+| `cross_ref_index` | да | да: эвристический индекс от общего слоя `parser.enrichment` (библиография, подписи рисунков/таблиц/приложений, упоминания) | да |
 | `anomalies` | да | пусто (дефолт модели) | да |
 | `page_count` | оценка (`docx_native_breaks`/`geometric_estimation`) | да, `pdf_exact`, `high` | да, `pdf_exact`, `high` (даже при расхождении текста — с пояснением в `note`) |
 | `capabilities.*` | см. 4.2 | см. 4.2 | см. 4.2 |
@@ -254,9 +267,9 @@ services (оркестрация)
 | `sections_parsed` | `True` | `False` | `True` |
 | `exact_pagination` | `False` | `True` | `True`, если сверка с PDF успешна, иначе `False` |
 | `pdf_layout_coordinates` | `False` | `True` | `True` при применённом выравнивании; при `alignment_applied=False` сервис выставляет `False` (PDF прочитан, но координат у блоков нет) |
-| `visual_registry` | `True` | `False` | `True` |
+| `visual_registry` | `True` | `True`, если слой обогащения связал хотя бы одну подпись рисунка с визуальным объектом PDF, иначе `False` | `True` |
 | `footnotes_parsed` | `True` | `False` | `True` |
-| `cross_references` | `True` | `False` | `True` |
+| `cross_references` | `True` | `True` (индекс заполняет общий слой `parser.enrichment`) | `True` |
 | `word_metadata` | `True` | `False` | `True` |
 | `page_count_estimated` | `True` (кроме `docx_native_breaks`) | `False` | `False` |
 
@@ -267,10 +280,12 @@ services (оркестрация)
 ### 4.2.1. Семантика `pdf_only`: флаг `False` ≠ пустая коллекция
 
 В `pdf_only` флаги `styles_parsed`, `numbering_parsed`, `sections_parsed`,
-`visual_registry`, `footnotes_parsed`, `cross_references` и `word_metadata`
-равны `False` потому, что **DOCX-производных данных в этом режиме нет** (нет
-`styles.xml`, `numbering.xml`, `w:sectPr`, `word/footnotes.xml` и `docProps`).
-Это не означает, что соответствующие поля JSON пусты:
+`footnotes_parsed` и `word_metadata` равны `False` потому, что
+**DOCX-производных данных в этом режиме нет** (нет `styles.xml`,
+`numbering.xml`, `w:sectPr`, `word/footnotes.xml` и `docProps`).
+`cross_references` теперь `True`: индекс перекрёстных ссылок заполняет
+формат-независимый слой `parser.enrichment`. Это не означает, что
+соответствующие поля JSON пусты:
 
 | Поле JSON | `pdf_only` |
 |---|---|
@@ -278,7 +293,7 @@ services (оркестрация)
 | `sections` | **может быть непустым**: секции синтезированы по геометрии PDF (группы страниц одинакового размера, оцененные поля) |
 | `visuals` | **может быть непустым**: зарегистрированы растровые изображения, извлечённые из PDF |
 | `footnotes` | `[]` — сноски DOCX не извлекаются |
-| `cross_ref_index` | пустой индекс — перекрёстные ссылки DOCX не разбираются |
+| `cross_ref_index` | заполняется эвристически: `bibliography` (нумерованные записи), `figures`/`tables`/`Apps` (подписи), `mentions` (ссылки `[1]`, «рис. 2», «(Иванов, 2020)»); `equations` пуст |
 
 Поэтому:
 
@@ -286,7 +301,12 @@ services (оркестрация)
   данные в `sections` — оценка PDF, а не DOCX-геометрия;
 - `capabilities.visual_registry=False` читается как «реестр визуальных объектов
   DOCX не заполнен»; `visuals` — только растровые изображения PDF, без фигур,
-  диаграмм, OLE и OMML;
+  диаграмм, OLE и OMML. Флаг поднимается до `True` только там, где слой
+  обогащения связал подпись рисунка с изображением PDF (поле
+  `NumberedCaptionEntity.target_object_id`);
+- `cross_references=True` означает, что слой обогащения отработал, а не что в
+  документе гарантированно есть ссылки: при отсутствии списка литературы и
+  подписей коллекции `cross_ref_index` останутся пустыми;
 - `styles_parsed=False` и `numbering_parsed=False` означают, что каскад стилей и
   списки DOCX недоступны: проверки rule_engine, которым нужны стили/нумерация,
   должны пропускаться, даже если отдельные свойства ранов заполнены
@@ -298,8 +318,10 @@ services (оркестрация)
   заполняет только `pdf_only`; в `docx_pdf` аудит строится выравниванием
   DOCX↔PDF, поэтому интервал там пуст — это оценка PDF-слоя, а не DOCX.
 
-Сервис (`services/document_parsing.py`) явно выставляет эти флаги по матрице и
-не переопределяет их по непустоте коллекций.
+Сервис (`services/document_parsing.py`) выставляет флаги по матрице 4.2, но для
+`pdf_only` берёт `cross_references` из матрицы, а `visual_registry` — из
+результата PDF-парсера (слой обогащения): статическая матрица не может знать,
+связалась ли подпись рисунка с изображением в конкретном документе.
 
 ### 4.3. `page_count.method`
 
@@ -342,10 +364,12 @@ services (оркестрация)
 `document.schema_version` (попадает в `RuleCheckReport.parser_schema_version`).
 В `pdf_only` проверки, которым нужны стили, нумерация, секции и сноски, должны
 пропускаться по `capabilities` — флаги `styles_parsed`, `numbering_parsed`,
-`sections_parsed`, `visual_registry`, `footnotes_parsed`, `cross_references`,
-`word_metadata` там `False`. При этом `sections` и `visuals` могут быть
-непустыми (оценка PDF, см. 4.2.1): наличие элементов в этих коллекциях не
-разрешает запускать DOCX-проверки, рассчитанные на `w:sectPr` и реестр DOCX.
+`sections_parsed`, `footnotes_parsed`, `word_metadata` там `False`.
+`cross_references=True` означает лишь, что индекс перекрёстных ссылок заполнен
+эвристически, и не отменяет пропуск DOCX-проверок. При этом `sections` и
+`visuals` могут быть непустыми (оценка PDF, см. 4.2.1): наличие элементов в этих
+коллекциях не разрешает запускать DOCX-проверки, рассчитанные на `w:sectPr` и
+реестр DOCX.
 DOCX-ветка `rule_engine` не меняется.
 
 ---
@@ -376,18 +400,21 @@ DOCX-ветка `rule_engine` не меняется.
       ├─ pdf_pages_audit: PdfPageAudit по каждой странице
       ├─ интервал: медианный leading по парам строк тела одного кегля (оценка)
       ├─ document_tree: по найденным заголовкам
-      └─ page_count = PageCountInfo(total_pages=len(pages), method="pdf_exact", confidence="high")
-          └─ ParsedDocument(parse_mode="pdf_only",
-                            source=SourceInfo(mode="pdf_only", has_docx=False, has_pdf=True,
-                                              pdf_filename=..., pdf_sha256=...),
-                            meta=DocumentMeta(filename=<имя PDF>, file_sha256=<хэш PDF>,
-                                              pdf_filename=..., pagination_source="pdf_exact"),
-                            capabilities=DocumentCapabilities(
-                                styles_parsed=False, numbering_parsed=False, sections_parsed=False,
-                                exact_pagination=True, pdf_layout_coordinates=True,
-                                visual_registry=False, footnotes_parsed=False,
-                                cross_references=False, word_metadata=False,
-                                page_count_estimated=False))
+      ├─ page_count = PageCountInfo(total_pages=len(pages), method="pdf_exact", confidence="high")
+      ├─ enrichment: bibliography, captions, mentions -> cross_ref_index (оценка)
+      └─ ParsedDocument(parse_mode="pdf_only",
+                        source=SourceInfo(mode="pdf_only", has_docx=False, has_pdf=True,
+                                          pdf_filename=..., pdf_sha256=...),
+                        meta=DocumentMeta(filename=<имя PDF>, file_sha256=<хэш PDF>,
+                                          pdf_filename=..., pagination_source="pdf_exact"),
+                        capabilities=DocumentCapabilities(
+                            styles_parsed=False, numbering_parsed=False, sections_parsed=False,
+                            exact_pagination=True, pdf_layout_coordinates=True,
+                            # visual_registry=True, если подпись рисунка связалась
+                            # с изображением PDF; иначе False (см. текст ниже)
+                            visual_registry=<динамически>, footnotes_parsed=False,
+                            cross_references=True, word_metadata=False,
+                            page_count_estimated=False))
 ```
 
 `meta.filename`/`meta.file_sha256` обязательны и описывают сам PDF; `source`
@@ -395,9 +422,12 @@ DOCX-ветка `rule_engine` не меняется.
 заполняет и `meta.pdf_filename`/`meta.pdf_sha256`, но для сериализации это не
 обязательно: решающий признак — `source.has_pdf=True` (иначе сериализатор удалит
 `pdf_*`-ключи). `sections`/`visuals` в `pdf_only` могут быть непустыми, хотя
-`sections_parsed`/`visual_registry` равны `False` — это оценка PDF, а не данные
-DOCX (см. 4.2.1). `styles={}`, `footnotes=[]`, `cross_ref_index` пустой,
-`settings`/`theme` — дефолты модели.
+`sections_parsed` равен `False` — это оценка PDF, а не данные DOCX (см. 4.2.1).
+`styles={}`, `footnotes=[]`, `settings`/`theme` — дефолты модели. После сборки
+модели PDF-парсер вызывает общий слой `parser.enrichment`: `cross_ref_index`
+заполняется эвристически (`bibliography`, `figures`/`tables`/`Apps`, `mentions`),
+поэтому `cross_references=True`; `visual_registry` поднимается до `True`, только
+если подпись рисунка связалась с изображением PDF.
 
 Фактический результат на `manual_test/2.pdf`: `total_pages=69`, `method="pdf_exact"`,
 `sections=1` (страницы 1–69), `blocks=407`, `pdf_pages_audit=69`.
@@ -557,10 +587,10 @@ Word выполняет `rule_engine` делением на `PDF_SINGLE_LINE_FAC
   `PropertySource="pdf_estimate"` и `page_count.method`/`capabilities`, а не
   выдаются за точные.
 - **`sections`/`visuals` в `pdf_only` — оценка PDF.** Они могут быть непустыми,
-  хотя `sections_parsed`/`visual_registry` равны `False`: секции синтезированы
-  по группам страниц одного размера, а `visuals` содержат только растровые
-  изображения. Нельзя трактовать непустоту этих коллекций как наличие
-  DOCX-данных (см. 4.2.1).
+  хотя `sections_parsed` равен `False`, а `visual_registry` — `False`, пока
+  подпись рисунка не связалась с изображением: секции синтезированы по группам
+  страниц одного размера, а `visuals` содержат только растровые изображения.
+  Нельзя трактовать непустоту этих коллекций как наличие DOCX-данных (см. 4.2.1).
 - **Таблицы PDF ищутся по векторным линиям.** Таблица без рамок (только
   отступы/пробелы) не распознаётся; оглавление без отточия остаётся обычными
   абзацами.
@@ -568,9 +598,12 @@ Word выполняет `rule_engine` делением на `PDF_SINGLE_LINE_FAC
   должен вернуть понятную ошибку или документ с `capabilities`, где данные
   отсутствуют. Распознавание изображений не выполняется.
 - **Форматирование в `pdf_only` неполное.** Доступны размеры и гарнитуры,
-  измеренные по PDF, но нет каскада стилей, нумерации списков, сносок и
-  перекрестных ссылок DOCX. Проверки rule_engine, требующие этих данных,
-  должны пропускаться по `capabilities`.
+  измеренные по PDF, но нет каскада стилей, нумерации списков и сносок DOCX.
+  Перекрёстные ссылки восстанавливаются эвристически общим слоем
+  `parser.enrichment` (библиография, подписи, упоминания) и могут быть
+  неполными: например, ссылка без списка литературы останется без цели.
+  Проверки rule_engine, требующие DOCX-данных, должны пропускаться по
+  `capabilities`.
 - **`docx_pdf` доверяет сверке.** PDF должен быть снят с того же документа, что
   и DOCX. При низком `pdf_docx_sync_score` парсер пишет
   `anomalies.pdf_docx_mismatch_warning`, а пагинация не помечается как точная.
@@ -595,9 +628,11 @@ PDF и сервис. Точки входа — сервис (`services`), CLI в
 | Что реализовано | Основные файлы |
 |---|---|
 | автономный `pdf_only`: извлечение, вёрстка, структура, точные страницы, `pdf_pages_audit` | `parser/pdf/extractor.py`, `parser/pdf/layout.py`, `parser/pdf/structure.py`, `parser/pdf/parser.py` |
+| общий слой обогащения `ParsedDocument` для `pdf_only`: библиография, подписи рисунков/таблиц/приложений, упоминания и `cross_ref_index` | `parser/enrichment/`, `parser/pdf/parser.py` |
 | `docx_only`: DOCX-конвейер без PDF, оценка страниц (`docx_native_breaks`/`geometric_estimation`), `meta.pdf_* = None` | `parser/docx/pipeline.py` |
 | сервис `parse_document`/`parse_to_json_file`, коды ошибок, CLI | `services/document_parsing.py` |
 | общее извлечение PDF (`pdf_page_text.py`, `pdf_text_utils.py`), сквозная интеграция трёх режимов | `parser/docx/pdf_page_text.py`, `tests/test_integration_modes.py` |
+| отчёт о ссылках на источники `citations.json` поверх `ParsedDocument` (все три режима) | `citations/`, `services/references.py` |
 
 Что проверяется автоматически:
 
@@ -606,6 +641,9 @@ PDF и сервис. Точки входа — сервис (`services`), CLI в
   `capabilities.pdf_layout_coordinates`);
 - `pdf_only` без DOCX/LibreOffice: точные страницы, `pdf_estimate` у свойств,
   `sections`/`visuals` заполнены оценкой PDF при `sections_parsed=False`;
+- общий слой `parser.enrichment`: библиография, подписи, упоминания и
+  `cross_ref_index` в `pdf_only`, а также паритет семантики DOCX/PDF
+  (`tests/test_enrichment_*.py`, `tests/test_parser_parity.py`);
 - `docx_pdf` при совпадающей паре: `sync_score >= 0.80`, точные страницы и
   координаты; при расхождении — warning, `page_count` остаётся `pdf_exact` с
   пояснением, `exact_pagination=False`;
@@ -631,4 +669,20 @@ python -m pytest tests -q -m integration
 `tests/test_pdf_only_parser.py` (`pdf_only`), `tests/test_service_modes.py`
 (сервис), `tests/test_import_boundaries.py` (границы импорта),
 `tests/test_integration_modes.py` (сквозные сценарии, legacy-JSON, обратная
-совместимость).
+совместимость), `tests/test_parser_parity.py` (паритет DOCX/PDF по семантике
+перекрёстных ссылок).
+
+## 9. Производные артефакты: ссылки на источники
+
+`backend/citations/` считает отдельный отчёт `citations.json` поверх готового
+`ParsedDocument`: парсер не меняется, сканер работает по `blocks` и поэтому
+одинаково применим к `docx_only`, `pdf_only` и `docx_pdf`. Раздел литературы
+исключается из поиска по `document_tree` (`semantic_role="bibliography"`), а
+записи `cross_ref_index.bibliography` используются для сопоставления ссылок.
+В `pdf_only` записи списка литературы извлекает общий слой
+`parser.enrichment` (нумерованные абзацы раздела), поэтому ссылки получают
+`resolved_entity_ids`; если списка в документе нет, ссылки находятся и получают
+место в документе, но остаются `unresolved` — причина пишется в `not_extracted`.
+Отчёт не входит в `ParsedDocument` и не влияет на `capabilities`: это
+потребитель модели, а не её часть. Подробности — в
+`backend/citations/README.md`.

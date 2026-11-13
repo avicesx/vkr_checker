@@ -76,6 +76,20 @@ RE_BIB_URL = re.compile(r"https?://[^\s\)\]\>\"«»]+", re.IGNORECASE)
 RE_BIB_ACCESS_DATE = re.compile(r"дата\s+обращения\s*:\s*\d{1,2}\.\d{1,2}\.\d{2,4}", re.IGNORECASE)
 RE_BIB_DOT_DASH = re.compile(r"\.\s*[\—\–\-]\s+")
 
+#: Номерной маркер структурной нумерации Word: «1.», «2)», «[3]».
+RE_BIB_NUMBERED_MARKER = re.compile(r"^(?:\[\s*\d+\s*\]|\d+\s*[\.\)]?)$")
+#: Запись закончена: точка, восклицательный или вопросительный знак в конце.
+RE_BIB_TERMINAL_END = re.compile(r"[.!?…][»\"']?\s*$")
+#: Явный обрывок фразы, которым может начинаться перенос строки записи.
+RE_BIB_FRAGMENT_START = re.compile(r"^[,;:—–\-)\]»]")
+#: Библиографические приметы текста: год, «//», ISBN, URL, страницы.
+RE_BIB_SIGNAL = re.compile(
+    r"(?:19|20)\d{2}|//|ISBN|https?://|\b[СсPp]\.\s*\d|\d+\s*[сp]\."
+)
+
+#: Сколько подряд непохожих на записи блоков означают конец списка литературы.
+MAX_BIB_NON_ENTRY_RUN = 2
+
 RE_BROKEN_FIELD = re.compile(
     r"Ошибка!\s*Источник\s+ссылки\s+не\s+найден\.?|Error!\s*Reference\s+source\s+not\s+found\.?",
     re.IGNORECASE,
@@ -980,33 +994,108 @@ class StructureCrossRefParser:
             return [], set()
 
         block_map: Dict[str, BlockUnion] = {b.block_id: b for b in blocks}
-        entries: List[BibliographyEntry] = []
-        order_idx = 0
+        ordered_blocks = [
+            b for b in blocks
+            if b.block_id in bib_block_ids and isinstance(b, ParagraphBlock)
+        ]
 
-        for b_id in [b.block_id for b in blocks if b.block_id in bib_block_ids]:
-            b = block_map.get(b_id)
-            if not isinstance(b, ParagraphBlock) or b.is_empty_or_whitespace:
+        entries: List[BibliographyEntry] = []
+        # Накопитель текущей записи: номерной абзац и приклеенные к нему переносы строки.
+        current_block: Optional[ParagraphBlock] = None
+        current_prefix: Optional[str] = None
+        current_parts: List[str] = []
+        last_part_text = ""
+        # Флаг не дает тексту после списка приклеиться к последней записи.
+        last_block_was_entry_part = False
+        non_entry_run = 0
+
+        def flush_entry() -> None:
+            """Сохраняет накопленную запись в результат."""
+            nonlocal current_block, current_prefix, current_parts
+            if current_block is None:
+                return
+            entries.append(
+                self._analyze_single_bib_entry(
+                    current_block.block_id,
+                    len(entries) + 1,
+                    current_prefix,
+                    " ".join(part for part in current_parts if part).strip(),
+                )
+            )
+            current_block = None
+            current_prefix = None
+            current_parts = []
+
+        for b in ordered_blocks:
+            if b.is_empty_or_whitespace:
                 continue
             if b.heading_info and b.heading_info.is_heading:
+                # Заголовок после записей открывает новый раздел: список закончился.
+                if current_block is not None or entries:
+                    break
                 continue
 
-            full_txt = b.text_visible.strip()
-            raw_prefix: Optional[str] = None
-            body_txt = full_txt
+            entry_start = self._detect_bib_entry_start(b)
+            if entry_start is not None:
+                flush_entry()
+                current_prefix, body_txt = entry_start
+                current_block = b
+                current_parts = [body_txt]
+                last_part_text = b.text_visible.strip()
+                last_block_was_entry_part = True
+                non_entry_run = 0
+                continue
 
-            if b.list_info and b.list_info.mechanism == "openxml_numPr":
-                raw_prefix = b.list_info.rendered_marker
-                body_txt = b.list_info.body_text_without_marker
-            else:
-                m_num = RE_BIB_MANUAL_NUM.match(full_txt)
-                if m_num:
-                    raw_prefix = m_num.group("raw_pref").strip()
-                    body_txt = m_num.group("body").strip()
+            if (
+                last_block_was_entry_part
+                and current_block is not None
+                and self._looks_like_bib_continuation(last_part_text, b.text_visible.strip())
+            ):
+                # Перенос строки внутри записи приклеивается к предыдущему абзацу.
+                current_parts.append(b.text_visible.strip())
+                last_part_text = b.text_visible.strip()
+                continue
 
-            order_idx += 1
-            entries.append(self._analyze_single_bib_entry(b.block_id, order_idx, raw_prefix, body_txt))
+            # Блок не похож на запись: несколько таких подряд означают конец списка.
+            last_block_was_entry_part = False
+            non_entry_run += 1
+            if non_entry_run >= MAX_BIB_NON_ENTRY_RUN:
+                break
 
+        flush_entry()
         return entries, bib_block_ids
+
+    @staticmethod
+    def _detect_bib_entry_start(
+        block: ParagraphBlock,
+    ) -> Optional[Tuple[Optional[str], str]]:
+        """Возвращает номерной префикс и текст, если абзац начинает запись списка."""
+        full_txt = block.text_visible.strip()
+        list_info = block.list_info
+        if list_info is not None and list_info.mechanism == "openxml_numPr":
+            marker = (list_info.rendered_marker or "").strip()
+            body_txt = (list_info.body_text_without_marker or "").strip()
+            # Маркер-буллит или буквенная нумерация записью литературы не считаются.
+            if body_txt and RE_BIB_NUMBERED_MARKER.match(marker):
+                return marker, body_txt
+
+        m_num = RE_BIB_MANUAL_NUM.match(full_txt)
+        if m_num:
+            return m_num.group("raw_pref").strip(), m_num.group("body").strip()
+        return None
+
+    @staticmethod
+    def _looks_like_bib_continuation(prev_text: str, cur_text: str) -> bool:
+        """True, если абзац продолжает предыдущую запись (перенос строки)."""
+        if not prev_text or not cur_text:
+            return False
+        if RE_BIB_TERMINAL_END.search(prev_text):
+            # Законченная фраза продолжается только явным обрывком.
+            return bool(RE_BIB_FRAGMENT_START.match(cur_text))
+        # Оборванная строка продолжается, если обрывок похож на библиографию.
+        return bool(
+            RE_BIB_FRAGMENT_START.match(cur_text) or RE_BIB_SIGNAL.search(cur_text)
+        )
 
     def _analyze_single_bib_entry(
         self,

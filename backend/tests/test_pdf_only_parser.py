@@ -328,14 +328,18 @@ def test_parse_mode_and_source(document: ParsedDocument) -> None:
 
 
 def test_capabilities_matrix_for_pdf_only(document: ParsedDocument) -> None:
-    """Матрица возможностей: точные страницы есть, структуры DOCX нет."""
+    """Матрица возможностей: точные страницы есть, структуры DOCX нет.
+
+    ``cross_references`` теперь ``True``: индекс перекрестных ссылок заполняет
+    общий слой обогащения (``parser.enrichment``) эвристически по тексту PDF.
+    """
     capabilities = document.capabilities
     assert capabilities.styles_parsed is False
     assert capabilities.numbering_parsed is False
     assert capabilities.sections_parsed is False
     assert capabilities.visual_registry is False
     assert capabilities.footnotes_parsed is False
-    assert capabilities.cross_references is False
+    assert capabilities.cross_references is True
     assert capabilities.word_metadata is False
     assert capabilities.exact_pagination is True
     assert capabilities.pdf_layout_coordinates is True
