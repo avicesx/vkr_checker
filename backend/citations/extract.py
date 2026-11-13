@@ -6,6 +6,12 @@ DOCX список литературы уже разобран парсером 
 и ссылки сопоставляются с записями; в PDF записи списка не извлекаются, поэтому
 ссылки находятся и получают место в документе, но остаются ``unresolved``.
 
+Сканируются абзацы основного текста и абзацы ячеек таблиц
+(``container_type="table_cell"``): у последних в отчёте стоит ``block_id``
+самого абзаца ячейки, поэтому место ссылки остаётся однозначным. Абзацы ячеек
+лежат не в ``ParsedDocument.blocks``, а внутри ``TableBlock``, поэтому таблицы
+обходятся рекурсивно, включая вложенные.
+
 Раздел литературы исключается из поиска по ``document_tree``: у обоих
 конвейеров он размечен ``semantic_role="bibliography"``, поэтому записи списка
 не попадают в отчёт как «ссылки в тексте».
@@ -20,18 +26,23 @@ from parser.core.schema import (
     DocumentTreeNode,
     ParagraphBlock,
     ParsedDocument,
+    TableBlock,
 )
 
 from .patterns import (
     RE_AUTHOR_YEAR_CITATION,
     RE_BRACKET_CITATION,
-    parse_author_year_citation,
+    parse_author_year_citations,
     parse_bracket_citation,
 )
 from .schema import Citation, CitationReport, CitationSource, CitationSummary
 
 #: Радиус окна контекста вокруг ссылки, символов.
 CONTEXT_RADIUS = 60
+
+#: Контейнеры абзацев, которые участвуют в поиске ссылок. Колонтитулы, сноски,
+#: концевые сноски и надписи не сканируются: это не текст работы.
+SCANNED_CONTAINERS = ("body", "table_cell")
 
 #: Причины, по которым часть ссылок могла не попасть в отчёт.
 NOTE_NO_BIBLIOGRAPHY = (
@@ -45,7 +56,7 @@ NOTE_PDF_BIBLIOGRAPHY = (
 
 def extract_citations(document: ParsedDocument) -> CitationReport:
     """Собирает отчёт о ссылках на источники для разобранного документа."""
-    paragraphs = _body_paragraphs(document.blocks)
+    paragraphs = _scanned_paragraphs(document.blocks)
     skipped = _bibliography_block_ids(paragraphs, document.document_tree)
     section_titles = _section_titles(paragraphs, document.document_tree)
     bibliography = list(document.cross_ref_index.bibliography)
@@ -112,7 +123,12 @@ class _FoundMatch:
 
 
 def _iter_matches(text: str) -> Iterator[_FoundMatch]:
-    """Перебирает вхождения всех форм ссылок в порядке следования по тексту."""
+    """Перебирает вхождения всех форм ссылок в порядке следования по тексту.
+
+    Скобочная группа с несколькими источниками — ``(Иванов, 2020; Петров,
+    2021)`` — даёт отдельное вхождение на каждый источник: у них разные авторы,
+    годы и смещения, поэтому в отчёте это самостоятельные ссылки.
+    """
     matches: List[_FoundMatch] = []
 
     for match in RE_BRACKET_CITATION.finditer(text):
@@ -131,21 +147,29 @@ def _iter_matches(text: str) -> Iterator[_FoundMatch]:
         )
 
     for match in RE_AUTHOR_YEAR_CITATION.finditer(text):
-        parsed = parse_author_year_citation(match.group(0))
-        if parsed is None:
+        entries = parse_author_year_citations(match.group(0))
+        if not entries:
             continue
-        matches.append(
-            _FoundMatch(
-                start=match.start(),
-                end=match.end(),
-                raw=parsed.raw,
-                style=parsed.style,
-                targets=parsed.targets,
-                page_in_source=parsed.page_in_source,
-                authors=parsed.authors,
-                year=parsed.year,
+        single_entry = len(entries) == 1
+        for entry in entries:
+            if single_entry:
+                start, end, raw = match.start(), match.end(), entry.raw
+            else:
+                start = match.start() + (entry.start or 0)
+                end = match.start() + (entry.end or 0)
+                raw = text[start:end]
+            matches.append(
+                _FoundMatch(
+                    start=start,
+                    end=end,
+                    raw=raw,
+                    style=entry.style,
+                    targets=entry.targets,
+                    page_in_source=entry.page_in_source,
+                    authors=entry.authors,
+                    year=entry.year,
+                )
             )
-        )
 
     matches.sort(key=lambda item: item.start)
     last_end = -1
@@ -277,13 +301,29 @@ def _build_report(
 # ---------------------------------------------------------------------
 
 
-def _body_paragraphs(blocks: Sequence[object]) -> List[ParagraphBlock]:
-    """Оставляет абзацы основного текста: колонтитулы, сноски и таблицы не сканируем."""
-    return [
-        block
-        for block in blocks
-        if isinstance(block, ParagraphBlock) and block.container_type == "body"
-    ]
+def _scanned_paragraphs(blocks: Sequence[object]) -> List[ParagraphBlock]:
+    """Собирает абзацы, в которых ищутся ссылки, в порядке следования по документу.
+
+    Основной текст и ячейки таблиц сканируются; колонтитулы, сноски, концевые
+    сноски и надписи — нет. Абзацы ячеек вложены в ``TableBlock``, поэтому
+    таблицы обходятся рекурсивно вместе с вложенными таблицами.
+    """
+    paragraphs: List[ParagraphBlock] = []
+    _collect_paragraphs(blocks, paragraphs)
+    return paragraphs
+
+
+def _collect_paragraphs(blocks: Sequence[object], target: List[ParagraphBlock]) -> None:
+    """Рекурсивно добавляет подходящие абзацы из блоков и ячеек таблиц."""
+    for block in blocks:
+        if isinstance(block, ParagraphBlock):
+            if block.container_type in SCANNED_CONTAINERS:
+                target.append(block)
+            continue
+        if isinstance(block, TableBlock):
+            for row in block.rows:
+                for cell in row.cells:
+                    _collect_paragraphs(cell.blocks, target)
 
 
 def _flatten_tree(nodes: Sequence[DocumentTreeNode]) -> Iterator[DocumentTreeNode]:

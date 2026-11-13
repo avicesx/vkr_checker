@@ -6,7 +6,9 @@
 * ``[3, с. 15]`` — та же ссылка с указанием страницы источника;
 * ``[1–4]`` (и ``[3, 5-7]``) — диапазон номеров, раскрывается в отдельные цели;
 * ``(Иванов, 2020)`` — авторско-годовая ссылка, в том числе «Иванов и др.»,
-  «Smith et al.» и вариант со страницей «(Иванов, 2020, с. 15)».
+  «Smith et al.» и вариант со страницей «(Иванов, 2020, с. 15)»;
+* ``(Иванов, 2020; Петров, 2021)`` — несколько источников в одних скобках:
+  разбирается в отдельные записи, по одной на источник.
 
 Модуль не знает о ``ParsedDocument`` и не зависит от схемы отчёта: на входе
 строка абзаца, на выходе разобранные цели. Это позволяет переиспользовать его
@@ -46,12 +48,21 @@ _ENTRY = (
 )
 
 #: Авторско-годовая ссылка в круглых скобках. Допускает вводное «см.» и
-#: продолжение «; …» с другими источниками: в отчёт попадает первая запись,
-#: остальные разбираются следующим проходом, если встретятся отдельно.
+#: продолжение «; …» с другими источниками: разбор отдельных записей внутри
+#: скобок делает :func:`parse_author_year_citations`.
 RE_AUTHOR_YEAR_CITATION = re.compile(
     r"\(\s*(?:(?:см|see)\.?\s+)?" + _ENTRY + r"(?:\s*;[\s\S]*?)?\s*\)",
     re.UNICODE,
 )
+
+#: Одна запись внутри скобок — та же грамматика, но без внешних скобок.
+_RE_ENTRY = re.compile(_ENTRY, re.UNICODE)
+
+#: Содержимое круглых скобок: всё, что стоит между ними, с необязательным «см.».
+_RE_GROUP_INNER = re.compile(r"\(\s*(?:(?:см|see)\.?\s+)?(?P<inner>[\s\S]*?)\s*\)", re.UNICODE)
+
+#: Разделители между записями одного списка источников в скобках.
+_ENTRY_SEPARATORS = " \t\r\n,;"
 
 #: Часть ссылки «с. 15» / «стр. 15-17» — это страница источника, а не его номер.
 _PAGE_PART = re.compile(r"^(?:[сpстр]+\.?)\s*(\d+)(?:\s*[—–-]\s*(\d+))?$", re.IGNORECASE)
@@ -75,13 +86,21 @@ class BracketCitation:
 
 @dataclass(frozen=True)
 class AuthorYearCitation:
-    """Разобранная авторско-годовая ссылка."""
+    """Разобранная запись авторско-годовой ссылки одного источника.
+
+    ``raw`` — исходная скобочная группа целиком (в неё входят и остальные
+    источники, если они были в тех же скобках), а ``start``/``end`` — границы
+    именно этой записи внутри ``raw``. Так вхождение в отчёте получает точные
+    смещения, даже когда из одной скобки разобрано несколько источников.
+    """
 
     raw: str
     authors: List[str] = field(default_factory=list)
     year: Optional[int] = None
     page_in_source: Optional[str] = None
     style: str = "author_year"
+    start: Optional[int] = None
+    end: Optional[int] = None
 
     @property
     def targets(self) -> List[str]:
@@ -150,23 +169,63 @@ def parse_bracket_citation(raw: str) -> Optional[BracketCitation]:
     return BracketCitation(raw=raw, targets=targets, page_in_source=page, style=style)
 
 
-def parse_author_year_citation(raw: str) -> Optional[AuthorYearCitation]:
-    """Разбирает авторско-годовую ссылку на фамилии, год и страницу."""
-    match = RE_AUTHOR_YEAR_CITATION.fullmatch(raw.strip())
-    if match is None:
-        return None
-
+def _split_authors(names: str) -> List[str]:
+    """Разбивает перечисление фамилий, убирая хвост «и др.» / «et al.»."""
     authors: List[str] = []
-    for part in re.split(r"[,;]", match.group("names")):
+    for part in re.split(r"[,;]", names):
         surname = _AUTHOR_SUFFIX.sub("", part.strip()).strip()
         if surname:
             authors.append(surname)
-    if not authors:
-        return None
+    return authors
 
-    return AuthorYearCitation(
-        raw=raw,
-        authors=authors,
-        year=int(match.group("year")),
-        page_in_source=match.group("page"),
-    )
+
+def parse_author_year_citations(raw: str) -> List[AuthorYearCitation]:
+    """Разбирает скобочную группу в список записей — по одной на источник.
+
+    ``(Иванов, 2020; Петров, 2021)`` даёт две записи с собственными фамилиями,
+    годами, страницами и смещениями внутри ``raw``. Нераспознанные части
+    (например, «; см. приложение») отбрасываются: разбор останавливается на
+    первой такой части, уже найденные записи сохраняются. Пустой список
+    означает, что авторско-годовой ссылки в группе нет.
+    """
+    text = raw.strip()
+    if not text:
+        return []
+    shift = raw.find(text)
+    group = _RE_GROUP_INNER.fullmatch(text)
+    if group is None:
+        return []
+
+    inner = group.group("inner")
+    inner_start = shift + group.start("inner")
+
+    entries: List[AuthorYearCitation] = []
+    consumed = 0
+    for match in _RE_ENTRY.finditer(inner):
+        if inner[consumed : match.start()].strip(_ENTRY_SEPARATORS):
+            break
+        authors = _split_authors(match.group("names"))
+        if not authors:
+            break
+        entries.append(
+            AuthorYearCitation(
+                raw=raw,
+                authors=authors,
+                year=int(match.group("year")),
+                page_in_source=match.group("page"),
+                start=inner_start + match.start(),
+                end=inner_start + match.end(),
+            )
+        )
+        consumed = match.end()
+    return entries
+
+
+def parse_author_year_citation(raw: str) -> Optional[AuthorYearCitation]:
+    """Разбирает первую запись авторско-годовой ссылки на фамилии, год и страницу.
+
+    Если в скобках несколько источников, возвращается только первый; полный
+    список записей даёт :func:`parse_author_year_citations`.
+    """
+    entries = parse_author_year_citations(raw)
+    return entries[0] if entries else None

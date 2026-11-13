@@ -16,7 +16,11 @@ from typing import Iterable, List, Optional, Sequence
 
 from citations import CITATION_SCHEMA_VERSION, CitationReport, extract_citations
 from citations.extract import NOTE_NO_BIBLIOGRAPHY, NOTE_PDF_BIBLIOGRAPHY
-from citations.patterns import parse_author_year_citation, parse_bracket_citation
+from citations.patterns import (
+    parse_author_year_citation,
+    parse_author_year_citations,
+    parse_bracket_citation,
+)
 from parser.core.schema import (
     BibliographyEntry,
     CrossReferenceIndex,
@@ -26,6 +30,9 @@ from parser.core.schema import (
     PageCountInfo,
     ParagraphBlock,
     ParsedDocument,
+    TableBlock,
+    TableCell,
+    TableRow,
     ThemeData,
 )
 from services.references import extract_citations_from_json, extract_citations_to_json_file
@@ -38,11 +45,14 @@ EN_DASH = "–"
 # ---------------------------------------------------------------------
 
 
-def _paragraph(block_id: str, text: str, page: int = 1) -> ParagraphBlock:
-    """Создает абзац основного текста с заданным местом на странице."""
+def _paragraph(
+    block_id: str, text: str, page: int = 1, *, container_type: str = "body"
+) -> ParagraphBlock:
+    """Создает абзац с заданным местом на странице и типом контейнера."""
     return ParagraphBlock(
         block_id=block_id,
         section_idx=0,
+        container_type=container_type,  # type: ignore[arg-type]
         page_start_est=page,
         page_end_est=page,
         text_raw=text,
@@ -84,16 +94,50 @@ def _tree_node(
     )
 
 
+def _table_block(
+    block_id: str,
+    rows: Sequence[Sequence[ParagraphBlock]],
+    *,
+    page: int = 1,
+) -> TableBlock:
+    """Создает таблицу, в каждой ячейке которой лежит ровно один абзац."""
+    table_rows = [
+        TableRow(
+            row_idx=row_idx,
+            page_start_est=page,
+            page_end_est=page,
+            cells=[
+                TableCell(
+                    cell_id=f"{block_id}_r{row_idx}c{col_idx}",
+                    row_idx=row_idx,
+                    col_idx=col_idx,
+                    text_combined=paragraph.text_visible,
+                    blocks=[paragraph],
+                )
+                for col_idx, paragraph in enumerate(row)
+            ],
+        )
+        for row_idx, row in enumerate(rows)
+    ]
+    return TableBlock(
+        block_id=block_id,
+        section_idx=0,
+        page_start_est=page,
+        page_end_est=page,
+        rows=table_rows,
+    )
+
+
 def _document(
-    paragraphs: Iterable[ParagraphBlock],
+    blocks: Iterable[object],
     *,
     tree: Sequence[DocumentTreeNode] = (),
     bibliography: Sequence[BibliographyEntry] = (),
     parse_mode: str = "docx_only",
 ) -> ParsedDocument:
     """Собирает минимальный ParsedDocument для сканера ссылок."""
-    blocks: List[ParagraphBlock] = list(paragraphs)
-    pages = max((block.page_end_est for block in blocks), default=1)
+    block_list = list(blocks)
+    pages = max((getattr(block, "page_end_est", 1) for block in block_list), default=1)
     return ParsedDocument(
         parse_mode=parse_mode,  # type: ignore[arg-type]
         meta=DocumentMeta(filename="vkr.docx", file_sha256="0" * 64),
@@ -102,7 +146,7 @@ def _document(
         page_count=PageCountInfo(
             total_pages=pages, method="docx_native_breaks", confidence="high"
         ),
-        blocks=blocks,
+        blocks=block_list,  # type: ignore[arg-type]
         document_tree=list(tree),
         cross_ref_index=CrossReferenceIndex(bibliography=list(bibliography)),
     )
@@ -168,6 +212,29 @@ def test_author_year_with_etal_and_page() -> None:
     assert latin is not None
     assert latin.authors == ["Smith"]
     assert latin.year == 2020
+
+
+def test_multi_source_group_is_split_into_entries() -> None:
+    """«(Иванов, 2020; Петров, 2021)» — две записи с собственными смещениями."""
+    raw = "(Иванов, 2020; Петров, 2021)"
+    entries = parse_author_year_citations(raw)
+
+    assert [entry.targets for entry in entries] == [["Иванов, 2020"], ["Петров, 2021"]]
+    assert [entry.year for entry in entries] == [2020, 2021]
+    assert [raw[entry.start : entry.end] for entry in entries] == [
+        "Иванов, 2020",
+        "Петров, 2021",
+    ]
+    # одиночный разбор остается совместимым: возвращается первая запись
+    first = parse_author_year_citation(raw)
+    assert first is not None
+    assert first.authors == ["Иванов"]
+
+
+def test_multi_source_group_keeps_page_of_each_entry() -> None:
+    """Страница источника относится к своей записи, а не ко всей скобке."""
+    entries = parse_author_year_citations("(Иванов, 2020, с. 15; Петров, 2021, с. 20)")
+    assert [entry.page_in_source for entry in entries] == ["15", "20"]
 
 
 # ---------------------------------------------------------------------
@@ -237,6 +304,81 @@ def test_long_context_is_trimmed_with_ellipsis() -> None:
     assert len(citation.context) < len(text)
     assert citation.context.startswith("…")
     assert citation.context.endswith("…")
+
+
+def test_multi_source_citation_produces_two_citations() -> None:
+    """В отчёте группа из двух источников — две ссылки со своими целями."""
+    text = "Сравнение дано в (Иванов, 2020; Петров, 2021)."
+    citations = _citations_of(text)
+
+    assert [c.style for c in citations] == ["author_year", "author_year"]
+    assert [c.targets for c in citations] == [["Иванов, 2020"], ["Петров, 2021"]]
+    assert [c.authors for c in citations] == [["Иванов"], ["Петров"]]
+    assert [c.year for c in citations] == [2020, 2021]
+    assert [c.block_id for c in citations] == ["p_0001", "p_0001"]
+    for citation in citations:
+        assert text[citation.start_char : citation.end_char] == citation.raw
+    assert citations[0].end_char <= citations[1].start_char
+
+
+def test_multi_source_citations_resolve_independently() -> None:
+    """Каждая запись сопоставляется со своей записью списка литературы."""
+    bibliography = [
+        _bib_entry(1, "Иванов И.И. Методы анализа. — М., 2020."),
+        _bib_entry(2, "Петров П.П. Другие методы. — СПб., 2021."),
+    ]
+    report = extract_citations(
+        _document(
+            [_paragraph("p_0001", "См. (Иванов, 2020; Петров, 2021).")],
+            bibliography=bibliography,
+        )
+    )
+
+    assert [c.resolved_bib_ids for c in report.citations] == [["bib_001"], ["bib_002"]]
+    assert report.summary.total == 2
+    assert report.summary.resolved == 2
+    assert report.summary.unique_sources == 2
+
+
+def test_table_cell_citations_are_scanned() -> None:
+    """Ссылки в ячейках таблиц попадают в отчёт со block_id абзаца ячейки."""
+    table = _table_block(
+        "t_0001",
+        [
+            [_paragraph("p_0002", "Показатель [4]", page=5, container_type="table_cell")],
+            [_paragraph("p_0003", "Метод (Иванов, 2020)", page=5, container_type="table_cell")],
+        ],
+        page=5,
+    )
+    document = _document(
+        [
+            _paragraph("p_0001", "Основной текст [1].", page=4),
+            table,
+            _paragraph("p_0004", "Продолжение [2].", page=5),
+        ],
+        bibliography=[_bib_entry(4, "Сидоров С.С. Работа. — М., 2021.")],
+    )
+    citations = extract_citations(document).citations
+
+    assert [c.block_id for c in citations] == ["p_0001", "p_0002", "p_0003", "p_0004"]
+    assert citations[1].raw == "[4]"
+    assert citations[1].page_est == 5
+    assert citations[1].resolved_bib_ids == ["bib_004"]
+    assert citations[2].style == "author_year"
+
+
+def test_headers_and_textboxes_are_still_skipped() -> None:
+    """Колонтитулы и надписи не сканируются: в отчёт идут только body и table_cell."""
+    document = _document(
+        [
+            _paragraph("p_0001", "Колонтитул [9]", container_type="header"),
+            _paragraph("p_0002", "Надпись [8]", container_type="textbox"),
+            _paragraph("p_0003", "Текст [1]."),
+        ]
+    )
+    citations = extract_citations(document).citations
+
+    assert [c.block_id for c in citations] == ["p_0003"]
 
 
 # ---------------------------------------------------------------------
