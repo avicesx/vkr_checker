@@ -1,18 +1,18 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "VKR Norm Control API",
-    "description": "Upload a thesis and its formatting guide to create a check. This version stores uploads and exposes the initial uploaded status.",
+    "title": "API нормоконтроля ВКР",
+    "description": "Загрузка ВКР и методички для создания проверки. Текущая версия сохраняет файлы и возвращает начальный статус uploaded.",
     "version": "1.0.0"
   },
   "paths": {
     "/api/v1/checks": {
       "post": {
         "tags": [
-          "checks"
+          "Проверки"
         ],
-        "summary": "Upload thesis and formatting guide",
-        "description": "Validate and save uploaded files, then return the new check ID.",
+        "summary": "Загрузить ВКР и методичку",
+        "description": "проверяет и сохраняет файлы, затем возвращает ID новой проверки",
         "operationId": "create_check_api_v1_checks_post",
         "requestBody": {
           "content": {
@@ -36,7 +36,7 @@
             }
           },
           "400": {
-            "description": "Empty file",
+            "description": "Пустой файл",
             "content": {
               "application/json": {
                 "schema": {
@@ -46,7 +46,7 @@
             }
           },
           "413": {
-            "description": "File exceeds 20 MiB",
+            "description": "Размер файла превышает 20 МиБ",
             "content": {
               "application/json": {
                 "schema": {
@@ -56,7 +56,7 @@
             }
           },
           "415": {
-            "description": "Unsupported or invalid file",
+            "description": "Неподдерживаемый или некорректный файл",
             "content": {
               "application/json": {
                 "schema": {
@@ -81,10 +81,10 @@
     "/api/v1/checks/{check_id}": {
       "get": {
         "tags": [
-          "checks"
+          "Проверки"
         ],
-        "summary": "Get check status",
-        "description": "Return the current persisted status for a check ID.",
+        "summary": "Получить статус проверки",
+        "description": "возвращает сохранённый статус проверки по её ID",
         "operationId": "get_check_status_api_v1_checks__check_id__get",
         "parameters": [
           {
@@ -110,7 +110,7 @@
             }
           },
           "404": {
-            "description": "Check not found",
+            "description": "Проверка не найдена",
             "content": {
               "application/json": {
                 "schema": {
@@ -141,13 +141,13 @@
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "Thesis",
-            "description": "Thesis document in DOCX format; maximum 20 MiB"
+            "description": "ВКР в формате DOCX; не более 20 МиБ"
           },
           "guidelines": {
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "Guidelines",
-            "description": "Formatting guide in DOCX or PDF format; maximum 20 MiB"
+            "description": "Методичка в формате DOCX или PDF; не более 20 МиБ"
           }
         },
         "type": "object",
@@ -163,17 +163,17 @@
             "type": "string",
             "format": "uuid",
             "title": "Id",
-            "description": "Unique identifier of the check"
+            "description": "Уникальный идентификатор проверки"
           },
           "status": {
             "$ref": "#/components/schemas/CheckStatus",
-            "description": "Current lifecycle state. Uploads start as uploaded; queued, processing, completed, and failed are reserved for async processing."
+            "description": "Текущее состояние. После загрузки задаётся uploaded; значения queued, processing, completed и failed предназначены для фоновой обработки."
           },
           "created_at": {
             "type": "string",
             "format": "date-time",
             "title": "Created At",
-            "description": "UTC time when the check was created"
+            "description": "Время создания проверки в UTC"
           }
         },
         "type": "object",
@@ -183,7 +183,7 @@
           "created_at"
         ],
         "title": "CheckResponse",
-        "description": "Public representation of a check and its current status.",
+        "description": "данные проверки и её текущий статус",
         "examples": [
           {
             "created_at": "2026-11-06T07:00:00Z",
@@ -202,14 +202,14 @@
           "failed"
         ],
         "title": "CheckStatus",
-        "description": "Lifecycle states exposed by the check status API."
+        "description": "состояния проверки, доступные через API статуса"
       },
       "ErrorResponse": {
         "properties": {
           "detail": {
             "type": "string",
             "title": "Detail",
-            "description": "Human-readable explanation of the error"
+            "description": "Текстовое описание ошибки"
           }
         },
         "type": "object",
@@ -217,7 +217,7 @@
           "detail"
         ],
         "title": "ErrorResponse",
-        "description": "Error response returned by API endpoints."
+        "description": "описание ошибки, возвращаемой эндпоинтом"
       },
       "HTTPValidationError": {
         "properties": {

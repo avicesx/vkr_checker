@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CheckStatus(str, Enum):
-    """Lifecycle states exposed by the check status API."""
+    """состояния проверки, доступные через API статуса"""
 
     UPLOADED = "uploaded"
     QUEUED = "queued"
@@ -16,7 +16,7 @@ class CheckStatus(str, Enum):
 
 
 class CheckResponse(BaseModel):
-    """Public representation of a check and its current status."""
+    """данные проверки и её текущий статус"""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -30,17 +30,17 @@ class CheckResponse(BaseModel):
         }
     )
 
-    id: UUID = Field(description="Unique identifier of the check")
+    id: UUID = Field(description="Уникальный идентификатор проверки")
     status: CheckStatus = Field(
         description=(
-            "Current lifecycle state. Uploads start as uploaded; queued, "
-            "processing, completed, and failed are reserved for async processing."
+            "Текущее состояние. После загрузки задаётся uploaded; значения queued, "
+            "processing, completed и failed предназначены для фоновой обработки."
         )
     )
-    created_at: datetime = Field(description="UTC time when the check was created")
+    created_at: datetime = Field(description="Время создания проверки в UTC")
 
 
 class ErrorResponse(BaseModel):
-    """Error response returned by API endpoints."""
+    """описание ошибки, возвращаемой эндпоинтом"""
 
-    detail: str = Field(description="Human-readable explanation of the error")
+    detail: str = Field(description="Текстовое описание ошибки")

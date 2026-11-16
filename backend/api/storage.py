@@ -12,16 +12,16 @@ from .models import CheckResponse, CheckStatus
 
 
 class CheckStore:
-    """Persist uploaded files and check status in a local directory."""
+    """сохраняет загруженные файлы и статус проверки в локальном каталоге"""
 
     def __init__(self, storage_dir: Path | str) -> None:
-        """Set the root directory for database and uploaded files."""
+        """задаёт корневой каталог базы данных и загруженных файлов"""
         self.storage_dir = Path(storage_dir)
         self.files_dir = self.storage_dir / "files"
         self.database_path = self.storage_dir / "checks.sqlite3"
 
     def initialize(self) -> None:
-        """Create storage directories and initialize the checks database."""
+        """создаёт каталоги хранилища и инициализирует базу проверок"""
         self.storage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.files_dir.mkdir(mode=0o700, exist_ok=True)
         os.chmod(self.storage_dir, 0o700)
@@ -49,7 +49,7 @@ class CheckStore:
         guidelines_filename: str,
         guidelines_content: bytes,
     ) -> CheckResponse:
-        """Atomically store both files and create a check record."""
+        """сохраняет оба файла и создаёт запись проверки"""
         check_id = str(uuid4())
         created_at = datetime.now(timezone.utc)
         temporary_dir = Path(tempfile.mkdtemp(prefix=".upload-", dir=self.files_dir))
@@ -92,7 +92,7 @@ class CheckStore:
         )
 
     def get_check(self, check_id: str) -> CheckResponse | None:
-        """Return a persisted check, or None when its ID is unknown."""
+        """возвращает сохранённую проверку или None, если такой ID не найден"""
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT id, status, created_at FROM checks WHERE id = ?",
@@ -109,7 +109,7 @@ class CheckStore:
         )
 
     def _connect(self) -> sqlite3.Connection:
-        """Open a row-addressable SQLite connection."""
+        """открывает соединение SQLite с доступом к строкам по именам полей"""
         connection = sqlite3.connect(self.database_path, timeout=10)
         connection.row_factory = sqlite3.Row
         return connection
