@@ -117,7 +117,7 @@ def create_app(
         title="API нормоконтроля ВКР",
         description=(
             "Загрузка ВКР и методички для создания проверки. "
-            "Текущая версия сохраняет файлы и возвращает начальный статус uploaded."
+            "Записи хранятся в PostgreSQL, файлы — в подключённом каталоге."
         ),
         version="1.0.0",
         lifespan=lifespan,
@@ -136,6 +136,16 @@ def create_app(
         )
 
     application.include_router(admin_router, prefix="/api/v1/admin")
+
+    @application.get(
+        "/health",
+        tags=["Служебное"],
+        summary="Проверить доступность API и базы данных",
+    )
+    async def health_check() -> dict[str, str]:
+        """Проверяет доступность API и соединения с базой данных"""
+        await run_in_threadpool(store.check_database_connection)
+        return {"status": "ok"}
 
     @application.post(
         "/api/v1/checks",

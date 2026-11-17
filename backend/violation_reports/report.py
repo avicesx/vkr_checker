@@ -138,42 +138,36 @@ _CATEGORY_TITLES = {
     ReportCategory.PAGE_LAYOUT: "Разметка страниц",
 }
 
-_PDF_RULE_DETAILS = {
-    "body_font_family": (
+_RULE_DETAILS = {
+    "font_body_text": (
         ReportCategory.FORMATTING,
         ReportSeverity.MEDIUM,
-        "Преобладающий шрифт отличается от Times New Roman.",
-        "Проверьте гарнитуру основного текста по методическим требованиям.",
+        "Форматирование шрифта основного текста не соответствует требованию.",
+        "Проверьте гарнитуру и размер шрифта основного текста по методичке.",
     ),
-    "body_font_size": (
+    "line_spacing_body": (
         ReportCategory.FORMATTING,
         ReportSeverity.MEDIUM,
-        "Доминирующий размер шрифта отличается от требуемого.",
-        "Проверьте размер шрифта основного текста в исходном документе.",
+        "Межстрочный интервал не соответствует требованию.",
+        "Проверьте межстрочный интервал основного текста по методичке.",
     ),
-    "line_spacing": (
-        ReportCategory.FORMATTING,
-        ReportSeverity.MEDIUM,
-        "Оценочный межстрочный интервал не соответствует требованию.",
-        "Проверьте межстрочный интервал в исходном документе.",
-    ),
-    "first_line_indent": (
+    "indent_first_line": (
         ReportCategory.FORMATTING,
         ReportSeverity.LOW,
-        "Оценка абзацного отступа не соответствует требованию.",
+        "Абзацный отступ не соответствует требованию.",
         "Проверьте отступ первой строки абзаца в исходном документе.",
     ),
-    "page_text_area_position": (
+    "page_margins": (
         ReportCategory.PAGE_LAYOUT,
         ReportSeverity.MEDIUM,
-        "Положение текстовой области отличается от заданного профиля.",
-        "Проверьте поля и размещение основного текста по методичке.",
+        "Поля страницы не соответствуют требованию.",
+        "Проверьте размеры полей страницы по методичке.",
     ),
-    "page_size_a4": (
+    "page_format": (
         ReportCategory.PAGE_LAYOUT,
         ReportSeverity.MEDIUM,
-        "Размер страницы отличается от A4.",
-        "Установите формат страницы A4, если он требуется выбранной методичкой.",
+        "Формат страницы не соответствует требованию.",
+        "Проверьте формат страницы по методичке.",
     ),
     "page_number_position": (
         ReportCategory.PAGE_LAYOUT,
@@ -204,7 +198,7 @@ def build_violation_report(
         block_id: Optional[str] = None,
         page: Optional[int] = None,
         excerpt: Optional[str] = None,
-        source: str = "docx_parser",
+        source: str = "parser",
     ) -> None:
         violations.append(
             Violation(
@@ -349,13 +343,13 @@ def build_violation_report(
             ReportSeverity.HIGH,
             anomalies.pdf_docx_mismatch_warning,
             "Убедитесь, что PDF и DOCX получены из одной и той же версии документа.",
-            source="docx_parser",
+            source="parser",
         )
 
     for finding in rule_assessments:
         if finding.status != "fail":
             continue
-        details = _PDF_RULE_DETAILS.get(finding.rule_id)
+        details = _RULE_DETAILS.get(finding.rule_id)
         if details is None:
             category, severity = ReportCategory.FORMATTING, ReportSeverity.MEDIUM
             description = f"Не выполнено требование оформления: {finding.rule_id}."

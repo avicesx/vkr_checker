@@ -1,17 +1,16 @@
 # Отчёты о нарушениях
 
 Функция `build_violation_report()` преобразует аномалии
-`ParsedDocxDocument.anomalies` и результаты неуспешных проверок
-`PdfRuleFinding` в единый сгруппированный отчёт. Успешные и неоценённые
-PDF-правила не включаются. Неизвестные правила со статусом `fail` включаются с
-общей категорией оформления и рекомендацией. Для каждого нарушения указываются
-идентификатор, категория, критичность, доступное место, описание, рекомендация
-и источник.
+`ParsedDocxDocument.anomalies` и неуспешные оценки `RuleAssessment` из
+`rule_engine` в единый сгруппированный отчёт. Успешные и неоценённые правила не
+включаются. Неизвестные правила со статусом `fail` включаются с общей категорией
+оформления и рекомендацией. Для каждого нарушения указываются идентификатор,
+категория, критичность, доступное место, описание, рекомендация и источник.
 
 ```python
 from violation_reports import build_violation_report
 
-report = build_violation_report(parsed_docx, pdf_report.findings)
+report = build_violation_report(parsed_docx, rule_report.assessments)
 json_for_result_page = report.model_dump(mode="json")
 markdown_for_download = report.to_markdown()
 ```

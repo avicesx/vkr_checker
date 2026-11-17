@@ -187,3 +187,32 @@ def test_openapi_contract_is_checked_in_and_matches_application() -> None:
     application_contract = create_app().openapi()
 
     assert contract == application_contract
+
+
+def test_health_endpoint_checks_the_database(tmp_path: Path) -> None:
+    """проверяет ответ служебного эндпоинта при доступной базе данных"""
+    database_url = os.environ["TEST_DATABASE_URL"]
+
+    with TestClient(create_app(tmp_path / "health", database_url)) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_api_can_save_and_read_checks_in_postgresql(tmp_path: Path) -> None:
+    """проверяет сохранение и чтение проверки в PostgreSQL"""
+    database_url = os.environ["TEST_DATABASE_URL"]
+
+    with TestClient(create_app(tmp_path / "postgres", database_url)) as client:
+        created = client.post(
+            "/api/v1/checks",
+            files=_upload_files(),
+        )
+        assert created.status_code == 201
+        check_id = created.json()["id"]
+
+        status_response = client.get(f"/api/v1/checks/{check_id}")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "uploaded"

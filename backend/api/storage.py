@@ -49,15 +49,17 @@ class CheckStore:
         created_at = datetime.now(timezone.utc)
         temporary_dir = Path(tempfile.mkdtemp(prefix=".upload-", dir=self.files_dir))
         final_dir = self.files_dir / check_id
+        thesis_path = final_dir / "thesis.docx"
+        guidelines_extension = Path(guidelines_filename).suffix.lower()
+        guidelines_path = final_dir / f"guidelines{guidelines_extension}"
 
         try:
-            thesis_path = temporary_dir / "thesis.docx"
-            guidelines_extension = Path(guidelines_filename).suffix.lower()
-            guidelines_path = temporary_dir / f"guidelines{guidelines_extension}"
-            thesis_path.write_bytes(thesis_content)
-            guidelines_path.write_bytes(guidelines_content)
-            os.chmod(thesis_path, 0o600)
-            os.chmod(guidelines_path, 0o600)
+            staged_thesis = temporary_dir / thesis_path.name
+            staged_guidelines = temporary_dir / guidelines_path.name
+            staged_thesis.write_bytes(thesis_content)
+            staged_guidelines.write_bytes(guidelines_content)
+            os.chmod(staged_thesis, 0o600)
+            os.chmod(staged_guidelines, 0o600)
             os.replace(temporary_dir, final_dir)
 
             with self.session_factory.begin() as session:
