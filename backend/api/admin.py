@@ -585,9 +585,8 @@ def update_rule(
     changes = payload.model_dump(exclude_unset=True)
     for key, value in changes.items():
         setattr(rule, key, value)
-    if cloned:
+    if changes:
         rule.status = "review"
-    if ruleset.status in {"draft", "approved"}:
         ruleset.status = "review"
     try:
         session.commit()

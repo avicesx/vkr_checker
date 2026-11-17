@@ -189,6 +189,23 @@ def test_openapi_contract_is_checked_in_and_matches_application() -> None:
     assert contract == application_contract
 
 
+def test_upload_storage_dir_environment_is_respected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """использует путь хранилища, заданный Docker Compose"""
+    storage_dir = tmp_path / "uploads"
+    monkeypatch.delenv("CHECK_STORAGE_DIR", raising=False)
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(storage_dir))
+
+    application = create_app(
+        database_url="postgresql+psycopg://user:password@localhost/test"
+    )
+
+    assert application.state.check_store.storage_dir == storage_dir
+    application.state.check_store.engine.dispose()
+
+
 def test_health_endpoint_checks_the_database(tmp_path: Path) -> None:
     """проверяет ответ служебного эндпоинта при доступной базе данных"""
     database_url = os.environ["TEST_DATABASE_URL"]

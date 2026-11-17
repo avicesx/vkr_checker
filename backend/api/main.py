@@ -79,8 +79,10 @@ def create_app(
     allowed_origins: list[str] | None = None,
 ) -> FastAPI:
     """Создаёт API-приложение с конфигурацией PostgreSQL и административного API."""
-    configured_storage = storage_dir or os.environ.get(
-        "CHECK_STORAGE_DIR", "data/checks"
+    configured_storage = (
+        storage_dir
+        or os.environ.get("CHECK_STORAGE_DIR")
+        or os.environ.get("UPLOAD_STORAGE_DIR", "data/checks")
     )
     configured_database_url = database_url or os.environ.get("DATABASE_URL")
     engine = (

@@ -152,6 +152,46 @@ def test_rule_edit_validates_engine_params_and_creates_new_version(
         assert new_rule.name == "Размер основного шрифта"
 
 
+def test_editing_approved_rule_in_review_set_requires_review_again(
+    admin_client: TestClient,
+) -> None:
+    _, ruleset_id, approved_rule_id = _make_rule_set(admin_client)
+    session_factory = admin_client.app.state.session_factory
+    with session_factory.begin() as session:
+        approved_rule = session.get(Rule, approved_rule_id)
+        approved_rule.status = "approved"
+        pending_rule = Rule(
+            ruleset_id=ruleset_id,
+            rule_type_id=approved_rule.rule_type_id,
+            name="Межстрочный интервал",
+            params={"value": 1.5},
+            scope="body_text",
+            status="review",
+        )
+        session.add(pending_rule)
+        session.flush()
+        pending_rule_id = pending_rule.id
+
+    update = admin_client.patch(
+        f"/api/v1/admin/rules/{approved_rule_id}",
+        headers=_admin_headers(),
+        json={"name": "Исправленное требование"},
+    )
+    assert update.status_code == 200
+
+    decision = admin_client.post(
+        f"/api/v1/admin/rules/{pending_rule_id}/decision",
+        headers=_admin_headers(),
+        json={"decision": "approved"},
+    )
+    assert decision.status_code == 200
+    assert decision.json()["ruleset_status"] == "review"
+
+    with session_factory() as session:
+        assert session.get(Rule, approved_rule_id).status == "review"
+        assert session.get(RuleSet, ruleset_id).status == "review"
+
+
 def test_activation_archives_previous_ruleset_and_rejects_unreviewed(
     admin_client: TestClient,
 ) -> None:
