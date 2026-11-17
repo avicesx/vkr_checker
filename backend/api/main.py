@@ -68,28 +68,45 @@ async def _read_limited(upload: UploadFile, field: str) -> bytes:
     return content
 
 
-def create_app(storage_dir: Path | str | None = None) -> FastAPI:
+def create_app(
+    storage_dir: Path | str | None = None,
+    database_url: str | None = None,
+) -> FastAPI:
     """создаёт API-приложение с необязательным переопределением каталога хранения"""
-    configured_storage = storage_dir or os.environ.get(
-        "CHECK_STORAGE_DIR", "data/checks"
-    )
-    store = CheckStore(configured_storage)
+    configured_storage = storage_dir or os.environ.get("UPLOAD_STORAGE_DIR", "data/uploads")
+    configured_database_url = database_url or os.environ.get("DATABASE_URL")
+    if not configured_database_url:
+        raise RuntimeError("Для запуска API задайте переменную DATABASE_URL")
+    store = CheckStore(configured_storage, configured_database_url)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         store.initialize()
-        yield
+        try:
+            yield
+        finally:
+            store.dispose()
 
     application = FastAPI(
         title="API нормоконтроля ВКР",
         description=(
             "Загрузка ВКР и методички для создания проверки. "
-            "Текущая версия сохраняет файлы и возвращает начальный статус uploaded."
+            "Записи хранятся в PostgreSQL, файлы — в подключённом каталоге."
         ),
         version="1.0.0",
         lifespan=lifespan,
     )
     application.state.check_store = store
+
+    @application.get(
+        "/health",
+        tags=["Служебное"],
+        summary="Проверить доступность API и базы данных",
+    )
+    async def health_check() -> dict[str, str]:
+        """Проверяет доступность API и соединения с базой данных"""
+        await run_in_threadpool(store.check_database_connection)
+        return {"status": "ok"}
 
     @application.post(
         "/api/v1/checks",

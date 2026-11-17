@@ -4,16 +4,18 @@ API принимает ВКР в формате DOCX и методичку в ф
 каждого файла ограничен 20 МиБ. Формат проверяется по расширению и содержимому;
 заголовку `Content-Type` запроса API не доверяет.
 
-Запуск из каталога `backend/`:
+Для запуска необходим PostgreSQL. Задайте строку подключения в `DATABASE_URL`
+и каталог для загруженных файлов в `UPLOAD_STORAGE_DIR`:
 
 ```bash
 python -m pip install -r requirements.txt
-CHECK_STORAGE_DIR=/path/to/persistent/check-data \
-  python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+DATABASE_URL='postgresql+psycopg://vkr_checker:password@localhost:5432/vkr_checker_db' \
+UPLOAD_STORAGE_DIR=/path/to/persistent/uploads \
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-В каталоге хранятся база `checks.sqlite3` и папка `files/`. При запуске в Docker
-задайте `CHECK_STORAGE_DIR`, указав постоянный том.
+Статусы проверок хранятся в PostgreSQL, файлы — в `UPLOAD_STORAGE_DIR`.
+В Docker Compose каталог загрузок подключён как постоянный том.
 
 ## Эндпоинты
 

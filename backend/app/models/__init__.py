@@ -7,6 +7,7 @@ from .ruleset import RuleSet
 from .rule import Rule
 from .check import Check
 from .violation import Violation
+from .uploaded_check import UploadedCheck
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "Rule",
     "Check",
     "Violation",
+    "UploadedCheck",
 ]

@@ -33,6 +33,7 @@ documents/
 
 # Local API upload database and files
 backend/data/
+.env
 
 # Артефакты ручных прогонов CLI (например, backend/out/*.citations.json)
 backend/out/
