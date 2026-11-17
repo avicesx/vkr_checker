@@ -121,7 +121,8 @@ def test_real_vkr_pdf_is_checked_with_profile_ruleset(
         assert pages_with_number < threshold
         assert number_check.confidence == "low"
     else:
-        assert pages_with_number > 0
+        threshold = max(3, number_check.details["pages_total"] // 3)
+        assert pages_with_number >= threshold
         assert number_check.confidence == "medium"
 
     spacing_check = assessments["line_spacing_body"]

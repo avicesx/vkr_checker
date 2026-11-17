@@ -7,7 +7,7 @@ from .base import Base
 
 
 class UploadedCheck(Base):
-    """Запись загрузки файлов и состояния проверки"""
+    """Запись загрузки ВКР и методички для API статуса."""
 
     __tablename__ = "upload_check"
 

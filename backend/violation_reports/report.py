@@ -184,7 +184,7 @@ def build_violation_report(
     *,
     generated_at: Optional[datetime] = None,
 ) -> ViolationReport:
-    """преобразует аномалии документа и результаты правил в сгруппированный отчёт"""
+    """преобразует аномалии парсера и нарушения движка правил в отчёт"""
     violations: list[Violation] = []
     blocks = _index_blocks(document.blocks)
 

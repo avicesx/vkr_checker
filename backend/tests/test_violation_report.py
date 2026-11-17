@@ -61,7 +61,7 @@ def test_report_groups_test_findings_and_counts_severity() -> None:
         _sample_parser_result(),
         [
             RuleAssessment(
-                rule_id="font_body_text",
+                rule_id="body_font_size",
                 kind="font",
                 status="fail",
                 expected_text="14 pt",
@@ -69,7 +69,7 @@ def test_report_groups_test_findings_and_counts_severity() -> None:
                 confidence="medium",
             ),
             RuleAssessment(
-                rule_id="line_spacing_body",
+                rule_id="line_spacing",
                 kind="line_spacing",
                 status="not_assessed",
                 expected_text="1.5",
@@ -77,7 +77,7 @@ def test_report_groups_test_findings_and_counts_severity() -> None:
                 confidence="low",
             ),
             RuleAssessment(
-                rule_id="page_format",
+                rule_id="page_size_a4",
                 kind="page_format",
                 status="pass",
                 expected_text="A4",
