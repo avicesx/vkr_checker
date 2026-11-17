@@ -2,45 +2,41 @@ from __future__ import annotations
 
 import os
 import shutil
-import sqlite3
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from sqlalchemy import Engine, text
+from sqlalchemy.orm import Session
+
+from app.database import create_database_engine
+from app.models import UploadedCheck
+from app.models.base import Base
+
 from .models import CheckResponse, CheckStatus
 
 
 class CheckStore:
-    """сохраняет загруженные файлы и статус проверки в локальном каталоге"""
+    """Сохраняет файлы проверок на диске, а их статусы — в SQLAlchemy"""
 
-    def __init__(self, storage_dir: Path | str) -> None:
-        """задаёт корневой каталог базы данных и загруженных файлов"""
+    def __init__(
+        self,
+        storage_dir: Path | str,
+        database_url: str,
+    ) -> None:
+        """Задаёт каталог файлов и адрес базы данных"""
         self.storage_dir = Path(storage_dir)
         self.files_dir = self.storage_dir / "files"
-        self.database_path = self.storage_dir / "checks.sqlite3"
+        self.engine = _create_engine(database_url)
 
     def initialize(self) -> None:
-        """создаёт каталоги хранилища и инициализирует базу проверок"""
+        """Создаёт каталог файлов и таблицу загрузок, если их ещё нет"""
         self.storage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.files_dir.mkdir(mode=0o700, exist_ok=True)
         os.chmod(self.storage_dir, 0o700)
         os.chmod(self.files_dir, 0o700)
-        with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS checks (
-                    id TEXT PRIMARY KEY,
-                    status TEXT NOT NULL CHECK (
-                        status IN ('uploaded', 'queued', 'processing', 'completed', 'failed')
-                    ),
-                    created_at TEXT NOT NULL,
-                    thesis_filename TEXT NOT NULL,
-                    guidelines_filename TEXT NOT NULL
-                )
-                """
-            )
-        os.chmod(self.database_path, 0o600)
+        Base.metadata.create_all(self.engine)
 
     def create_check(
         self,
@@ -49,36 +45,35 @@ class CheckStore:
         guidelines_filename: str,
         guidelines_content: bytes,
     ) -> CheckResponse:
-        """сохраняет оба файла и создаёт запись проверки"""
+        """Сохраняет оба файла и создаёт запись проверки"""
         check_id = str(uuid4())
         created_at = datetime.now(timezone.utc)
         temporary_dir = Path(tempfile.mkdtemp(prefix=".upload-", dir=self.files_dir))
         final_dir = self.files_dir / check_id
+        thesis_path = final_dir / "thesis.docx"
+        guidelines_extension = Path(guidelines_filename).suffix.lower()
+        guidelines_path = final_dir / f"guidelines{guidelines_extension}"
 
         try:
-            thesis_path = temporary_dir / "thesis.docx"
-            guidelines_extension = Path(guidelines_filename).suffix.lower()
-            guidelines_path = temporary_dir / f"guidelines{guidelines_extension}"
-            thesis_path.write_bytes(thesis_content)
-            guidelines_path.write_bytes(guidelines_content)
-            os.chmod(thesis_path, 0o600)
-            os.chmod(guidelines_path, 0o600)
+            staged_thesis = temporary_dir / thesis_path.name
+            staged_guidelines = temporary_dir / guidelines_path.name
+            staged_thesis.write_bytes(thesis_content)
+            staged_guidelines.write_bytes(guidelines_content)
+            os.chmod(staged_thesis, 0o600)
+            os.chmod(staged_guidelines, 0o600)
             os.replace(temporary_dir, final_dir)
 
-            with self._connect() as connection:
-                connection.execute(
-                    """
-                    INSERT INTO checks (
-                        id, status, created_at, thesis_filename, guidelines_filename
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        check_id,
-                        CheckStatus.UPLOADED.value,
-                        created_at.isoformat(),
-                        thesis_filename,
-                        guidelines_filename,
-                    ),
+            with Session(self.engine) as session, session.begin():
+                session.add(
+                    UploadedCheck(
+                        id=check_id,
+                        status=CheckStatus.UPLOADED.value,
+                        created_at=created_at,
+                        thesis_filename=Path(thesis_filename).name,
+                        thesis_path=str(thesis_path),
+                        guidelines_filename=Path(guidelines_filename).name,
+                        guidelines_path=str(guidelines_path),
+                    )
                 )
         except Exception:
             shutil.rmtree(temporary_dir, ignore_errors=True)
@@ -92,24 +87,30 @@ class CheckStore:
         )
 
     def get_check(self, check_id: str) -> CheckResponse | None:
-        """возвращает сохранённую проверку или None, если такой ID не найден"""
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT id, status, created_at FROM checks WHERE id = ?",
-                (check_id,),
-            ).fetchone()
+        """Возвращает сохранённую проверку или None, если такой ID не найден"""
+        with Session(self.engine) as session:
+            check = session.get(UploadedCheck, check_id)
+            if check is None:
+                return None
+            created_at = check.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            return CheckResponse(
+                id=check.id,
+                status=CheckStatus(check.status),
+                created_at=created_at,
+            )
 
-        if row is None:
-            return None
+    def check_database_connection(self) -> None:
+        """Проверяет доступность базы данных"""
+        with self.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
 
-        return CheckResponse(
-            id=row["id"],
-            status=CheckStatus(row["status"]),
-            created_at=datetime.fromisoformat(row["created_at"]),
-        )
+    def dispose(self) -> None:
+        """Закрывает соединения с базой данных"""
+        self.engine.dispose()
 
-    def _connect(self) -> sqlite3.Connection:
-        """открывает соединение SQLite с доступом к строкам по именам полей"""
-        connection = sqlite3.connect(self.database_path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        return connection
+
+def _create_engine(database_url: str) -> Engine:
+    """Создаёт SQLAlchemy engine для PostgreSQL"""
+    return create_database_engine(database_url)

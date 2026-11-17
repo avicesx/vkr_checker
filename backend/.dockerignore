@@ -1,0 +1,28 @@
+# Git metadata
+/.git/
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+/.venv/
+/venv/
+
+# Local data and environment files
+/data/
+/.env
+/.env.*
+!/.env.example
+
+# Test-only files
+/tests/
+/pytest.ini
+/requirements-dev.txt
+
+# Build artifacts
+*.egg-info/
+build/
+dist/
+tests/

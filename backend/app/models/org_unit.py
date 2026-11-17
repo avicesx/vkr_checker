@@ -12,4 +12,9 @@ class OrgUnit(Base):
     code = Column(String(50), nullable=True)
     profile_name = Column(String(255), nullable=True)
 
-    children = relationship("OrgUnit", backref="parent")
+    parent = relationship(
+        "OrgUnit",
+        remote_side=[id],
+        back_populates="children",
+    )
+    children = relationship("OrgUnit", back_populates="parent")
