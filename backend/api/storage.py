@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -37,6 +37,11 @@ class CheckStore:
         os.chmod(self.storage_dir, 0o700)
         os.chmod(self.files_dir, 0o700)
         Base.metadata.create_all(bind=self.engine)
+
+    def check_database_connection(self) -> None:
+        """Проверяет доступность базы данных коротким запросом."""
+        with self.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
 
     def create_check(
         self,

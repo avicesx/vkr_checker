@@ -853,6 +853,32 @@
         ]
       }
     },
+    "/health": {
+      "get": {
+        "tags": [
+          "Служебное"
+        ],
+        "summary": "Проверить доступность API и базы данных",
+        "description": "Проверяет доступность API и соединения с базой данных",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Check Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/checks": {
       "post": {
         "tags": [
