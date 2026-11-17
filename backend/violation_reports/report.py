@@ -7,8 +7,7 @@ from typing import Iterable, Optional
 
 from pydantic import BaseModel, Field
 
-from docx_parser.pdf_norm_control_parser import PdfRuleFinding
-from docx_parser.schema import (
+from parser.core.schema import (
     BlockUnion,
     CommentArtifact,
     ConsecutiveEmptyParagraphs,
@@ -20,6 +19,7 @@ from docx_parser.schema import (
     TrackChangeArtifact,
     VisualObject,
 )
+from rule_engine.findings import RuleAssessment
 
 
 class ReportCategory(str, Enum):
@@ -186,11 +186,11 @@ _PDF_RULE_DETAILS = {
 
 def build_violation_report(
     document: ParsedDocxDocument,
-    pdf_findings: Iterable[PdfRuleFinding] = (),
+    rule_assessments: Iterable[RuleAssessment] = (),
     *,
     generated_at: Optional[datetime] = None,
 ) -> ViolationReport:
-    """преобразует аномалии DOCX и ошибки PDF-проверок в сгруппированный отчёт"""
+    """преобразует аномалии парсера и нарушения движка правил в отчёт"""
     violations: list[Violation] = []
     blocks = _index_blocks(document.blocks)
 
@@ -352,7 +352,7 @@ def build_violation_report(
             source="docx_parser",
         )
 
-    for finding in pdf_findings:
+    for finding in rule_assessments:
         if finding.status != "fail":
             continue
         details = _PDF_RULE_DETAILS.get(finding.rule_id)
@@ -366,9 +366,12 @@ def build_violation_report(
             f"pdf:{finding.rule_id}",
             category,
             severity,
-            f"{description} Ожидалось: {finding.expected}. Обнаружено: {finding.observed}.",
+            (
+                f"{description} Ожидалось: {finding.expected_text}. "
+                f"Обнаружено: {finding.observed_text}."
+            ),
             recommendation,
-            source="pdf_norm_control",
+            source="rule_engine",
         )
 
     return _create_report(

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from docx_parser.pdf_norm_control_parser import PdfRuleFinding
-from docx_parser.schema import (
+from parser.core.schema import (
     CommentArtifact,
     DocumentAnomalies,
     DocumentMeta,
@@ -13,6 +12,7 @@ from docx_parser.schema import (
     ThemeData,
     TrackChangeArtifact,
 )
+from rule_engine.findings import RuleAssessment
 from violation_reports import ReportCategory, ReportSeverity, build_violation_report
 
 
@@ -60,25 +60,28 @@ def test_report_groups_test_findings_and_counts_severity() -> None:
     report = build_violation_report(
         _sample_parser_result(),
         [
-            PdfRuleFinding(
+            RuleAssessment(
                 rule_id="body_font_size",
+                kind="font",
                 status="fail",
-                expected="14 pt",
-                observed="12 pt",
+                expected_text="14 pt",
+                observed_text="12 pt",
                 confidence="medium",
             ),
-            PdfRuleFinding(
+            RuleAssessment(
                 rule_id="line_spacing",
+                kind="line_spacing",
                 status="not_assessed",
-                expected="1.5",
-                observed="not enough lines",
+                expected_text="1.5",
+                observed_text="not enough lines",
                 confidence="low",
             ),
-            PdfRuleFinding(
+            RuleAssessment(
                 rule_id="page_size_a4",
+                kind="page_format",
                 status="pass",
-                expected="A4",
-                observed="A4",
+                expected_text="A4",
+                observed_text="A4",
                 confidence="high",
             ),
         ],

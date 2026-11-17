@@ -23,9 +23,24 @@ def _docx_bytes() -> bytes:
     return buffer.getvalue()
 
 
+def _docx_parts(content: bytes) -> dict[str, bytes]:
+    """возвращает содержимое частей OOXML без учета метаданных ZIP-архива"""
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        return {name: archive.read(name) for name in archive.namelist()}
+
+
 def _client(tmp_path: Path) -> TestClient:
-    """создаёт тестовый клиент с отдельным каталогом хранения"""
-    return TestClient(create_app(tmp_path / "store"))
+    """создаёт тестовый клиент с PostgreSQL и отдельным каталогом файлов"""
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Для API-тестов задайте TEST_DATABASE_URL PostgreSQL")
+    return TestClient(
+        create_app(
+            tmp_path / "store",
+            database_url=database_url,
+            admin_token="test-admin-token",
+        )
+    )
 
 
 def _upload_files(guidelines_name: str = "guide.docx") -> dict[str, tuple]:
@@ -126,21 +141,40 @@ def test_status_endpoint_returns_not_found_for_unknown_id(tmp_path: Path) -> Non
 def test_files_and_status_survive_store_recreation(tmp_path: Path) -> None:
     """сохраняет файлы и статус после перезапуска клиента и приложения"""
     storage_dir = tmp_path / "persistent"
-    with TestClient(create_app(storage_dir)) as client:
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Для API-тестов задайте TEST_DATABASE_URL PostgreSQL")
+    with TestClient(
+        create_app(
+            storage_dir,
+            database_url=database_url,
+            admin_token="test-admin-token",
+        )
+    ) as client:
         created = client.post(
             "/api/v1/checks",
             files=_upload_files(),
         ).json()
 
-    with TestClient(create_app(storage_dir)) as client:
+    with TestClient(
+        create_app(
+            storage_dir,
+            database_url=database_url,
+            admin_token="test-admin-token",
+        )
+    ) as client:
         response = client.get(f"/api/v1/checks/{created['id']}")
 
     assert response.status_code == 200
     check_dir = storage_dir / "files" / created["id"]
     assert (check_dir / "thesis.docx").is_file()
     assert (check_dir / "guidelines.docx").is_file()
-    assert (check_dir / "thesis.docx").read_bytes() == _docx_bytes()
-    assert (check_dir / "guidelines.docx").read_bytes() == _docx_bytes()
+    assert _docx_parts((check_dir / "thesis.docx").read_bytes()) == _docx_parts(
+        _docx_bytes()
+    )
+    assert _docx_parts((check_dir / "guidelines.docx").read_bytes()) == _docx_parts(
+        _docx_bytes()
+    )
     if os.name == "posix":
         assert stat.S_IMODE((check_dir / "thesis.docx").stat().st_mode) == 0o600
         assert stat.S_IMODE(check_dir.stat().st_mode) == 0o700

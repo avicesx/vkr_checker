@@ -9,8 +9,12 @@ from typing import Annotated, AsyncIterator
 from uuid import UUID
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
+from app.database import create_database_engine, create_session_factory
+
+from .admin import router as admin_router
 from .models import CheckResponse, ErrorResponse
 from .storage import CheckStore
 
@@ -68,17 +72,46 @@ async def _read_limited(upload: UploadFile, field: str) -> bytes:
     return content
 
 
-def create_app(storage_dir: Path | str | None = None) -> FastAPI:
-    """создаёт API-приложение с необязательным переопределением каталога хранения"""
+def create_app(
+    storage_dir: Path | str | None = None,
+    database_url: str | None = None,
+    admin_token: str | None = None,
+    allowed_origins: list[str] | None = None,
+) -> FastAPI:
+    """Создаёт API-приложение с конфигурацией PostgreSQL и административного API."""
     configured_storage = storage_dir or os.environ.get(
         "CHECK_STORAGE_DIR", "data/checks"
     )
-    store = CheckStore(configured_storage)
+    configured_database_url = database_url or os.environ.get("DATABASE_URL")
+    engine = (
+        create_database_engine(configured_database_url)
+        if configured_database_url
+        else None
+    )
+    session_factory = create_session_factory(engine) if engine else None
+    store = (
+        CheckStore(configured_storage, engine, session_factory)
+        if engine is not None and session_factory is not None
+        else None
+    )
+    configured_admin_token = admin_token or os.environ.get("ADMIN_TOKEN")
+    origins = allowed_origins or [
+        origin.strip()
+        for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if "*" in origins:
+        raise ValueError("CORS_ALLOWED_ORIGINS должен содержать явные origin-адреса")
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if store is None or engine is None:
+            raise RuntimeError("Для запуска API задайте переменную DATABASE_URL")
         store.initialize()
-        yield
+        try:
+            yield
+        finally:
+            engine.dispose()
 
     application = FastAPI(
         title="API нормоконтроля ВКР",
@@ -90,6 +123,19 @@ def create_app(storage_dir: Path | str | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.check_store = store
+    application.state.session_factory = session_factory
+    application.state.admin_token = configured_admin_token
+
+    if origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+
+    application.include_router(admin_router, prefix="/api/v1/admin")
 
     @application.post(
         "/api/v1/checks",
@@ -124,6 +170,11 @@ def create_app(storage_dir: Path | str | None = None) -> FastAPI:
                 guidelines.filename, guidelines_content, "guidelines"
             )
 
+        if store is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Хранилище базы данных не настроено",
+            )
         return await run_in_threadpool(
             store.create_check,
             thesis_filename,
@@ -141,6 +192,11 @@ def create_app(storage_dir: Path | str | None = None) -> FastAPI:
     )
     async def get_check_status(check_id: UUID) -> CheckResponse:
         """возвращает сохранённый статус проверки по её ID"""
+        if store is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Хранилище базы данных не настроено",
+            )
         check = await run_in_threadpool(store.get_check, str(check_id))
         if check is None:
             raise HTTPException(
