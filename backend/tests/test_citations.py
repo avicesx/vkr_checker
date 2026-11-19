@@ -35,7 +35,7 @@ from parser.core.schema import (
     TableRow,
     ThemeData,
 )
-from services.references import extract_citations_from_json, extract_citations_to_json_file
+from services.citations import extract_citations_from_json, extract_citations_to_json_file
 
 EN_DASH = "–"
 

@@ -179,7 +179,7 @@ def _mismatched_field(violation: Any) -> str:
 # ---------------------------------------------------------------------
 
 
-def test_unresolved_reference_is_violation() -> None:
+def test_unresolved_citation_is_violation() -> None:
     """Ссылка на номер, которого нет в списке, дает нарушение с адресом."""
     document = _document(
         entries=[_entry()],
@@ -211,7 +211,7 @@ def test_unresolved_reference_is_violation() -> None:
     assert report.assessments[0].details["unresolved_mentions"] == 1
 
 
-def test_all_references_resolved_pass() -> None:
+def test_all_citations_resolved_pass() -> None:
     """Разрешенные ссылки не дают нарушений: проверка завершается статусом pass."""
     document = _document(
         entries=[_entry("bib_001", "p_0002", 1), _entry("bib_002", "p_0003", 2)],
@@ -261,7 +261,7 @@ def test_missing_mentions_are_not_assessed() -> None:
     assert assessment.details["bibliography_entries"] == 1
 
 
-def test_partially_resolved_reference_is_violation() -> None:
+def test_partially_resolved_citation_is_violation() -> None:
     """Перечисление «[1, 7]» разрешается частично: отсутствующий номер — нарушение."""
     document = _document(
         entries=[_entry("bib_001", "p_0002", 1)],

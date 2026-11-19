@@ -113,7 +113,7 @@ python manual_test/extract_citations.py out/parse.json --out out/citations.json
 
 ```python
 from citations import extract_citations
-from services.references import extract_citations_to_json_file
+from services.citations import extract_citations_to_json_file
 
 report = extract_citations(document)                    # ParsedDocument -> CitationReport
 report = extract_citations_to_json_file("parse.json", "citations.json")
