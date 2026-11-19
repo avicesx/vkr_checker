@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 import zipfile
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 from lxml import etree
 
 from parser.core.schema import (
@@ -193,7 +193,7 @@ class MetaAndAnomaliesParser:
 
         Проверяются пустые абзацы подряд, артефакты правок и комментариев,
         невидимый текст, внедрённые OLE-объекты, номера страниц без отрисовки,
-        битые поля ссылок, а также подписи рисунков: пропущенная подпись,
+        битые поля ссылок, а также подписи рисунков и таблиц: пропущенная подпись,
         иллюстрация без подписи, отсутствие ссылки в тексте и сбои нумерации.
         """
         track_changes = self._extract_track_changes(body_elem, xml_para_to_block_map)
@@ -259,8 +259,9 @@ class MetaAndAnomaliesParser:
             uncaptioned_visual_ids,
             captions_without_visual_ids,
             unreferenced_figure_ids,
+            unreferenced_table_ids,
             figure_numbering_issues,
-        ) = self._detect_figure_anomalies(visuals, cross_ref_index)
+        ) = self._detect_caption_anomalies(visuals, cross_ref_index)
 
         return DocumentAnomalies(
             unaccepted_track_changes=track_changes,
@@ -275,15 +276,18 @@ class MetaAndAnomaliesParser:
             uncaptioned_visual_ids=uncaptioned_visual_ids,
             figure_captions_without_visual_ids=captions_without_visual_ids,
             unreferenced_figure_ids=unreferenced_figure_ids,
+            unreferenced_table_ids=unreferenced_table_ids,
             figure_numbering_issues=figure_numbering_issues,
         )
 
-    def _detect_figure_anomalies(
+    def _detect_caption_anomalies(
         self,
         visuals: Optional[Dict[str, VisualObject]],
         cross_ref_index: Optional[CrossReferenceIndex],
-    ) -> Tuple[List[str], List[str], List[str], List[FigureNumberingIssue]]:
-        """Ищет иллюстрации без подписи, подписи без объекта и дефекты нумерации рисунков."""
+    ) -> Tuple[
+        List[str], List[str], List[str], List[str], List[FigureNumberingIssue]
+    ]:
+        """Ищет объекты без подписи, подписи без объекта, объекты без ссылок и сбои нумерации."""
         uncaptioned_visual_ids: List[str] = []
         if visuals:
             for vis_id, vis in visuals.items():
@@ -292,65 +296,92 @@ class MetaAndAnomaliesParser:
                     uncaptioned_visual_ids.append(vis_id)
 
         if cross_ref_index is None:
-            return uncaptioned_visual_ids, [], [], []
+            return uncaptioned_visual_ids, [], [], [], []
 
         captions_without_visual_ids: List[str] = []
-        unreferenced_figure_ids: List[str] = []
         for fig in cross_ref_index.figures:
             if fig.target_object_id is None or (
                 visuals is not None and fig.target_object_id not in visuals
             ):
                 captions_without_visual_ids.append(fig.caption_block_id)
-            if not fig.is_mentioned_in_text:
-                unreferenced_figure_ids.append(fig.entity_id)
+
+        # Нумерация рисунков и таблиц проверяется раздельно: это независимые
+        # сквозные последовательности, а issue_kind и номер достаточно однозначны,
+        # чтобы хранить оба семейства в одном списке аномалий.
+        numbering_issues = self._detect_figure_numbering_issues(
+            cross_ref_index.figures, entity_type="figure"
+        ) + self._detect_figure_numbering_issues(
+            cross_ref_index.tables, entity_type="table"
+        )
 
         return (
             uncaptioned_visual_ids,
             captions_without_visual_ids,
-            unreferenced_figure_ids,
-            self._detect_figure_numbering_issues(cross_ref_index.figures),
+            self._collect_unreferenced_ids(cross_ref_index.figures),
+            self._collect_unreferenced_ids(cross_ref_index.tables),
+            numbering_issues,
         )
 
     @staticmethod
+    def _collect_unreferenced_ids(
+        entities: List[NumberedCaptionEntity],
+    ) -> List[str]:
+        """entity_id пронумерованных объектов, на которые нет ссылок в тексте."""
+        return [
+            entity.entity_id for entity in entities if not entity.is_mentioned_in_text
+        ]
+
+    @staticmethod
     def _normalize_figure_prefix(prefix_word: str) -> str:
-        """Сводит «Рис.», «Рисунок», «Скриншот» и «Снимок экрана» к семейству подписей."""
+        """Сводит «Рис.», «Рисунок», «Скриншот», «Таблица» и «Табл.» к семействам подписей."""
         prefix = prefix_word.strip().lower().replace(".", "")
         if prefix.startswith("рисунк") or prefix == "рис":
             return "рисунок"
         if prefix.startswith("скрин") or prefix.startswith("снимок"):
             return "скриншот"
+        if prefix.startswith("табл"):
+            return "таблица"
+        if prefix.startswith("прилож"):
+            return "приложение"
         return prefix
 
     @classmethod
     def _detect_figure_numbering_issues(
-        cls, figures: List[NumberedCaptionEntity]
+        cls,
+        entities: List[NumberedCaptionEntity],
+        entity_type: Literal["figure", "table", "appendix"] = "figure",
     ) -> List[FigureNumberingIssue]:
-        """Проверяет сквозную арабскую нумерацию рисунков: дубли, пропуски, порядок."""
+        """Проверяет сквозную арабскую нумерацию подписей: дубли, пропуски, порядок.
+
+        Один и тот же алгоритм применяется к рисункам и таблицам: вызывающий код
+        передает соответствующее подписям семейство в entity_type.
+        """
         issues: List[FigureNumberingIssue] = []
         seen_numbers: Dict[Tuple[str, str], str] = {}
         last_by_family: Dict[str, Tuple[int, str, str]] = {}
 
-        for fig in figures:
-            if fig.numbering_scheme != "continuous_arabic":
+        for entity in entities:
+            if entity.numbering_scheme != "continuous_arabic":
                 continue
             try:
-                number = int(fig.number_str)
+                number = int(entity.number_str)
             except ValueError:
                 continue
 
-            family = cls._normalize_figure_prefix(fig.prefix_word)
-            number_key = (family, fig.number_str)
+            family = cls._normalize_figure_prefix(entity.prefix_word)
+            number_key = (family, entity.number_str)
             if number_key in seen_numbers:
                 issues.append(
                     FigureNumberingIssue(
                         issue_kind="duplicate",
-                        number_str=fig.number_str,
-                        caption_block_id=fig.caption_block_id,
+                        number_str=entity.number_str,
+                        caption_block_id=entity.caption_block_id,
                         previous_number_str=seen_numbers[number_key],
+                        entity_type=entity_type,
                     )
                 )
                 continue
-            seen_numbers[number_key] = fig.caption_block_id
+            seen_numbers[number_key] = entity.caption_block_id
 
             previous = last_by_family.get(family)
             if previous is not None:
@@ -364,21 +395,27 @@ class MetaAndAnomaliesParser:
                             FigureNumberingIssue(
                                 issue_kind="gap",
                                 number_str=str(missing),
-                                caption_block_id=fig.caption_block_id,
+                                caption_block_id=entity.caption_block_id,
                                 previous_number_str=prev_number_str,
+                                entity_type=entity_type,
                             )
                         )
                 elif number != prev_number:
                     issues.append(
                         FigureNumberingIssue(
                             issue_kind="out_of_order",
-                            number_str=fig.number_str,
-                            caption_block_id=fig.caption_block_id,
+                            number_str=entity.number_str,
+                            caption_block_id=entity.caption_block_id,
                             previous_number_str=prev_number_str,
+                            entity_type=entity_type,
                         )
                     )
 
-            last_by_family[family] = (number, fig.number_str, fig.caption_block_id)
+            last_by_family[family] = (
+                number,
+                entity.number_str,
+                entity.caption_block_id,
+            )
 
         return issues
 
