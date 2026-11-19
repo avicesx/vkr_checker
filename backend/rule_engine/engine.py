@@ -70,13 +70,16 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from parser.core.schema import (
+    BibliographyEntry,
     BlockUnion,
     DocumentTreeNode,
+    NumberedCaptionEntity,
     ParagraphBlock,
     ParsedDocxDocument,
     RunFontPropertiesEffective,
     SectionProperties,
     TableBlock,
+    TextCrossReferenceMention,
     TextRun,
     TocContainerBlock,
     TocEntryItem,
@@ -96,6 +99,13 @@ from .findings import (
 )
 from .rules import (
     NUMBERLESS_HEADING_ROLES,
+    AlignmentRule,
+    BibliographyCitedRule,
+    BibliographyFormatRule,
+    BibliographyLinkRule,
+    CaptionFormatRule,
+    CaptionNumberingRule,
+    CaptionReferenceRule,
     FontExpectation,
     FontRule,
     HeadingFormatRule,
@@ -136,7 +146,63 @@ ALIGNMENT_LABELS: Dict[str, str] = {
     "right": "по правому краю",
     "both": "по ширине",
     "distribute": "по ширине с разрядкой",
+    "justify": "по ширине",
 }
+
+BIBLIOGRAPHY_CATEGORY_LABELS: Dict[str, str] = {
+    "book_monograph": "книга или монография",
+    "journal_article": "статья в журнале",
+    "conference_paper": "доклад конференции",
+    "electronic_resource": "электронный ресурс",
+    "normative_act_law": "нормативный акт",
+    "standard_gost": "стандарт",
+    "dissertation_autoref": "диссертация или автореферат",
+    "patent": "патент",
+    "unknown": "категория не определена",
+}
+
+BIBLIOGRAPHY_FORMAT_LABELS: Dict[str, str] = {
+    "urls": "URL источника",
+    "access_date_raw": "дата обращения",
+    "year_extracted": "год издания",
+    "pages_extracted": "объём в страницах",
+    "isbn_or_issn": "ISBN или ISSN",
+    "has_double_slash_source": "разделитель «//» перед источником",
+    "has_text_type_designation": "обозначение вида издания",
+}
+
+CAPTION_ENTITY_LABELS: Dict[str, str] = {
+    "figure": "рисунок",
+    "table": "таблица",
+    "appendix": "приложение",
+    "any": "объект с подписью",
+}
+
+CAPTION_NUMBERING_ISSUE_LABELS: Dict[str, str] = {
+    "duplicate": "повтор номера",
+    "gap": "пропуск номера",
+    "out_of_order": "нарушение порядка номеров",
+}
+
+CAPTION_SEPARATOR_LABELS: Dict[str, str] = {
+    "dash": "тире",
+    "dot": "точка",
+    "space": "пробел",
+    "none": "без разделителя",
+}
+
+CAPTION_PREFIX_FAMILIES: Dict[str, str] = {
+    "рис": "figure",
+    "рисунок": "figure",
+    "табл": "table",
+    "таблица": "table",
+    "прил": "appendix",
+    "приложение": "appendix",
+}
+"""Слово-префикс подписи → семейство нумерации: рисунки и таблицы нумеруются отдельно."""
+
+CAPTION_GAP_LIMIT = 10
+"""Сколько пропущенных номеров подряд перечислять: разрыв 1..1000 не должен раздувать отчет."""
 
 ZONE_LABELS: Dict[str, str] = {
     "header": "верхний колонтитул",
@@ -679,6 +745,250 @@ def _caption_block_ids(document: ParsedDocxDocument) -> Set[str]:
     return {entity.caption_block_id for entity in entities}
 
 
+def _safe_page_est(value: Optional[int]) -> Optional[int]:
+    """Приводит номер страницы к допустимому в модели значению.
+
+    ``ViolationLocation.page_start_est`` требует номер не меньше единицы, а
+    парсер в старом JSON мог оставить 0, поэтому ноль и отрицательные значения
+    превращаются в None («страница неизвестна»).
+    """
+    if value is None or value < 1:
+        return None
+    return int(value)
+
+
+def _paragraph_index(document: ParsedDocxDocument) -> Dict[str, ParagraphBlock]:
+    """Индексирует абзацы документа по block_id: тело, таблицы, колонтитулы, сноски.
+
+    Индекс нужен правилам подписей: сущность ссылается на абзац по
+    ``caption_block_id``, а сам абзац лежит в общем списке блоков.
+    """
+    paragraphs = (
+        _iter_paragraphs(document.blocks)
+        + _iter_section_paragraphs(document.sections)
+        + [
+            paragraph
+            for footnote in document.footnotes
+            for paragraph in _iter_paragraphs(footnote.blocks)
+        ]
+    )
+    index: Dict[str, ParagraphBlock] = {}
+    for paragraph in paragraphs:
+        index.setdefault(paragraph.block_id, paragraph)
+    return index
+
+
+def _caption_entities(
+    document: ParsedDocxDocument,
+    entity_type: str,
+) -> List[NumberedCaptionEntity]:
+    """Возвращает подписи выбранного вида в порядке следования в документе."""
+    index = document.cross_ref_index
+    if entity_type == "figure":
+        return list(index.figures)
+    if entity_type == "table":
+        return list(index.tables)
+    if entity_type == "appendix":
+        return list(index.Apps)
+    return [*index.figures, *index.tables, *index.Apps]
+
+
+def _referenced_caption_entities(
+    document: ParsedDocxDocument,
+    entity_type: str,
+) -> List[NumberedCaptionEntity]:
+    """Возвращает рисунки и таблицы, на которые в тексте должна быть ссылка.
+
+    Приложения в выборку не входят: ссылка «приложение А» — отдельный вид
+    ссылки, и ``CaptionReferenceExpectation`` говорит только о рисунках и
+    таблицах.
+    """
+    index = document.cross_ref_index
+    if entity_type == "figure":
+        return list(index.figures)
+    if entity_type == "table":
+        return list(index.tables)
+    return [*index.figures, *index.tables]
+
+
+def _caption_number(entity: NumberedCaptionEntity) -> Optional[int]:
+    """Возвращает арабский номер подписи или None, если он не арабский/не сквозной."""
+    if entity.numbering_scheme != "continuous_arabic":
+        return None
+    number_str = (entity.number_str or "").strip()
+    if not number_str.isdigit():
+        return None
+    return int(number_str)
+
+
+def _normalize_caption_prefix(word: Optional[str]) -> str:
+    """Нормализует слово-префикс подписи: регистр, пробелы и завершающая точка."""
+    if not word:
+        return ""
+    return " ".join(word.split()).casefold().rstrip(".")
+
+
+def _caption_family(entity: NumberedCaptionEntity) -> str:
+    """Возвращает семейство нумерации: рисунки и таблицы нумеруются отдельно."""
+    normalized = _normalize_caption_prefix(entity.prefix_word)
+    return CAPTION_PREFIX_FAMILIES.get(normalized, entity.entity_type)
+
+
+def _caption_separator_kind(
+    separator: Optional[str],
+    title_text: Optional[str] = None,
+) -> str:
+    """Переводит фактический разделитель подписи в имя требования.
+
+    Разбор хранит в ``separator`` только пунктуационный разделитель, а
+    пробельный не хранит вовсе: «Таблица 1 Данные» дает ``separator=None`` и
+    непустой ``title_text``. Поэтому ``None`` с непустым названием — это
+    пробел, а ``None`` без названия — разделителя нет. Пустая строка — тоже
+    «разделителя нет», строка из пробелов (включая NBSP) — «пробел».
+
+    Порядок проверок важен: тире и точка распознаются до пробельного
+    вывода, иначе «— » превратилось бы в пробел. Любой не-тире и не-точка
+    разделитель (":", "|" и т.п.) считается пробельным: подпись с ним читается
+    как «номер, затем название», то есть тот же случай, что и обычный пробел.
+    """
+    if separator is None:
+        return "space" if (title_text or "").strip() else "none"
+    if separator == "":
+        return "none"
+    normalized = separator.replace("\u00a0", " ").strip()
+    if not normalized:
+        return "space"
+    if any(dash in normalized for dash in ("—", "–", "-")):
+        return "dash"
+    if "." in normalized:
+        return "dot"
+    return "space"
+
+
+def _is_uppercase_text(text: Optional[str]) -> Optional[bool]:
+    """True, если все буквы текста прописные; None — если букв нет или текста нет."""
+    if text is None:
+        return None
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return None
+    return all(char.isupper() for char in letters)
+
+
+def _alignment_matches(expected: str, actual: Optional[str]) -> bool:
+    """Сверяет ожидаемое выравнивание с фактическим.
+
+    ``justify`` — требование «по ширине»: разбор DOCX/PDF записывает его как
+    ``both`` (двустороннее), а вариант с разрядкой — как ``distribute``.
+    """
+    if actual is None:
+        return False
+    if expected == actual:
+        return True
+    return expected == "justify" and actual in {"both", "distribute"}
+
+
+def _caption_display(entity: NumberedCaptionEntity) -> str:
+    """Короткое название подписи для текста отчета: «Рисунок 2»."""
+    prefix = (entity.prefix_word or CAPTION_ENTITY_LABELS.get(entity.entity_type, "объект"))
+    number = entity.number_str or "?"
+    return f"{prefix} {number}".strip()
+
+
+def _mention_targets_text(mention: TextCrossReferenceMention) -> str:
+    """Перечисляет номера источников, на которые ссылается упоминание."""
+    return ", ".join(mention.extracted_targets) or mention.raw_snippet
+
+
+def _unresolved_bibliography_targets(
+    mention: TextCrossReferenceMention,
+    available_orders: Set[str],
+) -> List[str]:
+    """Номера ссылки, для которых в списке литературы нет записи.
+
+    Числовые цели ссылки сравниваются с ``order_index`` записей: перечисление
+    «[1, 7]» может разрешиться частично, и отсутствие седьмого источника —
+    такое же нарушение, как полностью неразрешенная ссылка. Цели, разбор
+    которых не дал числа (авторско-годовая ссылка «Иванов, 2020»), здесь не
+    проверяются: их разрешение видно по ``resolved_entity_ids``.
+    """
+    unresolved: List[str] = []
+    seen: Set[str] = set()
+    for target in mention.extracted_targets:
+        normalized = (target or "").strip()
+        if not normalized.isdigit():
+            continue
+        number = str(int(normalized))
+        if number in available_orders or number in seen:
+            continue
+        seen.add(number)
+        unresolved.append(number)
+    return unresolved
+
+
+def _bibliography_location(
+    entry: BibliographyEntry,
+    blocks: Dict[str, ParagraphBlock],
+) -> ViolationLocation:
+    """Строит локацию записи списка литературы: блок, страницу и фрагмент записи.
+
+    У самой записи страницы нет, поэтому она берется у абзаца записи, если
+    абзац найден в разборе; иначе страница остается неизвестной.
+    """
+    block = blocks.get(entry.block_id)
+    return ViolationLocation(
+        block_id=entry.block_id,
+        page_start_est=(
+            _safe_page_est(block.page_start_est) if block is not None else None
+        ),
+        page_end_est=(
+            _safe_page_est(block.page_end_est) if block is not None else None
+        ),
+        container_type=block.container_type if block is not None else None,
+        style_id=block.style_id if block is not None else None,
+        snippet=_collapse_text(entry.raw_text),
+    )
+
+
+def _bibliography_field_present(value: Any) -> bool:
+    """Считает поле записи списка литературы заполненным.
+
+    Отсутствие элемента — это ``None``, пустая строка, пустой список и
+    ``False`` (признак, который требуется: «есть разделитель //»). Числовые
+    значения, включая ноль, считаются заполненными: смысл конкретного поля
+    проверка не угадывает.
+    """
+    if value is None or value is False:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _caption_numbering_texts(
+    issue_kind: str,
+    number_str: str,
+    previous_str: Optional[str],
+) -> Tuple[str, str]:
+    """Формулирует ожидание и факт для нарушения нумерации подписей."""
+    if issue_kind == "duplicate":
+        return (
+            "уникальный номер подписи",
+            f"номер {number_str} уже использован подписью в блоке {previous_str}",
+        )
+    if issue_kind == "gap":
+        return (
+            f"следующий номер подписи после {previous_str}",
+            f"пропущен номер {number_str}",
+        )
+    return (
+        f"номер подписи больше {previous_str}",
+        f"номер {number_str} идет после {previous_str}",
+    )
+
+
 def _is_pdf_only(document: ParsedDocxDocument) -> bool:
     """True, если документ разобран только по PDF: стилей, pPr и numbering нет.
 
@@ -904,6 +1214,48 @@ class RuleEngine:
                     rule, document, contexts
                 )
                 assessments.append(assessment)
+            elif isinstance(rule, BibliographyLinkRule):
+                rule_violations, checked, assessment = self._check_bibliography_link_rule(
+                    rule, document
+                )
+                if assessment is not None:
+                    assessments.append(assessment)
+            elif isinstance(rule, BibliographyCitedRule):
+                rule_violations, checked, assessment = self._check_bibliography_cited_rule(
+                    rule, document
+                )
+                if assessment is not None:
+                    assessments.append(assessment)
+            elif isinstance(rule, BibliographyFormatRule):
+                rule_violations, checked, assessment = self._check_bibliography_format_rule(
+                    rule, document
+                )
+                if assessment is not None:
+                    assessments.append(assessment)
+            elif isinstance(rule, CaptionNumberingRule):
+                rule_violations, checked, assessment = self._check_caption_numbering_rule(
+                    rule, document
+                )
+                if assessment is not None:
+                    assessments.append(assessment)
+            elif isinstance(rule, CaptionFormatRule):
+                rule_violations, checked, assessment = self._check_caption_format_rule(
+                    rule, document
+                )
+                if assessment is not None:
+                    assessments.append(assessment)
+            elif isinstance(rule, CaptionReferenceRule):
+                rule_violations, checked, assessment = self._check_caption_reference_rule(
+                    rule, document
+                )
+                if assessment is not None:
+                    assessments.append(assessment)
+            elif isinstance(rule, AlignmentRule):
+                rule_violations, checked, assessment = self._check_alignment_rule(
+                    rule, document, contexts
+                )
+                if assessment is not None:
+                    assessments.append(assessment)
             else:
                 continue
             violations.extend(rule_violations)
@@ -2339,5 +2691,931 @@ class RuleEngine:
                     )
 
         return violations, checked
+
+    # -----------------------------------------------------------------
+    # Список литературы: ссылки, цитирование и формат записи
+    # -----------------------------------------------------------------
+
+    def _check_bibliography_link_rule(
+        self,
+        rule: BibliographyLinkRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        """Ищет ссылки на источники, которых нет в списке литературы.
+
+        Упоминание ``ref_type="bibliography"`` с непустыми
+        ``extracted_targets`` — это ссылка вида ``[3]``. Разрешенная ссылка
+        несет непустой ``resolved_entity_ids``; пустой список означает, что
+        записи с таким номером в списке нет. Перечисление может разрешиться
+        частично («[1, 7]»): отсутствующие номера сравниваются с
+        ``order_index`` записей и тоже дают нарушение. Если список литературы
+        пуст, проверять нечего: статус ``not_assessed``, а не выдуманные
+        нарушения.
+        """
+        index = document.cross_ref_index
+        entries = index.bibliography
+        expected_text = "ссылка указывает на источник, который есть в списке литературы"
+        if not entries:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text="список литературы пуст: разрешать ссылки не с чем",
+                    confidence="low",
+                    details={"bibliography_entries": 0, "mentions_considered": 0},
+                ),
+            )
+
+        mentions = [
+            mention
+            for mention in index.mentions
+            if mention.ref_type == "bibliography" and mention.extracted_targets
+        ]
+        if not mentions:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text=(
+                        "в тексте не найдено ссылок на источники списка литературы"
+                    ),
+                    confidence="low",
+                    details={
+                        "bibliography_entries": len(entries),
+                        "mentions_considered": 0,
+                    },
+                    note="Ссылки на источники ищет слой обогащения parser.enrichment",
+                ),
+            )
+
+        violations: List[Violation] = []
+        available_orders = {str(entry.order_index) for entry in entries}
+        for mention in mentions:
+            unresolved_targets = _unresolved_bibliography_targets(
+                mention, available_orders
+            )
+            if mention.resolved_entity_ids and not unresolved_targets:
+                continue
+            found_text = (
+                "в списке литературы нет источников: " + ", ".join(unresolved_targets)
+                if unresolved_targets
+                else (
+                    f"ссылка «{_mention_targets_text(mention)}» не разрешена "
+                    "в записи списка литературы"
+                )
+            )
+            violations.append(
+                Violation(
+                    violation_id=f"{rule.rule_id}:{mention.mention_id}",
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=ViolationLocation(
+                        block_id=mention.block_id,
+                        page_start_est=_safe_page_est(mention.page_est),
+                        snippet=_collapse_text(mention.raw_snippet),
+                    ),
+                    expected={
+                        "resolved_into_bibliography": True,
+                        "targets": list(mention.extracted_targets),
+                    },
+                    found={
+                        "resolved_into_bibliography": bool(
+                            mention.resolved_entity_ids
+                        ),
+                        "unresolved_targets": unresolved_targets,
+                    },
+                    expected_text=expected_text,
+                    found_text=found_text,
+                )
+            )
+
+        status = "fail" if violations else "pass"
+        observed_text = (
+            f"неразрешенных ссылок: {len(violations)} из {len(mentions)}"
+            if violations
+            else (
+                f"все ссылки ({len(mentions)}) разрешены "
+                "в записях списка литературы"
+            )
+        )
+        return (
+            violations,
+            len(mentions),
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence="high",
+                details={
+                    "bibliography_entries": len(entries),
+                    "mentions_considered": len(mentions),
+                    "unresolved_mentions": len(violations),
+                },
+            ),
+        )
+
+    def _check_bibliography_cited_rule(
+        self,
+        rule: BibliographyCitedRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        """Ищет источники списка литературы, на которые нет ссылок в тексте.
+
+        Признак ``is_cited_in_text`` вычисляет слой обогащения: запись, у
+        которой он False, — источник, не упомянутый в работе. Если записей нет,
+        проверять нечего: статус ``not_assessed``.
+        """
+        entries = document.cross_ref_index.bibliography
+        expected_text = "каждый источник списка литературы цитируется в тексте работы"
+        if not entries:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text="список литературы пуст: проверять цитирование нечего",
+                    confidence="low",
+                    details={"entries_considered": 0},
+                ),
+            )
+        if not rule.expected.require_all_cited:
+            # Модель отвергает такую конфигурацию; защита от копирования правила.
+            return (
+                [],
+                len(entries),
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="pass",
+                    expected_text=expected_text,
+                    observed_text="проверка цитирования отключена требованием правила",
+                    confidence="high",
+                    details={"entries_considered": len(entries)},
+                ),
+            )
+
+        violations: List[Violation] = []
+        blocks = _paragraph_index(document)
+        for entry in entries:
+            if entry.is_cited_in_text:
+                continue
+            violations.append(
+                Violation(
+                    violation_id=f"{rule.rule_id}:{entry.bib_id}",
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=_bibliography_location(entry, blocks),
+                    expected={"is_cited_in_text": True},
+                    found={
+                        "is_cited_in_text": False,
+                        "bib_id": entry.bib_id,
+                        "category": entry.detected_category,
+                    },
+                    expected_text=expected_text,
+                    found_text=(
+                        f"на источник «{_collapse_text(entry.raw_text, 60)}» "
+                        "нет ссылки в тексте"
+                    ),
+                )
+            )
+
+        status = "fail" if violations else "pass"
+        observed_text = (
+            f"без ссылок в тексте: {len(violations)} из {len(entries)} источников"
+            if violations
+            else f"все источники списка ({len(entries)}) процитированы"
+        )
+        return (
+            violations,
+            len(entries),
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence="high",
+                details={
+                    "entries_considered": len(entries),
+                    "uncited_entries": len(violations),
+                },
+            ),
+        )
+
+    def _check_bibliography_format_rule(
+        self,
+        rule: BibliographyFormatRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        """Проверяет разобранные поля записей списка литературы.
+
+        Каждое включенное требование — отдельная проверка: запись без URL и без
+        года дает два нарушения, чтобы нормоконтролер видел оба пропуска.
+        Фильтр ``categories`` ограничивает выборку категориями источников:
+        URL и дата обращения обычно обязательны для электронного ресурса, но
+        не для книги.
+        """
+        expected = rule.expected
+        entries = list(document.cross_ref_index.bibliography)
+        expected_text = "запись списка литературы содержит обязательные элементы"
+        if expected.categories is not None:
+            entries = [
+                entry
+                for entry in entries
+                if entry.detected_category in expected.categories
+            ]
+        if not entries:
+            category_text = (
+                " выбранных категорий" if expected.categories is not None else ""
+            )
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text=(
+                        f"в списке литературы нет записей{category_text}: "
+                        "проверять формат нечего"
+                    ),
+                    confidence="low",
+                    details={
+                        "entries_considered": 0,
+                        "categories": (
+                            list(expected.categories)
+                            if expected.categories is not None
+                            else None
+                        ),
+                    },
+                ),
+            )
+
+        violations: List[Violation] = []
+        blocks = _paragraph_index(document)
+        for entry in entries:
+            checks: List[Tuple[str, Any]] = []
+            if expected.require_url:
+                checks.append(("urls", entry.urls))
+            if expected.require_access_date:
+                checks.append(("access_date_raw", entry.access_date_raw))
+            if expected.require_year:
+                checks.append(("year_extracted", entry.year_extracted))
+            if expected.require_pages:
+                checks.append(("pages_extracted", entry.pages_extracted))
+            if expected.require_isbn_or_issn:
+                checks.append(("isbn_or_issn", entry.isbn_or_issn))
+            if expected.require_double_slash:
+                checks.append(("has_double_slash_source", entry.has_double_slash_source))
+            if expected.require_text_type_designation:
+                checks.append(
+                    ("has_text_type_designation", entry.has_text_type_designation)
+                )
+
+            for field, actual in checks:
+                if _bibliography_field_present(actual):
+                    continue
+                label = BIBLIOGRAPHY_FORMAT_LABELS[field]
+                violations.append(
+                    Violation(
+                        violation_id=f"{rule.rule_id}:{entry.bib_id}:{field}",
+                        rule_id=rule.rule_id,
+                        kind=rule.kind,
+                        severity=rule.severity,
+                        message=rule.message,
+                        requirement_ref=rule.requirement_ref,
+                        location=_bibliography_location(entry, blocks),
+                        expected={field: True},
+                        found={
+                            field: actual,
+                            "bib_id": entry.bib_id,
+                            "category": entry.detected_category,
+                        },
+                        expected_text=f"{label}: обязательно",
+                        found_text=f"{label}: отсутствует",
+                    )
+                )
+
+        status = "fail" if violations else "pass"
+        observed_text = (
+            f"несоответствий формата: {len(violations)} у {len(entries)} записей"
+            if violations
+            else f"все {len(entries)} записей списка соответствуют требованиям"
+        )
+        return (
+            violations,
+            len(entries),
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence="high",
+                details={
+                    "entries_considered": len(entries),
+                    "mismatches_total": len(violations),
+                    "categories": (
+                        list(expected.categories)
+                        if expected.categories is not None
+                        else None
+                    ),
+                },
+            ),
+        )
+
+    # -----------------------------------------------------------------
+    # Подписи рисунков, таблиц и приложений
+    # -----------------------------------------------------------------
+
+    def _check_caption_numbering_rule(
+        self,
+        rule: CaptionNumberingRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        """Проверяет сквозную арабскую нумерацию подписей выбранного вида.
+
+        Проверка реализована здесь, а не берется из
+        ``parser.docx.metadata_anomalies_parser``: движок работает и с
+        ``pdf_only``, где DOCX-слой аномалий не запускается. Дубли, пропуски и
+        нарушение порядка считаются по ``cross_ref_index``, а перечень
+        пропусков ограничен ``CAPTION_GAP_LIMIT`` номерами подряд, чтобы разрыв
+        1..1000 не раздувал отчет. Буквенные номера приложений и section-based
+        номера («2.1») в последовательности не участвуют: они видны в счетчике
+        объектов, но сквозной арабской нумерацией не являются.
+        """
+        expected = rule.expected
+        entities = _caption_entities(document, expected.entity_type)
+        entity_label = CAPTION_ENTITY_LABELS.get(
+            expected.entity_type, "объект с подписью"
+        )
+        expected_text = (
+            "сквозная арабская нумерация подписей без дублей, пропусков "
+            "и нарушения порядка"
+        )
+        if not entities:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text=(
+                        f"в документе не найдено подписей ({entity_label}): "
+                        "проверять нумерацию нечего"
+                    ),
+                    confidence="low",
+                    details={"entities_considered": 0, "entity_type": expected.entity_type},
+                ),
+            )
+
+        issues: List[Tuple[NumberedCaptionEntity, str, str, Optional[str]]] = []
+        seen: Dict[Tuple[str, str], str] = {}
+        last_by_family: Dict[str, Tuple[int, str]] = {}
+        arabic_numbers = 0
+        for entity in entities:
+            number = _caption_number(entity)
+            if number is None:
+                continue
+            arabic_numbers += 1
+            family = _caption_family(entity)
+            number_key = (family, entity.number_str)
+            if number_key in seen:
+                if not expected.allow_duplicates:
+                    issues.append(
+                        (entity, "duplicate", entity.number_str, seen[number_key])
+                    )
+                continue
+            seen[number_key] = entity.caption_block_id
+
+            previous = last_by_family.get(family)
+            if previous is not None:
+                previous_number, previous_str = previous
+                if number > previous_number + 1:
+                    if not expected.allow_gaps:
+                        for missing in range(
+                            previous_number + 1,
+                            min(
+                                number,
+                                previous_number + 1 + CAPTION_GAP_LIMIT,
+                            ),
+                        ):
+                            issues.append(
+                                (entity, "gap", str(missing), previous_str)
+                            )
+                elif number < previous_number:
+                    if not expected.allow_out_of_order:
+                        issues.append(
+                            (entity, "out_of_order", entity.number_str, previous_str)
+                        )
+            last_by_family[family] = (number, entity.number_str)
+
+        violations: List[Violation] = []
+        for entity, issue_kind, number_str, previous_str in issues:
+            expected_issue_text, found_issue_text = _caption_numbering_texts(
+                issue_kind, number_str, previous_str
+            )
+            violations.append(
+                Violation(
+                    violation_id=(
+                        f"{rule.rule_id}:{entity.entity_id}:{issue_kind}:{number_str}"
+                    ),
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=ViolationLocation(
+                        block_id=entity.caption_block_id,
+                        page_start_est=_safe_page_est(entity.page_est),
+                        snippet=_collapse_text(_caption_display(entity)),
+                    ),
+                    expected={
+                        "scheme": expected.scheme,
+                        "numbering": "без дублей, пропусков и нарушения порядка",
+                    },
+                    found={
+                        "issue_kind": issue_kind,
+                        "number": number_str,
+                        "previous_number": previous_str,
+                        "entity_id": entity.entity_id,
+                    },
+                    expected_text=expected_issue_text,
+                    found_text=found_issue_text,
+                )
+            )
+
+        details = {
+            "entity_type": expected.entity_type,
+            "entities_considered": len(entities),
+            "numbered_arabic": arabic_numbers,
+            "issues_total": len(issues),
+        }
+        if arabic_numbers == 0:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text=(
+                        "среди подписей нет сквозных арабских номеров "
+                        "(буквенные или section-based номера): сверять последовательность не с чем"
+                    ),
+                    confidence="low",
+                    details=details,
+                ),
+            )
+        status = "fail" if violations else "pass"
+        observed_text = (
+            f"нарушений нумерации: {len(violations)} из {arabic_numbers} нумерованных подписей"
+            if violations
+            else f"нумерация {arabic_numbers} подписей корректна"
+        )
+        return (
+            violations,
+            len(entities),
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence="high",
+                details=details,
+            ),
+        )
+
+    def _check_caption_format_rule(
+        self,
+        rule: CaptionFormatRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        """Проверяет оформление подписи: префикс, разделитель, точка, регистр.
+
+        Все расхождения одной подписи собираются в одно нарушение (как у
+        правила шрифта): нормоконтролеру нужен один адрес, а ``occurrences``
+        показывает, сколько свойств не совпало. Регистр проверяется по тексту
+        самого абзаца подписи; если абзаца нет в разборе, свойство
+        пропускается, а не считается нарушением.
+        """
+        expected = rule.expected
+        entities = _caption_entities(document, expected.entity_type)
+        entity_label = CAPTION_ENTITY_LABELS.get(
+            expected.entity_type, "объект с подписью"
+        )
+        if not entities:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text="подпись оформлена по требованию",
+                    observed_text=(
+                        f"в документе не найдено подписей ({entity_label}): "
+                        "проверять оформление нечего"
+                    ),
+                    confidence="low",
+                    details={"entities_considered": 0, "entity_type": expected.entity_type},
+                ),
+            )
+
+        blocks = _paragraph_index(document)
+        allowed_prefixes: Optional[Set[str]] = None
+        if expected.prefix_words is not None:
+            allowed_prefixes = {
+                _normalize_caption_prefix(word) for word in expected.prefix_words
+            }
+        violations: List[Violation] = []
+        assessed_entities = 0
+        skipped_uppercase = 0
+        for entity in entities:
+            block = blocks.get(entity.caption_block_id)
+            expected_values: Dict[str, Any] = {}
+            found_values: Dict[str, Any] = {}
+            expected_parts: List[str] = []
+            found_parts: List[str] = []
+            measurable = False
+
+            if allowed_prefixes is not None:
+                measurable = True
+                actual_prefix = _normalize_caption_prefix(entity.prefix_word)
+                if actual_prefix not in allowed_prefixes:
+                    expected_values["prefix_word"] = list(expected.prefix_words or [])
+                    found_values["prefix_word"] = entity.prefix_word
+                    expected_parts.append(
+                        "подпись начинается с "
+                        + " / ".join(f"«{word}»" for word in expected.prefix_words or [])
+                    )
+                    found_parts.append(f"«{entity.prefix_word}»")
+
+            if expected.separator is not None:
+                measurable = True
+                actual_separator = _caption_separator_kind(
+                    entity.separator, entity.title_text
+                )
+                if actual_separator != expected.separator:
+                    expected_values["separator"] = expected.separator
+                    found_values["separator"] = actual_separator
+                    expected_parts.append(
+                        f"разделитель: {CAPTION_SEPARATOR_LABELS[expected.separator]}"
+                    )
+                    found_parts.append(
+                        "разделитель: "
+                        f"{CAPTION_SEPARATOR_LABELS.get(actual_separator, actual_separator)}"
+                    )
+
+            if expected.require_trailing_dot is not None:
+                measurable = True
+                if entity.has_trailing_dot != expected.require_trailing_dot:
+                    expected_values["has_trailing_dot"] = expected.require_trailing_dot
+                    found_values["has_trailing_dot"] = entity.has_trailing_dot
+                    expected_parts.append(
+                        "точка в конце подписи"
+                        if expected.require_trailing_dot
+                        else "без точки в конце подписи"
+                    )
+                    found_parts.append(
+                        "точка есть" if entity.has_trailing_dot else "точки нет"
+                    )
+
+            if expected.uppercase is not None:
+                actual_case = _is_uppercase_text(
+                    block.text_visible if block is not None else None
+                )
+                if actual_case is None:
+                    skipped_uppercase += 1
+                else:
+                    measurable = True
+                    if actual_case != expected.uppercase:
+                        expected_values["uppercase"] = expected.uppercase
+                        found_values["uppercase"] = actual_case
+                        expected_parts.append(
+                            "подпись прописными буквами"
+                            if expected.uppercase
+                            else "подпись не прописными буквами"
+                        )
+                        found_parts.append(
+                            "прописными" if actual_case else "не прописными"
+                        )
+
+            if measurable:
+                assessed_entities += 1
+            if not expected_values:
+                continue
+            violations.append(
+                Violation(
+                    violation_id=f"{rule.rule_id}:{entity.entity_id}",
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=ViolationLocation(
+                        block_id=entity.caption_block_id,
+                        page_start_est=_safe_page_est(entity.page_est),
+                        snippet=(
+                            _collapse_text(block.text_visible)
+                            if block is not None
+                            else _collapse_text(_caption_display(entity))
+                        ),
+                    ),
+                    expected=expected_values,
+                    found={**found_values, "entity_id": entity.entity_id},
+                    expected_text=", ".join(expected_parts),
+                    found_text=", ".join(found_parts),
+                    occurrences=len(expected_parts),
+                )
+            )
+
+        details = {
+            "entity_type": expected.entity_type,
+            "entities_considered": len(entities),
+            "entities_assessed": assessed_entities,
+            "skipped_uppercase": skipped_uppercase,
+            "mismatches_total": len(violations),
+        }
+        if assessed_entities == 0:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text="подпись оформлена по требованию",
+                    observed_text=(
+                        "оформление подписей не измерено: абзацы подписей "
+                        "отсутствуют в разборе, проверялся только регистр"
+                    ),
+                    confidence="low",
+                    details=details,
+                ),
+            )
+        status = "fail" if violations else "pass"
+        observed_text = (
+            f"подписей с нарушением оформления: {len(violations)} из {assessed_entities}"
+            if violations
+            else f"оформление {assessed_entities} подписей соответствует требованиям"
+        )
+        return (
+            violations,
+            len(entities),
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text="подпись оформлена по требованию",
+                observed_text=observed_text,
+                confidence="high",
+                details=details,
+            ),
+        )
+
+    def _check_caption_reference_rule(
+        self,
+        rule: CaptionReferenceRule,
+        document: ParsedDocxDocument,
+    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        """Ищет рисунки и таблицы, на которые нет ссылки в тексте работы.
+
+        Признак ``is_mentioned_in_text`` вычисляет слой обогащения: подпись
+        сама называет объект, но ссылкой не считается. Приложения в выборку не
+        входят — ссылка «приложение А» проверяется отдельно.
+        """
+        expected = rule.expected
+        entities = _referenced_caption_entities(document, expected.entity_type)
+        entity_label = CAPTION_ENTITY_LABELS.get(expected.entity_type, "объект")
+        expected_text = "объект упомянут в тексте работы"
+        if not entities:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text=(
+                        f"в документе не найдено подписей ({entity_label}): "
+                        "проверять ссылки нечего"
+                    ),
+                    confidence="low",
+                    details={"entities_considered": 0, "entity_type": expected.entity_type},
+                ),
+            )
+        if not expected.required:
+            # Модель отвергает такую конфигурацию; защита от копирования правила.
+            return (
+                [],
+                len(entities),
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="pass",
+                    expected_text=expected_text,
+                    observed_text="проверка ссылок отключена требованием правила",
+                    confidence="high",
+                    details={"entities_considered": len(entities)},
+                ),
+            )
+
+        violations: List[Violation] = []
+        for entity in entities:
+            if entity.is_mentioned_in_text:
+                continue
+            violations.append(
+                Violation(
+                    violation_id=f"{rule.rule_id}:{entity.entity_id}",
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=ViolationLocation(
+                        block_id=entity.caption_block_id,
+                        page_start_est=_safe_page_est(entity.page_est),
+                        snippet=_collapse_text(_caption_display(entity)),
+                    ),
+                    expected={"is_mentioned_in_text": True},
+                    found={
+                        "is_mentioned_in_text": False,
+                        "entity_id": entity.entity_id,
+                        "number": entity.number_str,
+                    },
+                    expected_text=expected_text,
+                    found_text=(
+                        f"на «{_caption_display(entity)}» нет ссылки в тексте"
+                    ),
+                )
+            )
+
+        status = "fail" if violations else "pass"
+        observed_text = (
+            f"без ссылки в тексте: {len(violations)} из {len(entities)} объектов"
+            if violations
+            else f"все {len(entities)} объектов упомянуты в тексте"
+        )
+        return (
+            violations,
+            len(entities),
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence="high",
+                details={
+                    "entity_type": expected.entity_type,
+                    "entities_considered": len(entities),
+                    "unreferenced_entities": len(violations),
+                },
+            ),
+        )
+
+    # -----------------------------------------------------------------
+    # Выравнивание
+    # -----------------------------------------------------------------
+
+    def _check_alignment_rule(
+        self,
+        rule: AlignmentRule,
+        document: ParsedDocxDocument,
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        """Сверяет выравнивание абзацев выбранной области с ожиданием.
+
+        Область ``captions`` берет абзацы подписей по ``caption_block_id``,
+        ``table_cells`` — абзацы внутри ячеек таблиц, ``body_text`` — абзацы
+        основного текста. Если выравнивание не измерено (``None`` в старом JSON
+        или абзац подписи отсутствует в разборе), объект пропускается с
+        причиной, а не считается нарушением: как у правила шрифта, отсутствие
+        измерения не превращается в вердикт.
+        """
+        expected_alignment = rule.expected.alignment
+        expected_text = f"выравнивание {ALIGNMENT_LABELS[expected_alignment]}"
+        measured: List[ParagraphBlock] = []
+        unmeasured = 0
+        if rule.target.scope == "captions":
+            blocks = _paragraph_index(document)
+            seen_blocks: Set[str] = set()
+            for entity in _caption_entities(document, "any"):
+                if entity.caption_block_id in seen_blocks:
+                    continue
+                seen_blocks.add(entity.caption_block_id)
+                block = blocks.get(entity.caption_block_id)
+                if block is None:
+                    unmeasured += 1
+                    continue
+                measured.append(block)
+        else:
+            measured = self._paragraph_targets(document, rule.target, contexts)
+
+        violations: List[Violation] = []
+        checked = 0
+        for paragraph in measured:
+            actual_alignment = paragraph.effective_props.alignment
+            if actual_alignment is None:
+                # Защита от старого JSON: поле «не измерено», а не «по левому краю».
+                unmeasured += 1
+                continue
+            checked += 1
+            if _alignment_matches(expected_alignment, actual_alignment):
+                continue
+            violations.append(
+                Violation(
+                    violation_id=f"{rule.rule_id}:{paragraph.block_id}",
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    severity=rule.severity,
+                    message=rule.message,
+                    requirement_ref=rule.requirement_ref,
+                    location=_paragraph_location(paragraph),
+                    expected={"alignment": expected_alignment},
+                    found={
+                        "alignment": actual_alignment,
+                        "alignment_source": paragraph.effective_props.alignment_source,
+                    },
+                    expected_text=expected_text,
+                    found_text=(
+                        "выравнивание "
+                        f"{ALIGNMENT_LABELS.get(actual_alignment, actual_alignment)}"
+                    ),
+                )
+            )
+
+        details = {
+            "scope": rule.target.scope,
+            "objects_considered": len(measured),
+            "checked": checked,
+            "skipped_unmeasured": unmeasured,
+            "mismatches_total": len(violations),
+        }
+        if checked == 0:
+            return (
+                [],
+                0,
+                RuleAssessment(
+                    rule_id=rule.rule_id,
+                    kind=rule.kind,
+                    status="not_assessed",
+                    expected_text=expected_text,
+                    observed_text=(
+                        "выравнивание не измерено ни для одного объекта области "
+                        f"'{rule.target.scope}': пропущено {unmeasured}"
+                    ),
+                    confidence="low",
+                    details=details,
+                ),
+            )
+        status = "fail" if violations else "pass"
+        observed_text = (
+            f"не соответствует требованию: {len(violations)} из {checked} объектов"
+            if violations
+            else (
+                f"все {checked} объектов выровнены "
+                f"{ALIGNMENT_LABELS[expected_alignment]}"
+            )
+        )
+        return (
+            violations,
+            checked,
+            RuleAssessment(
+                rule_id=rule.rule_id,
+                kind=rule.kind,
+                status=status,
+                expected_text=expected_text,
+                observed_text=observed_text,
+                confidence="high",
+                details=details,
+            ),
+        )
 
 

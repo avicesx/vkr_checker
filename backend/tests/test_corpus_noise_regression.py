@@ -33,7 +33,9 @@
   Смолиной) не дают нарушений шрифта и отступа;
 * реальные нарушения сохраняются: заголовки «по ширине», красная строка 0 в
   DOCX, подписи рисунков и таблиц, отклонения полей страницы больше допуска;
-* суммарный бюджет шума по корпусу не выходит за оговоренные границы.
+* суммарный бюджет шума по корпусу не выходит за оговоренные границы; находки
+  новых видов проверок (ссылки, подписи, выравнивание, шрифт таблиц) держатся
+  в отдельном бюджете первого замера.
 """
 from __future__ import annotations
 
@@ -86,6 +88,54 @@ PRE_FIX_FONT = 1109
 PRE_FIX_INDENT = 1162
 PRE_FIX_FONT_INDENT = PRE_FIX_FONT + PRE_FIX_INDENT  # 2271 по заданию
 PRE_FIX_TOTAL = 2611  # в отчетах pre_fix 2613; по заданию — 2611
+
+#: Девять текстовых правил штатного набора: их суммарный шум и держит бюджет 184.
+#: Новые виды проверок (ссылки, подписи, выравнивание, шрифт таблиц) в него не
+#: входят — у них собственный бюджет ниже, потому что это другие находки.
+TEXT_NOISE_RULE_IDS: frozenset = frozenset(
+    {
+        "font_body_text",
+        "indent_first_line",
+        "page_margins",
+        "heading_levels",
+        "heading_numbering",
+        "heading_format_text",
+        "heading_alignment",
+        "required_sections",
+        "toc",
+    }
+)
+
+#: Бюджет шума новых видов проверок: первый замер на корпусе (t3, набор 2.1.0).
+#: Числа детерминированы (разбор и обогащение без таймстемпов и случайности),
+#: поэтому это потолок: рост — регрессия эвристики, снижение допустимо.
+NEW_KIND_NOISE_BASELINE = 308
+NEW_KIND_NOISE_BASELINE_BY_FAMILY: Dict[str, int] = {
+    "alignment_table_cells": 144,
+    "font_table_cells": 121,
+    "bibliography": 26,
+    "captions": 17,
+}
+
+#: Правила новых видов: ссылки и список литературы, подписи, выравнивание,
+#: шрифт в таблицах. Используются для отдельного бюджета шума.
+NEW_KIND_RULE_IDS: frozenset = frozenset(
+    {
+        "bibliography_links_resolved",
+        "bibliography_all_cited",
+        "bibliography_format_electronic",
+        "bibliography_format_article",
+        "caption_numbering_figures",
+        "caption_numbering_tables",
+        "caption_format_figures",
+        "caption_format_tables",
+        "caption_reference_figures",
+        "caption_reference_tables",
+        "alignment_captions",
+        "alignment_table_cells",
+        "font_table_cells",
+    }
+)
 
 #: Бюджеты шума: не больше 20 % прежних текстовых нарушений и меньше 600 всего.
 FONT_INDENT_BUDGET_SHARE = 0.20
@@ -510,17 +560,76 @@ def test_corpus_noise_budget(corpus: Dict[str, CorpusDoc]) -> None:
 
 @requires_corpus
 def test_corpus_total_noise_at_most_target(corpus: Dict[str, CorpusDoc]) -> None:
-    """Итог корпуса не больше 184 нарушений, шрифтовых — ноль.
+    """Итог девяти текстовых правил не больше 184 нарушений, шрифтовых — ноль.
 
     Цель после правок f1–f6: font 0 (запись шрифта PDF нормализуется, строки
     кода распознаются листингом), indent 36 (реальная нулевая красная строка в
     DOCX), остальное — настоящие находки (выравнивание заголовков, поля,
     нумерация, состав разделов). Улучшения допустимы, рост — регрессия.
+
+    Бюджет считается по девяти текстовым правилам набора (``TEXT_NOISE_RULE_IDS``):
+    это гарантия отсутствия шума в текстовых проверках. Находки новых видов
+    (ссылки, подписи, выравнивание ячеек, шрифт таблиц) проверяются отдельным
+    бюджетом ниже: смешивать их с текстовым шумом нельзя — у них другая природа.
     """
     font_total = sum(len(doc.violations(FONT_RULE_ID)) for doc in corpus.values())
-    total = sum(doc.report.summary.violations_total for doc in corpus.values())
+    total = sum(
+        len([v for v in doc.report.violations if v.rule_id in TEXT_NOISE_RULE_IDS])
+        for doc in corpus.values()
+    )
 
     assert font_total == 0, f"шрифтовой шум корпуса {font_total} вместо нуля"
     assert total <= TOTAL_NOISE_TARGET, (
-        f"всего нарушений {total} при цели {TOTAL_NOISE_TARGET} (до фиксации {PRE_FIX_TOTAL})"
+        f"текстовых нарушений {total} при цели {TOTAL_NOISE_TARGET} "
+        f"(до фиксации {PRE_FIX_TOTAL})"
+    )
+
+
+def _new_kind_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
+    """Считает нарушения новых видов по семействам проверок.
+
+    Выравнивание и шрифт считаются по конкретному правилу (ячейки таблиц), а
+    ``bibliography_*`` и ``caption_*`` — группами: это разные проверки, но один
+    вид находок для бюджета.
+    """
+    counts: Dict[str, int] = {family: 0 for family in NEW_KIND_NOISE_BASELINE_BY_FAMILY}
+    for doc in corpus.values():
+        for violation in doc.report.violations:
+            if violation.rule_id not in NEW_KIND_RULE_IDS:
+                continue
+            if violation.rule_id in {"alignment_table_cells", "font_table_cells"}:
+                counts[violation.rule_id] += 1
+            elif violation.rule_id.startswith("bibliography_"):
+                counts["bibliography"] += 1
+            else:
+                counts["captions"] += 1
+    return counts
+
+
+@requires_corpus
+def test_new_check_kinds_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> None:
+    """Шум новых видов проверок не больше первого замера на корпусе.
+
+    Первый замер (t3, набор правил 2.1.0): alignment_table_cells 144,
+    font_table_cells 121, bibliography_* 26, captions 17 — всего 308 нарушений.
+    Это настоящие находки, а не шум эвристики: центрированные ячейки таблиц,
+    кегль в таблицах, источники без ссылок, подписи без тире и без ссылок в
+    тексте. Числа детерминированы, поэтому бюджет — потолок: снижение допустимо,
+    рост означает регрессию обогащения или правил.
+    """
+    counts = _new_kind_counts(corpus)
+    total = sum(counts.values())
+
+    for family, baseline in NEW_KIND_NOISE_BASELINE_BY_FAMILY.items():
+        assert counts[family] <= baseline, (
+            f"{family}: нарушений {counts[family]} при первом замере {baseline}"
+        )
+    assert total <= NEW_KIND_NOISE_BASELINE, (
+        f"нарушений новых видов {total} при первом замере {NEW_KIND_NOISE_BASELINE}"
+    )
+
+    applied = {rule.rule_id for rule in load_default_ruleset().rules}
+    assert NEW_KIND_RULE_IDS <= applied, (
+        "новые виды проверок пропали из штатного набора: "
+        f"{sorted(NEW_KIND_RULE_IDS - applied)}"
     )

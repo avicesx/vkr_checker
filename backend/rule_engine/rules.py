@@ -51,6 +51,13 @@ RuleKind = Literal[
     "page_number_position",
     "page_format",
     "line_spacing",
+    "bibliography_link",
+    "bibliography_cited",
+    "bibliography_format",
+    "caption_numbering",
+    "caption_format",
+    "caption_reference",
+    "alignment",
 ]
 RuleSeverity = Literal["error", "warning", "info"]
 
@@ -110,6 +117,8 @@ Scope = Literal[
     "headings",           # заголовки в порядке следования (document_tree)
     "document_structure", # структура документа: состав и порядок разделов
     "toc",                # блоки оглавления и их записи
+    "bibliography",       # список литературы и ссылки на его источники
+    "captions",           # подписи рисунков, таблиц и приложений
 ]
 
 PARAGRAPH_SCOPES: frozenset[str] = frozenset(
@@ -126,6 +135,11 @@ PARAGRAPH_SCOPES: frozenset[str] = frozenset(
 HEADING_SCOPES: frozenset[str] = frozenset({"headings"})
 STRUCTURE_SCOPES: frozenset[str] = frozenset({"document_structure"})
 TOC_SCOPES: frozenset[str] = frozenset({"toc"})
+BIBLIOGRAPHY_SCOPES: frozenset[str] = frozenset({"bibliography"})
+CAPTION_SCOPES: frozenset[str] = frozenset({"captions"})
+
+ALIGNMENT_SCOPES: frozenset[str] = CAPTION_SCOPES | frozenset({"table_cells", "body_text"})
+"""Области, где выравнивание абзаца осмысленно: подписи, ячейки таблиц и текст."""
 
 SCOPE_LABELS: dict[str, str] = {
     "body_text": "основной текст",
@@ -138,6 +152,8 @@ SCOPE_LABELS: dict[str, str] = {
     "headings": "заголовки",
     "document_structure": "структуру разделов",
     "toc": "оглавление",
+    "bibliography": "список литературы",
+    "captions": "подписи рисунков и таблиц",
 }
 
 DEFAULT_RULESET_PATH = Path(__file__).resolve().parent / "rules" / "vkr_test_rules.json"
@@ -661,9 +677,311 @@ class LineSpacingExpectation(BaseModel):
     )
 
 
+BibliographyCategory = Literal[
+    "book_monograph",
+    "journal_article",
+    "conference_paper",
+    "electronic_resource",
+    "normative_act_law",
+    "standard_gost",
+    "dissertation_autoref",
+    "patent",
+    "unknown",
+]
+"""Категория источника; совпадает с BibliographyEntry.detected_category парсера."""
+
+
+class BibliographyLinkExpectation(BaseModel):
+    """Требование к ссылкам на источники списка литературы.
+
+    Числовая ссылка вида ``[3]`` разрешается в запись списка по номеру: пустой
+    ``resolved_entity_ids`` у упоминания означает, что источника с таким номером
+    в списке нет. Конфигурация, отключающая проверку, отвергается на загрузке:
+    правило, которое ничего не проверяет, — ошибка набора, а не «мягкий режим».
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow_unresolved: bool = Field(
+        default=False,
+        description="Разрешить ссылки на источники, которых нет в списке литературы",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "BibliographyLinkExpectation":
+        """Запрещает набор, в котором проверка ссылок отключена."""
+        if self.allow_unresolved:
+            raise ValueError(
+                "BibliographyLinkExpectation пусто: allow_unresolved=True отключает "
+                "проверку ссылок на источники"
+            )
+        return self
+
+
+class BibliographyCitedExpectation(BaseModel):
+    """Требование цитирования источников: каждая запись списка упомянута в тексте.
+
+    Запись с ``is_cited_in_text=False`` — источник, на который в работе нет ни
+    одной ссылки. ``require_all_cited=False`` отключает проверку и поэтому
+    отвергается: правило без проверки бесполезно.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_all_cited: bool = Field(
+        default=True,
+        description="Требовать ссылку в тексте на каждый источник списка литературы",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "BibliographyCitedExpectation":
+        """Запрещает набор, в котором проверка цитирования отключена."""
+        if not self.require_all_cited:
+            raise ValueError(
+                "BibliographyCitedExpectation пусто: require_all_cited=False отключает "
+                "проверку цитирования источников"
+            )
+        return self
+
+
+class BibliographyFormatExpectation(BaseModel):
+    """Требования к оформлению записи списка литературы.
+
+    Проверяются разобранные поля ``BibliographyEntry``. ``categories``
+    ограничивает выборку категориями источников (``None`` — все записи):
+    например, URL и дата обращения обязательны для электронного ресурса, но не
+    для книги. Каждый включенный флаг — отдельное требование, поэтому запись
+    без URL и без года дает два нарушения, а не одно общее.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    categories: Optional[List[BibliographyCategory]] = Field(
+        default=None,
+        description="Категории источников, к которым применяется правило (None — все)",
+    )
+    require_url: bool = Field(default=False, description="Требовать URL источника")
+    require_access_date: bool = Field(
+        default=False,
+        description="Требовать дату обращения к источнику",
+    )
+    require_year: bool = Field(default=False, description="Требовать год издания")
+    require_pages: bool = Field(default=False, description="Требовать объём в страницах")
+    require_isbn_or_issn: bool = Field(
+        default=False,
+        description="Требовать ISBN или ISSN издания",
+    )
+    require_double_slash: bool = Field(
+        default=False,
+        description="Требовать разделитель «//» перед названием источника (статья, глава)",
+    )
+    require_text_type_designation: bool = Field(
+        default=False,
+        description="Требовать обозначение вида издания: [Текст], [Электронный ресурс] и т.п.",
+    )
+
+    @field_validator("categories")
+    @classmethod
+    def _validate_categories(
+        cls, value: Optional[List[BibliographyCategory]]
+    ) -> Optional[List[BibliographyCategory]]:
+        """Убирает повторы категорий и отвергает пустой перечень."""
+        if value is None:
+            return None
+        unique: List[BibliographyCategory] = []
+        for category in value:
+            if category not in unique:
+                unique.append(category)
+        if not unique:
+            raise ValueError(
+                "categories пуст: укажите категории источников или None (все категории)"
+            )
+        return unique
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "BibliographyFormatExpectation":
+        """Требует хотя бы одно проверяемое требование к записи."""
+        if not any(
+            (
+                self.require_url,
+                self.require_access_date,
+                self.require_year,
+                self.require_pages,
+                self.require_isbn_or_issn,
+                self.require_double_slash,
+                self.require_text_type_designation,
+            )
+        ):
+            raise ValueError(
+                "BibliographyFormatExpectation пусто: включите хотя бы одно требование "
+                "(require_url, require_access_date, require_year, require_pages, "
+                "require_isbn_or_issn, require_double_slash, require_text_type_designation)"
+            )
+        return self
+
+
+class CaptionNumberingExpectation(BaseModel):
+    """Требование к нумерации подписей: сквозная арабская, без дублей и пропусков.
+
+    ``entity_type`` выбирает вид объектов: рисунки, таблицы, приложения или все
+    вместе. Нумерация приложений буквенная, поэтому проверяется только на
+    арабских номерах: буквенные номера участвуют в подсчете объектов, но не в
+    последовательности. Разрешения (``allow_*``) нужны для документов, где
+    разрывы нумерации допустимы методикой; конфигурация, разрешающая всё сразу,
+    ничего не проверяет и отвергается.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_type: Literal["figure", "table", "appendix", "any"] = Field(
+        default="any",
+        description="Вид объектов: рисунок, таблица, приложение или все вместе",
+    )
+    scheme: Literal["continuous_arabic"] = Field(
+        default="continuous_arabic",
+        description="Требуемая схема нумерации: сквозная арабская",
+    )
+    allow_gaps: bool = Field(default=False, description="Разрешить пропуски номеров")
+    allow_duplicates: bool = Field(default=False, description="Разрешить повтор номеров")
+    allow_out_of_order: bool = Field(
+        default=False,
+        description="Разрешить нарушение порядка номеров (номер меньше предыдущего)",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "CaptionNumberingExpectation":
+        """Требует хотя бы одну включенную проверку нумерации."""
+        if self.allow_gaps and self.allow_duplicates and self.allow_out_of_order:
+            raise ValueError(
+                "CaptionNumberingExpectation пусто: разрешены дубли, пропуски и порядок, "
+                "проверять нечего"
+            )
+        return self
+
+
+class CaptionFormatExpectation(BaseModel):
+    """Требования к оформлению подписи: префикс, разделитель, точка, регистр.
+
+    ``separator`` задает вид разделителя между номером и названием: ``dash`` —
+    тире, ``dot`` — точка, ``space`` — пробел, ``none`` — разделителя нет.
+    Пробельный разделитель разбор подписи хранит как ``separator=None`` при
+    непустом названии, поэтому ``space`` означает и обычный пробел, и
+    «номер, затем название» без пунктуации; ``none`` — подпись без названия.
+    Разделитель, который не тире и не точка (``:``, ``|``), тоже считается
+    пробельным: подпись с ним читается как «номер, затем название».
+    ``prefix_words`` — допустимые слова-префиксы («Рисунок», «Рис.», «Таблица»);
+    сравнение без учета регистра и завершающей точки, поэтому ``рис.`` и ``Рис``
+    совпадают, а «Рисунок» и «Рис.» — разные варианты и перечисляются оба.
+    ``uppercase`` проверяет регистр текста подписи по самому абзацу подписи.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_type: Literal["figure", "table", "appendix", "any"] = Field(
+        default="any",
+        description="Вид объектов: рисунок, таблица, приложение или все вместе",
+    )
+    separator: Optional[Literal["dash", "dot", "space", "none"]] = Field(
+        default=None,
+        description="Вид разделителя между номером и названием (None — не проверять)",
+    )
+    require_trailing_dot: Optional[bool] = Field(
+        default=None,
+        description="Требовать точку в конце подписи (None — не проверять)",
+    )
+    prefix_words: Optional[List[str]] = Field(
+        default=None,
+        description="Допустимые слова-префиксы подписи (None — не проверять)",
+    )
+    uppercase: Optional[bool] = Field(
+        default=None,
+        description="Требовать текст подписи прописными буквами (None — не проверять)",
+    )
+
+    @field_validator("prefix_words")
+    @classmethod
+    def _normalize_prefix_words(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        """Убирает пустые варианты и лишние пробелы в словах-префиксах."""
+        if value is None:
+            return None
+        normalized = [" ".join(word.split()) for word in value]
+        result = [word for word in normalized if word]
+        if not result:
+            raise ValueError(
+                "prefix_words пуст: перечислите хотя бы один допустимый префикс подписи"
+            )
+        return result
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "CaptionFormatExpectation":
+        """Требует хотя бы одно проверяемое свойство подписи."""
+        if (
+            self.separator is None
+            and self.require_trailing_dot is None
+            and self.prefix_words is None
+            and self.uppercase is None
+        ):
+            raise ValueError(
+                "CaptionFormatExpectation пусто: задайте separator, require_trailing_dot, "
+                "prefix_words или uppercase"
+            )
+        return self
+
+
+class CaptionReferenceExpectation(BaseModel):
+    """Требование ссылки на объект в тексте: у подписи есть упоминание в тексте.
+
+    ``required=False`` отключает проверку и поэтому отвергается. Приложения в
+    выборку не входят: ссылка «приложение А» проверяется отдельно от ссылок на
+    рисунки и таблицы.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_type: Literal["figure", "table", "any"] = Field(
+        default="any",
+        description="Вид объектов: рисунок, таблица или оба вида",
+    )
+    required: bool = Field(
+        default=True,
+        description="Требовать упоминание объекта в тексте работы",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "CaptionReferenceExpectation":
+        """Запрещает набор, в котором проверка ссылок отключена."""
+        if not self.required:
+            raise ValueError(
+                "CaptionReferenceExpectation пусто: required=False отключает "
+                "проверку ссылок на объекты"
+            )
+        return self
+
+
+class AlignmentExpectation(BaseModel):
+    """Требование выравнивания абзаца.
+
+    ``justify`` — выравнивание по ширине: в разборе DOCX оно записано как
+    ``both`` (двустороннее), поэтому оба имени считаются одним требованием.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    alignment: Literal["left", "center", "right", "justify"] = Field(
+        description="Ожидаемое выравнивание: left, center, right или justify (по ширине)",
+    )
+
+    @field_validator("alignment", mode="before")
+    @classmethod
+    def _normalize_alignment(cls, value: object) -> object:
+        """Приводит выравнивание к нижнему регистру и убирает пробелы по краям."""
+        if isinstance(value, str):
+            return value.strip().casefold()
+        return value
+
+
 class _RuleBase(BaseModel):
     """Общие поля правила: идентификатор, важность, сообщение и область."""
-
     model_config = ConfigDict(extra="forbid")
 
     rule_id: str = Field(description="Уникальный идентификатор правила внутри набора")
@@ -780,6 +1098,62 @@ class LineSpacingRule(_RuleBase):
     expected: LineSpacingExpectation
 
 
+class BibliographyLinkRule(_RuleBase):
+    """Правило разрешения ссылок на источники списка литературы."""
+
+    kind: Literal["bibliography_link"] = "bibliography_link"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyLinkExpectation
+
+
+class BibliographyCitedRule(_RuleBase):
+    """Правило цитирования источников: каждая запись списка упомянута в тексте."""
+
+    kind: Literal["bibliography_cited"] = "bibliography_cited"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyCitedExpectation
+
+
+class BibliographyFormatRule(_RuleBase):
+    """Правило оформления записей списка литературы."""
+
+    kind: Literal["bibliography_format"] = "bibliography_format"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyFormatExpectation
+
+
+class CaptionNumberingRule(_RuleBase):
+    """Правило нумерации подписей рисунков, таблиц и приложений."""
+
+    kind: Literal["caption_numbering"] = "caption_numbering"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    expected: CaptionNumberingExpectation
+
+
+class CaptionFormatRule(_RuleBase):
+    """Правило оформления подписи: префикс, разделитель, точка, регистр."""
+
+    kind: Literal["caption_format"] = "caption_format"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    expected: CaptionFormatExpectation
+
+
+class CaptionReferenceRule(_RuleBase):
+    """Правило ссылки на рисунок или таблицу в тексте работы."""
+
+    kind: Literal["caption_reference"] = "caption_reference"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    expected: CaptionReferenceExpectation
+
+
+class AlignmentRule(_RuleBase):
+    """Правило выравнивания абзаца: подписи, ячейки таблиц, основной текст."""
+
+    kind: Literal["alignment"] = "alignment"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    expected: AlignmentExpectation
+
+
 Rule = Annotated[
     Union[
         FontRule,
@@ -793,6 +1167,13 @@ Rule = Annotated[
         PageNumberPositionRule,
         PageFormatRule,
         LineSpacingRule,
+        BibliographyLinkRule,
+        BibliographyCitedRule,
+        BibliographyFormatRule,
+        CaptionNumberingRule,
+        CaptionFormatRule,
+        CaptionReferenceRule,
+        AlignmentRule,
     ],
     Field(discriminator="kind"),
 ]
@@ -809,6 +1190,13 @@ KIND_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "page_number_position": frozenset({"headers_footers"}),
     "page_format": frozenset({"sections"}),
     "line_spacing": PARAGRAPH_SCOPES | HEADING_SCOPES,
+    "bibliography_link": BIBLIOGRAPHY_SCOPES,
+    "bibliography_cited": BIBLIOGRAPHY_SCOPES,
+    "bibliography_format": BIBLIOGRAPHY_SCOPES,
+    "caption_numbering": CAPTION_SCOPES,
+    "caption_format": CAPTION_SCOPES,
+    "caption_reference": CAPTION_SCOPES,
+    "alignment": ALIGNMENT_SCOPES,
 }
 """Какие scope допустимы для каждого вида правила (проверяется при загрузке набора)."""
 
