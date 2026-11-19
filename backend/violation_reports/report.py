@@ -31,6 +31,8 @@ class ReportCategory(str, Enum):
     DOCUMENT_INTEGRITY = "document_integrity"
     FIGURES = "figures"
     PAGE_LAYOUT = "page_layout"
+    BIBLIOGRAPHY = "bibliography"
+    CAPTIONS = "captions"
 
 
 class ReportSeverity(str, Enum):
@@ -136,6 +138,8 @@ _CATEGORY_TITLES = {
     ReportCategory.DOCUMENT_INTEGRITY: "Целостность документа",
     ReportCategory.FIGURES: "Рисунки и иллюстрации",
     ReportCategory.PAGE_LAYOUT: "Разметка страниц",
+    ReportCategory.BIBLIOGRAPHY: "Список литературы и ссылки на источники",
+    ReportCategory.CAPTIONS: "Подписи рисунков и таблиц",
 }
 
 _RULE_DETAILS = {
@@ -175,7 +179,109 @@ _RULE_DETAILS = {
         "Номер страницы расположен не в ожидаемой зоне.",
         "Проверьте расположение нумерации страниц по выбранной методичке.",
     ),
+    "bibliography_link": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.HIGH,
+        "Ссылка на источник в тексте не соответствует ни одной записи списка литературы.",
+        "Проверьте, что ссылка указывает на существующий источник и оформлена по методичке.",
+    ),
+    "bibliography_cited": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.MEDIUM,
+        "Источник из списка литературы не цитируется в тексте работы.",
+        "Добавьте ссылку на источник в тексте или удалите неиспользуемую запись списка.",
+    ),
+    "bibliography_format": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.MEDIUM,
+        "Запись списка литературы оформлена не по требованиям.",
+        "Оформите библиографическую запись по образцу из методички.",
+    ),
+    "caption_numbering": (
+        ReportCategory.CAPTIONS,
+        ReportSeverity.MEDIUM,
+        "Нумерация подписей рисунков и таблиц нарушена.",
+        "Проверьте сквозную нумерацию подписей и устраните дубли, пропуски и нарушения порядка.",
+    ),
+    "caption_format": (
+        ReportCategory.CAPTIONS,
+        ReportSeverity.MEDIUM,
+        "Подпись объекта оформлена не по требованиям.",
+        "Приведите подпись к требуемому виду: положение, шрифт, завершающие знаки.",
+    ),
+    "caption_reference": (
+        ReportCategory.CAPTIONS,
+        ReportSeverity.MEDIUM,
+        "Ссылка на объект в тексте отсутствует или не соответствует подписи.",
+        "Добавьте в текст корректную ссылку на рисунок или таблицу.",
+    ),
+    "alignment": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Выравнивание абзаца не соответствует требованию.",
+        "Проверьте выравнивание абзаца по методичке.",
+    ),
 }
+
+# резервные категории для семейств правил, которых нет в _RULE_DETAILS:
+# новые правила не должны оставаться без описания, даже если их rule_id
+# ещё не добавлен в точный маппинг
+_RULE_PREFIX_FALLBACKS: tuple[
+    tuple[str, tuple[ReportCategory, ReportSeverity, str, str]], ...
+] = (
+    (
+        "bibliography_",
+        (
+            ReportCategory.BIBLIOGRAPHY,
+            ReportSeverity.MEDIUM,
+            "Нарушение в оформлении ссылок на источники или списка литературы.",
+            "Сверьте ссылки и записи списка литературы с требованиями методички.",
+        ),
+    ),
+    (
+        "caption_",
+        (
+            ReportCategory.CAPTIONS,
+            ReportSeverity.MEDIUM,
+            "Нарушение в оформлении подписи рисунка или таблицы.",
+            "Сверьте оформление и нумерацию подписи с требованиями методички.",
+        ),
+    ),
+    (
+        "table_",
+        (
+            ReportCategory.FORMATTING,
+            ReportSeverity.MEDIUM,
+            "Оформление таблицы не соответствует требованию.",
+            "Проверьте шрифт и оформление текста в таблице по методичке.",
+        ),
+    ),
+    (
+        "font_",
+        (
+            ReportCategory.FORMATTING,
+            ReportSeverity.MEDIUM,
+            "Шрифт текста не соответствует требованию.",
+            "Проверьте гарнитуру, кегль и начертание текста по методичке.",
+        ),
+    ),
+)
+
+
+def _rule_details(
+    rule_id: str,
+) -> Optional[tuple[ReportCategory, ReportSeverity, str, str]]:
+    """находит описание нарушения по rule_id или по префиксу его семейства"""
+    details = _RULE_DETAILS.get(rule_id)
+    if details is not None:
+        return details
+    for known_id, known_details in _RULE_DETAILS.items():
+        if rule_id.startswith(f"{known_id}_"):
+            return known_details
+    for prefix, fallback_details in _RULE_PREFIX_FALLBACKS:
+        if rule_id.startswith(prefix):
+            return fallback_details
+    return None
 
 
 def build_violation_report(
@@ -333,8 +439,27 @@ def build_violation_report(
             block_id=entity.caption_block_id if entity else None,
             page=entity.page_est if entity else None,
         )
+    # поле может отсутствовать в промежуточных версиях схемы парсера
+    for entity_id in getattr(anomalies, "unreferenced_table_ids", ()):
+        entity = next(
+            (
+                item
+                for item in document.cross_ref_index.tables
+                if item.entity_id == entity_id
+            ),
+            None,
+        )
+        add(
+            f"unreferenced-table:{entity_id}",
+            ReportCategory.STRUCTURE,
+            ReportSeverity.LOW,
+            "На таблицу нет ссылки в основном тексте.",
+            "Добавьте ссылку на таблицу в тексте или проверьте необходимость таблицы.",
+            block_id=entity.caption_block_id if entity else None,
+            page=entity.page_est if entity else None,
+        )
     for issue in anomalies.figure_numbering_issues:
-        _add_figure_numbering_issue(add, issue)
+        _add_numbering_issue(add, issue)
 
     if anomalies.pdf_docx_mismatch_warning:
         add(
@@ -349,7 +474,7 @@ def build_violation_report(
     for finding in rule_assessments:
         if finding.status != "fail":
             continue
-        details = _RULE_DETAILS.get(finding.rule_id)
+        details = _rule_details(finding.rule_id)
         if details is None:
             category, severity = ReportCategory.FORMATTING, ReportSeverity.MEDIUM
             description = f"Не выполнено требование оформления: {finding.rule_id}."
@@ -432,19 +557,37 @@ def _add_visual_issue(
     )
 
 
-def _add_figure_numbering_issue(add, issue: FigureNumberingIssue) -> None:
-    """добавляет нарушение нумерации подписи рисунка"""
+_NUMBERING_ENTITY_FORMS = {
+    "figure": ("рисунка", "рисунков"),
+    "table": ("таблицы", "таблиц"),
+    "appendix": ("приложения", "приложений"),
+}
+
+
+def _add_numbering_issue(add, issue: FigureNumberingIssue) -> None:
+    """добавляет нарушение нумерации подписи рисунка, таблицы или приложения"""
+    # поле entity_type может отсутствовать в промежуточных версиях схемы парсера
+    entity_type = getattr(issue, "entity_type", "figure") or "figure"
+    entity_single, entity_plural = _NUMBERING_ENTITY_FORMS.get(
+        entity_type, _NUMBERING_ENTITY_FORMS["figure"]
+    )
+    is_table = entity_type == "table"
     issue_descriptions = {
-        "duplicate": "Обнаружен повтор номера подписи рисунка.",
-        "gap": "В последовательности номеров рисунков обнаружен пропуск.",
-        "out_of_order": "Номер подписи рисунка нарушает порядок нумерации.",
+        "duplicate": f"Обнаружен повтор номера подписи {entity_single}.",
+        "gap": f"В последовательности номеров {entity_plural} обнаружен пропуск.",
+        "out_of_order": (
+            f"Номер подписи {entity_single} нарушает порядок нумерации."
+        ),
     }
     add(
-        f"figure-numbering:{issue.issue_kind}:{issue.caption_block_id or issue.number_str}",
-        ReportCategory.FIGURES,
+        (
+            f"{'table' if is_table else 'figure'}-numbering:"
+            f"{issue.issue_kind}:{issue.caption_block_id or issue.number_str}"
+        ),
+        ReportCategory.CAPTIONS if is_table else ReportCategory.FIGURES,
         ReportSeverity.MEDIUM,
         (f"{issue_descriptions[issue.issue_kind]} Номер: {issue.number_str}."),
-        "Проверьте сквозную нумерацию подписей рисунков.",
+        f"Проверьте сквозную нумерацию подписей {entity_plural}.",
         block_id=issue.caption_block_id,
         excerpt=(
             f"Предыдущий номер: {issue.previous_number_str}"

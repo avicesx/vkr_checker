@@ -12,6 +12,13 @@ import pytest
 
 from rule_engine import (
     DEFAULT_RULESET_PATH,
+    AlignmentRule,
+    BibliographyCitedRule,
+    BibliographyFormatRule,
+    BibliographyLinkRule,
+    CaptionFormatRule,
+    CaptionNumberingRule,
+    CaptionReferenceRule,
     FontRule,
     HeadingFormatRule,
     HeadingLevelsRule,
@@ -130,12 +137,14 @@ def _page_format_rule(**overrides: object) -> dict:
     return rule
 
 
-def test_default_ruleset_describes_nine_checks() -> None:
-    """Штатный набор описывает девять правил: текст, поля, заголовки, разделы и оглавление."""
+def test_default_ruleset_describes_all_checks() -> None:
+    """Штатный набор описывает все проверки: текст и поля, заголовки и разделы,
+    оглавление, ссылки и список литературы, подписи рисунков и таблиц,
+    выравнивание и шрифт в таблицах."""
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "2.0.0"
+    assert ruleset.ruleset_version == "2.1.0"
     assert [rule.rule_id for rule in ruleset.rules] == [
         "font_body_text",
         "indent_first_line",
@@ -146,6 +155,19 @@ def test_default_ruleset_describes_nine_checks() -> None:
         "heading_alignment",
         "required_sections",
         "toc",
+        "bibliography_links_resolved",
+        "bibliography_all_cited",
+        "bibliography_format_electronic",
+        "bibliography_format_article",
+        "caption_numbering_figures",
+        "caption_numbering_tables",
+        "caption_format_figures",
+        "caption_format_tables",
+        "caption_reference_figures",
+        "caption_reference_tables",
+        "alignment_captions",
+        "alignment_table_cells",
+        "font_table_cells",
     ]
     assert isinstance(ruleset.rules[0], FontRule)
     assert isinstance(ruleset.rules[1], IndentRule)
@@ -156,6 +178,19 @@ def test_default_ruleset_describes_nine_checks() -> None:
     assert isinstance(ruleset.rules[6], HeadingFormatRule)
     assert isinstance(ruleset.rules[7], RequiredSectionsRule)
     assert isinstance(ruleset.rules[8], TocRule)
+    assert isinstance(ruleset.rules[9], BibliographyLinkRule)
+    assert isinstance(ruleset.rules[10], BibliographyCitedRule)
+    assert isinstance(ruleset.rules[11], BibliographyFormatRule)
+    assert isinstance(ruleset.rules[12], BibliographyFormatRule)
+    assert isinstance(ruleset.rules[13], CaptionNumberingRule)
+    assert isinstance(ruleset.rules[14], CaptionNumberingRule)
+    assert isinstance(ruleset.rules[15], CaptionFormatRule)
+    assert isinstance(ruleset.rules[16], CaptionFormatRule)
+    assert isinstance(ruleset.rules[17], CaptionReferenceRule)
+    assert isinstance(ruleset.rules[18], CaptionReferenceRule)
+    assert isinstance(ruleset.rules[19], AlignmentRule)
+    assert isinstance(ruleset.rules[20], AlignmentRule)
+    assert isinstance(ruleset.rules[21], FontRule)
 
 
 def test_default_ruleset_excludes_front_matter_from_heading_rules() -> None:

@@ -1,7 +1,7 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "2.0.0",
-  "description": "Тестовый набор ВКР: текст, поля страницы, заголовки, обязательные разделы и оглавление",
+  "ruleset_version": "2.1.0",
+  "description": "Тестовый набор ВКР: текст, поля страницы, заголовки, разделы и оглавление, ссылки и список литературы, подписи рисунков и таблиц, выравнивание и шрифт в таблицах",
   "rules": [
     {
       "rule_id": "font_body_text",
@@ -196,6 +196,193 @@
             "role": "bibliography"
           }
         ]
+      }
+    },
+    {
+      "rule_id": "bibliography_links_resolved",
+      "kind": "bibliography_link",
+      "severity": "error",
+      "message": "Ссылки в тексте указывают на источники, включенные в список литературы",
+      "requirement_ref": "Методические указания, требования к ссылкам на источники",
+      "target": {
+        "scope": "bibliography"
+      },
+      "expected": {
+        "allow_unresolved": false
+      }
+    },
+    {
+      "rule_id": "bibliography_all_cited",
+      "kind": "bibliography_cited",
+      "severity": "error",
+      "message": "Каждый источник списка литературы имеет ссылку в тексте работы",
+      "requirement_ref": "Методические указания, требования к списку литературы",
+      "target": {
+        "scope": "bibliography"
+      },
+      "expected": {
+        "require_all_cited": true
+      }
+    },
+    {
+      "rule_id": "bibliography_format_electronic",
+      "kind": "bibliography_format",
+      "severity": "error",
+      "message": "Электронный ресурс в списке литературы содержит URL и дату обращения",
+      "requirement_ref": "Методические указания, требования к оформлению списка литературы",
+      "target": {
+        "scope": "bibliography"
+      },
+      "expected": {
+        "categories": ["electronic_resource"],
+        "require_url": true,
+        "require_access_date": true
+      }
+    },
+    {
+      "rule_id": "bibliography_format_article",
+      "kind": "bibliography_format",
+      "severity": "error",
+      "message": "Статья в списке литературы оформлена с разделителем «//» перед названием источника",
+      "requirement_ref": "Методические указания, требования к оформлению списка литературы",
+      "target": {
+        "scope": "bibliography"
+      },
+      "expected": {
+        "categories": ["journal_article"],
+        "require_double_slash": true
+      }
+    },
+    {
+      "rule_id": "caption_numbering_figures",
+      "kind": "caption_numbering",
+      "severity": "error",
+      "message": "Рисунки нумеруются сквозной арабской нумерацией без дублей, пропусков и нарушения порядка",
+      "requirement_ref": "Методические указания, требования к нумерации рисунков",
+      "target": {
+        "scope": "captions"
+      },
+      "expected": {
+        "entity_type": "figure",
+        "scheme": "continuous_arabic",
+        "allow_gaps": false,
+        "allow_duplicates": false,
+        "allow_out_of_order": false
+      }
+    },
+    {
+      "rule_id": "caption_numbering_tables",
+      "kind": "caption_numbering",
+      "severity": "error",
+      "message": "Таблицы нумеруются сквозной арабской нумерацией без дублей, пропусков и нарушения порядка",
+      "requirement_ref": "Методические указания, требования к нумерации таблиц",
+      "target": {
+        "scope": "captions"
+      },
+      "expected": {
+        "entity_type": "table",
+        "scheme": "continuous_arabic",
+        "allow_gaps": false,
+        "allow_duplicates": false,
+        "allow_out_of_order": false
+      }
+    },
+    {
+      "rule_id": "caption_format_figures",
+      "kind": "caption_format",
+      "severity": "error",
+      "message": "Номер и название рисунка разделены тире, точка в конце подписи не ставится",
+      "requirement_ref": "Методические указания, требования к оформлению подписей рисунков",
+      "target": {
+        "scope": "captions"
+      },
+      "expected": {
+        "entity_type": "figure",
+        "separator": "dash",
+        "require_trailing_dot": false
+      }
+    },
+    {
+      "rule_id": "caption_format_tables",
+      "kind": "caption_format",
+      "severity": "error",
+      "message": "Номер и название таблицы разделены тире",
+      "requirement_ref": "Методические указания, требования к оформлению подписей таблиц",
+      "target": {
+        "scope": "captions"
+      },
+      "expected": {
+        "entity_type": "table",
+        "separator": "dash"
+      }
+    },
+    {
+      "rule_id": "caption_reference_figures",
+      "kind": "caption_reference",
+      "severity": "error",
+      "message": "На каждый рисунок есть ссылка в тексте работы",
+      "requirement_ref": "Методические указания, требования к ссылкам на рисунки",
+      "target": {
+        "scope": "captions"
+      },
+      "expected": {
+        "entity_type": "figure",
+        "required": true
+      }
+    },
+    {
+      "rule_id": "caption_reference_tables",
+      "kind": "caption_reference",
+      "severity": "error",
+      "message": "На каждую таблицу есть ссылка в тексте работы",
+      "requirement_ref": "Методические указания, требования к ссылкам на таблицы",
+      "target": {
+        "scope": "captions"
+      },
+      "expected": {
+        "entity_type": "table",
+        "required": true
+      }
+    },
+    {
+      "rule_id": "alignment_captions",
+      "kind": "alignment",
+      "severity": "error",
+      "message": "Подписи рисунков, таблиц и приложений выравниваются по центру",
+      "requirement_ref": "Методические указания, требования к оформлению подписей",
+      "target": {
+        "scope": "captions"
+      },
+      "expected": {
+        "alignment": "center"
+      }
+    },
+    {
+      "rule_id": "alignment_table_cells",
+      "kind": "alignment",
+      "severity": "error",
+      "message": "Текст в ячейках таблиц выравнивается по левому краю",
+      "requirement_ref": "Методические указания, требования к оформлению таблиц",
+      "target": {
+        "scope": "table_cells"
+      },
+      "expected": {
+        "alignment": "left"
+      }
+    },
+    {
+      "rule_id": "font_table_cells",
+      "kind": "font",
+      "severity": "error",
+      "message": "Текст в таблицах набирается гарнитурой Times New Roman, 12 pt",
+      "requirement_ref": "Методические указания, требования к оформлению таблиц",
+      "target": {
+        "scope": "table_cells"
+      },
+      "expected": {
+        "family": "Times New Roman",
+        "size_pt": 12.0,
+        "size_tolerance_pt": 0.5
       }
     }
   ]

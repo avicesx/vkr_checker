@@ -5,8 +5,10 @@
                 блоки SourceInfo, DocumentCapabilities, PageCountInfo и все
                 элементы документа: секции, абзацы, таблицы, рисунки, формулы,
                 TOC, сноски, аудит страниц PDF;
-    mode.py   — ParseMode (docx_only / pdf_only / docx_pdf), PARSE_MODES,
-                DEFAULT_PARSE_MODE, detect_mode() и normalize_parse_mode().
+    mode.py    — ParseMode (docx_only / pdf_only / docx_pdf), PARSE_MODES,
+                 DEFAULT_PARSE_MODE, detect_mode() и normalize_parse_mode();
+    sections.py — обход document_tree: узлы и диапазоны блоков разделов для
+                  потребителей контракта (citations, parser.enrichment).
 
 Слой core не импортирует parser.docx и parser.pdf: контракт не знает о
 конвейерах. Подмодули подключаются явно, чтобы `import parser.core` не тянул
@@ -17,4 +19,4 @@ pydantic без необходимости:
 """
 from __future__ import annotations
 
-__all__ = ["mode", "schema"]
+__all__ = ["mode", "schema", "sections"]

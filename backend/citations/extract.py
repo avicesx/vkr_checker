@@ -14,7 +14,8 @@ DOCX список литературы уже разобран парсером 
 
 Раздел литературы исключается из поиска по ``document_tree``: у обоих
 конвейеров он размечен ``semantic_role="bibliography"``, поэтому записи списка
-не попадают в отчёт как «ссылки в тексте».
+не попадают в отчёт как «ссылки в тексте». Границы раздела берёт общий
+помощник ``parser.core.sections``.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from parser.core.schema import (
     TableBlock,
 )
 
+from parser.core.sections import iter_tree_nodes, section_block_ids
 from .patterns import (
     RE_AUTHOR_YEAR_CITATION,
     RE_BRACKET_CITATION,
@@ -57,7 +59,7 @@ NOTE_PDF_BIBLIOGRAPHY = (
 def extract_citations(document: ParsedDocument) -> CitationReport:
     """Собирает отчёт о ссылках на источники для разобранного документа."""
     paragraphs = _scanned_paragraphs(document.blocks)
-    skipped = _bibliography_block_ids(paragraphs, document.document_tree)
+    skipped = section_block_ids(paragraphs, document.document_tree, "bibliography")
     section_titles = _section_titles(paragraphs, document.document_tree)
     bibliography = list(document.cross_ref_index.bibliography)
 
@@ -326,39 +328,6 @@ def _collect_paragraphs(blocks: Sequence[object], target: List[ParagraphBlock]) 
                     _collect_paragraphs(cell.blocks, target)
 
 
-def _flatten_tree(nodes: Sequence[DocumentTreeNode]) -> Iterator[DocumentTreeNode]:
-    """Обходит дерево документа в порядке следования узлов."""
-    for node in nodes:
-        yield node
-        yield from _flatten_tree(node.children)
-
-
-def _bibliography_block_ids(
-    paragraphs: Sequence[ParagraphBlock],
-    document_tree: Sequence[DocumentTreeNode],
-) -> Set[str]:
-    """Возвращает абзацы раздела литературы, чтобы не считать их записи ссылками."""
-    index_by_block = {paragraph.block_id: index for index, paragraph in enumerate(paragraphs)}
-    marks: List[Tuple[int, DocumentTreeNode]] = []
-    for node in _flatten_tree(document_tree):
-        index = index_by_block.get(node.heading_block_id or "")
-        if index is not None:
-            marks.append((index, node))
-    marks.sort(key=lambda pair: pair[0])
-
-    skipped: Set[str] = set()
-    for position, (start, node) in enumerate(marks):
-        if node.semantic_role != "bibliography":
-            continue
-        end = len(paragraphs)
-        for next_index, next_node in marks[position + 1 :]:
-            if next_node.level <= node.level:
-                end = next_index
-                break
-        skipped.update(paragraph.block_id for paragraph in paragraphs[start:end])
-    return skipped
-
-
 def _section_titles(
     paragraphs: Sequence[ParagraphBlock],
     document_tree: Sequence[DocumentTreeNode],
@@ -366,7 +335,7 @@ def _section_titles(
     """Сопоставляет каждому абзацу ближайший предшествующий заголовок раздела."""
     index_by_block = {paragraph.block_id: index for index, paragraph in enumerate(paragraphs)}
     marks: List[Tuple[int, str]] = []
-    for node in _flatten_tree(document_tree):
+    for node in iter_tree_nodes(document_tree):
         index = index_by_block.get(node.heading_block_id or "")
         if index is not None:
             marks.append((index, node.title))

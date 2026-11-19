@@ -1163,12 +1163,16 @@ class TocPageNumberWithoutRenderedNumber(BaseModel):
 
 
 class FigureNumberingIssue(BaseModel):
-    """Нарушение сквозной нумерации подписей рисунков."""
+    """Нарушение сквозной нумерации подписей рисунков и таблиц."""
 
     issue_kind: Literal["duplicate", "gap", "out_of_order"]
     number_str: str
     caption_block_id: Optional[str] = None
     previous_number_str: Optional[str] = None
+    entity_type: Literal["figure", "table", "appendix"] = Field(
+        default="figure",
+        description="Тип объекта с подписью: рисунок, таблица или приложение",
+    )
 
 
 class DocumentAnomalies(BaseModel):
@@ -1204,9 +1208,13 @@ class DocumentAnomalies(BaseModel):
         default_factory=list,
         description="entity_id рисунков, на которые нет ссылок в тексте документа",
     )
+    unreferenced_table_ids: List[str] = Field(
+        default_factory=list,
+        description="entity_id таблиц, на которые нет ссылок в тексте документа",
+    )
     figure_numbering_issues: List[FigureNumberingIssue] = Field(
         default_factory=list,
-        description="Пропуски, дубли и нарушения порядка в нумерации рисунков",
+        description="Пропуски, дубли и нарушения порядка в нумерации рисунков и таблиц",
     )
 
 

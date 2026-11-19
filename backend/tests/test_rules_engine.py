@@ -1,7 +1,7 @@
 """Интеграционные проверки движка: набор правил целиком на одном документе.
 
 Тесты фиксируют поведение RuleEngine на уровне сценария: соответствующий
-документ проходит все девять правил, документ с нарушениями дает по нарушению на
+документ проходит все правила набора, документ с нарушениями дает по нарушению на
 каждое правило, а отчет воспроизводим между прогонами.
 """
 from __future__ import annotations
@@ -97,7 +97,7 @@ def test_compliant_document_passes_all_default_rules(
     report = RuleEngine(load_default_ruleset()).check(document)
 
     assert report.passed is True
-    assert report.summary.rules_applied == 9
+    assert report.summary.rules_applied == 22
     assert report.summary.violations_total == 0
     assert report.summary.by_kind == {}
     assert report.summary.objects_checked > 0

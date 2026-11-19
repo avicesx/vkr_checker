@@ -632,7 +632,7 @@ PDF и сервис. Точки входа — сервис (`services`), CLI в
 | `docx_only`: DOCX-конвейер без PDF, оценка страниц (`docx_native_breaks`/`geometric_estimation`), `meta.pdf_* = None` | `parser/docx/pipeline.py` |
 | сервис `parse_document`/`parse_to_json_file`, коды ошибок, CLI | `services/document_parsing.py` |
 | общее извлечение PDF (`pdf_page_text.py`, `pdf_text_utils.py`), сквозная интеграция трёх режимов | `parser/docx/pdf_page_text.py`, `tests/test_integration_modes.py` |
-| отчёт о ссылках на источники `citations.json` поверх `ParsedDocument` (все три режима) | `citations/`, `services/references.py` |
+| отчёт о ссылках на источники `citations.json` поверх `ParsedDocument` (все три режима) | `citations/`, `services/citations.py` |
 
 Что проверяется автоматически:
 
@@ -660,7 +660,7 @@ PDF и сервис. Точки входа — сервис (`services`), CLI в
 Команды (из `backend`):
 
 ```powershell
-python -m compileall -q parser services rule_engine tests
+python -m compileall -q api app citations parser rule_engine services violation_reports tests
 python -m pytest tests -q
 python -m pytest tests -q -m integration
 ```

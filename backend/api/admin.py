@@ -38,6 +38,13 @@ DEFAULT_RULE_SCOPES = {
     "page_number_position": "headers_footers",
     "page_format": "sections",
     "line_spacing": "body_text",
+    "bibliography_link": "bibliography",
+    "bibliography_cited": "bibliography",
+    "bibliography_format": "bibliography",
+    "caption_numbering": "captions",
+    "caption_format": "captions",
+    "caption_reference": "captions",
+    "alignment": "captions",
 }
 
 

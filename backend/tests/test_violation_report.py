@@ -6,14 +6,22 @@ from parser.core.schema import (
     CommentArtifact,
     DocumentAnomalies,
     DocumentMeta,
+    FigureNumberingIssue,
     GlobalSettings,
+    NumberedCaptionEntity,
     ParagraphBlock,
     ParsedDocxDocument,
     ThemeData,
     TrackChangeArtifact,
 )
 from rule_engine.findings import RuleAssessment
-from violation_reports import ReportCategory, ReportSeverity, build_violation_report
+from violation_reports import (
+    ReportCategory,
+    ReportSeverity,
+    Violation,
+    ViolationReport,
+    build_violation_report,
+)
 
 
 def _sample_parser_result() -> ParsedDocxDocument:
@@ -53,6 +61,27 @@ def _sample_parser_result() -> ParsedDocxDocument:
             hidden_text_block_ids=["p-12"],
         ),
     )
+
+
+def _rule_failure(rule_id: str) -> RuleAssessment:
+    """создаёт неуспешный результат проверки правила с заданным rule_id"""
+    return RuleAssessment(
+        rule_id=rule_id,
+        kind="font",
+        status="fail",
+        expected_text="требование методички",
+        observed_text="фактическое оформление",
+        confidence="medium",
+    )
+
+
+def _violations_by_id(report: ViolationReport) -> dict[str, Violation]:
+    """индексирует нарушения отчёта по их идентификаторам"""
+    return {
+        violation.id: violation
+        for group in report.groups
+        for violation in group.violations
+    }
 
 
 def test_report_groups_test_findings_and_counts_severity() -> None:
@@ -143,3 +172,134 @@ def test_empty_result_has_zero_summary_and_markdown_notice() -> None:
     assert report.summary.total_violations == 0
     assert report.groups == []
     assert "Нарушений не найдено." in report.to_markdown()
+
+
+def test_new_rule_families_fall_into_own_categories() -> None:
+    """новые семейства правил попадают в свои категории отчёта"""
+    document = _sample_parser_result()
+    document.anomalies = DocumentAnomalies()
+
+    report = build_violation_report(
+        document,
+        [
+            _rule_failure("bibliography_link"),
+            _rule_failure("bibliography_cited"),
+            _rule_failure("bibliography_format"),
+            _rule_failure("caption_numbering"),
+            _rule_failure("caption_format"),
+            _rule_failure("caption_reference"),
+            _rule_failure("alignment"),
+        ],
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    violations = _violations_by_id(report)
+    assert violations["pdf:bibliography_link"].category == ReportCategory.BIBLIOGRAPHY
+    assert violations["pdf:bibliography_cited"].category == ReportCategory.BIBLIOGRAPHY
+    assert violations["pdf:bibliography_format"].category == ReportCategory.BIBLIOGRAPHY
+    assert violations["pdf:caption_numbering"].category == ReportCategory.CAPTIONS
+    assert violations["pdf:caption_format"].category == ReportCategory.CAPTIONS
+    assert violations["pdf:caption_reference"].category == ReportCategory.CAPTIONS
+    assert violations["pdf:alignment"].category == ReportCategory.FORMATTING
+
+    titles = {group.category: group.title for group in report.groups}
+    assert titles[ReportCategory.BIBLIOGRAPHY] == "Список литературы и ссылки на источники"
+    assert titles[ReportCategory.CAPTIONS] == "Подписи рисунков и таблиц"
+
+
+def test_table_without_reference_adds_violation() -> None:
+    """таблица без ссылки в основном тексте даёт нарушение отчёта"""
+    document = _sample_parser_result()
+    document.anomalies = DocumentAnomalies(unreferenced_table_ids=["tbl-2"])
+    document.cross_ref_index.tables = [
+        NumberedCaptionEntity(
+            entity_id="tbl-2",
+            entity_type="table",
+            caption_block_id="p-12",
+            page_est=7,
+            prefix_word="Таблица",
+            number_str="2",
+            numbering_scheme="continuous_arabic",
+            title_text="Результаты измерений",
+        )
+    ]
+
+    report = build_violation_report(
+        document,
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    violation = _violations_by_id(report)["unreferenced-table:tbl-2"]
+    assert violation.category == ReportCategory.STRUCTURE
+    assert violation.severity == ReportSeverity.LOW
+    assert violation.location.block_id == "p-12"
+    assert violation.location.page_start == 7
+    assert "таблицу" in violation.description
+
+
+def test_table_numbering_duplicate_adds_violation() -> None:
+    """дубль номера подписи таблицы даёт нарушение категории подписей"""
+    document = _sample_parser_result()
+    document.anomalies = DocumentAnomalies(
+        figure_numbering_issues=[
+            FigureNumberingIssue(
+                issue_kind="duplicate",
+                number_str="3",
+                caption_block_id="p-12",
+                previous_number_str="3",
+                entity_type="table",
+            ),
+            FigureNumberingIssue(
+                issue_kind="duplicate",
+                number_str="5",
+                previous_number_str="5",
+            ),
+        ]
+    )
+
+    report = build_violation_report(
+        document,
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    violations = _violations_by_id(report)
+    table_violation = violations["table-numbering:duplicate:p-12"]
+    assert table_violation.category == ReportCategory.CAPTIONS
+    assert table_violation.severity == ReportSeverity.MEDIUM
+    assert "подписи таблицы" in table_violation.description
+    assert "подписей таблиц" in table_violation.recommendation
+
+    figure_violation = violations["figure-numbering:duplicate:5"]
+    assert figure_violation.category == ReportCategory.FIGURES
+    assert "подписи рисунка" in figure_violation.description
+
+
+def test_unknown_rule_id_falls_back_by_family_prefix() -> None:
+    """rule_id без точного маппинга получает описание по префиксу семейства"""
+    document = _sample_parser_result()
+    document.anomalies = DocumentAnomalies()
+
+    report = build_violation_report(
+        document,
+        [
+            _rule_failure("bibliography_page_number_outdated"),
+            _rule_failure("caption_alignment_left"),
+            _rule_failure("table_cell_font_size"),
+            _rule_failure("font_table_cells"),
+        ],
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    violations = _violations_by_id(report)
+    bibliography = violations["pdf:bibliography_page_number_outdated"]
+    caption = violations["pdf:caption_alignment_left"]
+    table = violations["pdf:table_cell_font_size"]
+    font = violations["pdf:font_table_cells"]
+
+    assert bibliography.category == ReportCategory.BIBLIOGRAPHY
+    assert caption.category == ReportCategory.CAPTIONS
+    assert table.category == ReportCategory.FORMATTING
+    assert font.category == ReportCategory.FORMATTING
+    for violation in (bibliography, caption, table, font):
+        assert "Не выполнено требование оформления" not in violation.description
+        assert violation.recommendation
