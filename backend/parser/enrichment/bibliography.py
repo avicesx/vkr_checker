@@ -1,10 +1,10 @@
 """Извлечение списка литературы из готовой модели ParsedDocument.
 
 Модуль не зависит от DOCX/PDF-конвейеров и от слоя ``citations``: на вход
-подается ``ParsedDocument``, на выходе — записи ``BibliographyEntry``. Обход
-дерева документа повторяет прием из ``citations.extract`` (раздел литературы
-определяется по ``semantic_role``), но реализован здесь независимо, чтобы
-слои можно было развивать отдельно.
+подается ``ParsedDocument``, на выходе — записи ``BibliographyEntry``. Раздел
+литературы определяется по ``semantic_role``
+определяется по ``semantic_role``), границы раздела задаёт общий помощник
+``parser.core.sections``.
 
 Порядок работы:
     1. Находим блоки раздела (``semantic_role == "bibliography"``): прямые
@@ -34,6 +34,7 @@ from parser.core.schema import (
     ParsedDocument,
 )
 
+from parser.core.sections import iter_tree_nodes, section_block_ids
 #: Номерной префикс вручную набранной записи: "1.", "2)", "[3]".
 RE_NUMBER_PREFIX = re.compile(
     r"^\s*(?P<raw>\[\s*\d+\s*\]|\d+\s*[.)])\s*(?P<body>\S.*)$",
@@ -198,11 +199,11 @@ def _bibliography_blocks(document: ParsedDocument) -> List[ParagraphBlock]:
     by_id = {paragraph.block_id: paragraph for paragraph in paragraphs}
 
     marked_ids: Set[str] = set()
-    for node in _iter_tree(document.document_tree):
+    for node in iter_tree_nodes(document.document_tree):
         if node.semantic_role != "bibliography":
             continue
         # Записи могут лежать как в самом узле, так и в его подразделах.
-        for sub_node in _iter_tree([node]):
+        for sub_node in iter_tree_nodes([node]):
             marked_ids.update(sub_node.direct_block_ids)
 
     if marked_ids:
@@ -220,39 +221,11 @@ def _blocks_in_section_range(
 ) -> List[ParagraphBlock]:
     """Блоки от заголовка литературы до следующего заголовка того же уровня.
 
-    Прием повторяет ``citations.extract._bibliography_block_ids``, но здесь
-    возвращаются сами абзацы раздела, а не их идентификаторы.
+    Границы диапазона считает общий ``parser.core.sections.section_block_ids``;
+    здесь остаются только сами абзацы раздела в порядке модели.
     """
-    index_by_block = {
-        paragraph.block_id: index for index, paragraph in enumerate(paragraphs)
-    }
-    marks: List[Tuple[int, DocumentTreeNode]] = []
-    for node in _iter_tree(document_tree):
-        index = index_by_block.get(node.heading_block_id or "")
-        if index is not None:
-            marks.append((index, node))
-    marks.sort(key=lambda pair: pair[0])
-
-    selected: Set[int] = set()
-    for position, (start, node) in enumerate(marks):
-        if node.semantic_role != "bibliography":
-            continue
-        end = len(paragraphs)
-        for next_index, next_node in marks[position + 1:]:
-            if next_node.level <= node.level:
-                end = next_index
-                break
-
-        selected.update(range(start, end))
-
-    return [paragraph for index, paragraph in enumerate(paragraphs) if index in selected]
-
-
-def _iter_tree(nodes: Sequence[DocumentTreeNode]) -> Iterator[DocumentTreeNode]:
-    """Обходит дерево документа в порядке следования узлов."""
-    for node in nodes:
-        yield node
-        yield from _iter_tree(node.children)
+    selected = section_block_ids(paragraphs, document_tree, "bibliography")
+    return [paragraph for paragraph in paragraphs if paragraph.block_id in selected]
 
 
 def _split_entry_prefix(

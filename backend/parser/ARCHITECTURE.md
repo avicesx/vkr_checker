@@ -660,7 +660,7 @@ PDF и сервис. Точки входа — сервис (`services`), CLI в
 Команды (из `backend`):
 
 ```powershell
-python -m compileall -q parser services rule_engine tests
+python -m compileall -q api app citations parser rule_engine services violation_reports tests
 python -m pytest tests -q
 python -m pytest tests -q -m integration
 ```

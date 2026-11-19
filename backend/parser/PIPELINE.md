@@ -893,7 +893,7 @@ cd C:\code\vkr_checker\backend
 ### 10.1. Тесты
 
 ```powershell
-python -m compileall -q parser services rule_engine tests
+python -m compileall -q api app citations parser rule_engine services violation_reports tests
 python -m pytest tests -q
 ```
 
@@ -1112,7 +1112,7 @@ label `lo.version`.
 - [ ] изменение отражено в `parser/core/schema.py`, если меняется JSON;
 - [ ] поднят `schema_version` при несовместимом изменении;
 - [ ] добавлен или обновлен тест в `tests/`;
-- [ ] `python -m compileall -q parser services rule_engine tests` проходит;
+- [ ] `python -m compileall -q api app citations parser rule_engine services violation_reports tests` проходит;
 - [ ] `python -m pytest tests -q` проходит;
 - [ ] при изменении конвертации проверен реальный legacy-файл через Docker;
 - [ ] при изменении правил обновлен `rule_engine/RULES.md`;

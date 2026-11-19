@@ -17,8 +17,8 @@ DOCX/PDF-конвейеров, поэтому одинаково примени�
 
 Раздел литературы исключается из поиска: его абзацы размечены в
 ``document_tree`` ролью ``semantic_role="bibliography"``, поэтому записи списка
-не попадают в результат как упоминания в тексте. Приём повторяет
-``backend/citations/extract.py::_bibliography_block_ids``. По той же причине
+не попадают в результат как упоминания в тексте. Границы раздела берёт общий
+``parser.core.sections.section_block_ids``. По той же причине
 пропускаются абзацы-заголовки и абзацы-подписи (``caption_block_id`` из
 результата ``extract_captions``): подпись называет объект, но не ссылается на
 него из текста.
@@ -43,6 +43,7 @@ from parser.core.schema import (
     TextCrossReferenceMention,
 )
 
+from parser.core.sections import iter_tree_nodes, section_block_ids
 #: Слово-маркер упоминания объекта без завершающей точки. Парадигма повторяет
 #: DOCX-регекс ``RE_ENTITY_MENTION`` (``parser/docx/structure_crossref_parser.py``),
 #: чтобы падежные формы распознавались одинаково в обоих конвейерах.
@@ -111,7 +112,7 @@ def extract_mentions(
         captions = [*index.figures, *index.tables, *index.Apps]
 
     paragraphs = _body_paragraphs(document.blocks)
-    skipped = _bibliography_block_ids(paragraphs, document.document_tree)
+    skipped = section_block_ids(paragraphs, document.document_tree, "bibliography")
     # Строка-заголовок описывает структуру, а не ссылается на объект: даже если
     # в ней встретилось «рис. 2», это название раздела, а не упоминание.
     skipped |= _heading_block_ids(document)
@@ -415,13 +416,6 @@ def _body_paragraphs(blocks: Sequence[object]) -> List[ParagraphBlock]:
     ]
 
 
-def _flatten_tree(nodes: Sequence[DocumentTreeNode]) -> Iterator[DocumentTreeNode]:
-    """Обходит дерево документа в порядке следования узлов."""
-    for node in nodes:
-        yield node
-        yield from _flatten_tree(node.children)
-
-
 def _heading_block_ids(document: ParsedDocument) -> Set[str]:
     """Абзацы-заголовки: разметка ``heading_info`` и узлы ``document_tree``.
 
@@ -436,36 +430,10 @@ def _heading_block_ids(document: ParsedDocument) -> Set[str]:
             and block.heading_info.is_heading
         ):
             ids.add(block.block_id)
-    for node in _flatten_tree(document.document_tree):
+    for node in iter_tree_nodes(document.document_tree):
         if node.heading_block_id:
             ids.add(node.heading_block_id)
     return ids
-
-
-def _bibliography_block_ids(
-    paragraphs: Sequence[ParagraphBlock],
-    document_tree: Sequence[DocumentTreeNode],
-) -> Set[str]:
-    """Возвращает абзацы раздела литературы, чтобы не считать их записи упоминаниями."""
-    index_by_block = {paragraph.block_id: index for index, paragraph in enumerate(paragraphs)}
-    marks: List[Tuple[int, DocumentTreeNode]] = []
-    for node in _flatten_tree(document_tree):
-        index = index_by_block.get(node.heading_block_id or "")
-        if index is not None:
-            marks.append((index, node))
-    marks.sort(key=lambda pair: pair[0])
-
-    skipped: Set[str] = set()
-    for position, (start, node) in enumerate(marks):
-        if node.semantic_role != "bibliography":
-            continue
-        end = len(paragraphs)
-        for next_index, next_node in marks[position + 1 :]:
-            if next_node.level <= node.level:
-                end = next_index
-                break
-        skipped.update(paragraph.block_id for paragraph in paragraphs[start:end])
-    return skipped
 
 
 def _normalize_number(value: str) -> str:
