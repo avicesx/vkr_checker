@@ -163,10 +163,40 @@ BASIC_RULE_NOISE_BASELINE_BY_FAMILY: Dict[str, int] = {
     "page_format": 2,
 }
 
-#: Бюджеты шума: не больше 20 % прежних текстовых нарушений и меньше 750 всего
-#: (492 нарушения набора 2.1.0 + 239 базовых правил 2.2.0).
+#: Структурные проверки, добавленные в штатный набор 2.3.0 (t5): шрифт
+#: заголовков, висячие строки, неотрывность заголовка, начало раздела с новой
+#: страницы и объём работы. У них отдельный бюджет: это дешёвые проверки уже
+#: распарсенных данных, а не текстовый шум и не находки новых видов из 2.1.0.
+STRUCTURE_RULE_IDS: frozenset = frozenset(
+    {
+        "heading_font",
+        "widow_control_body",
+        "heading_keep_next",
+        "heading_page_break",
+        "document_volume",
+    }
+)
+
+#: Первый замер структурных правил на корпусе (t5, набор 2.3.0): висячие строки
+#: 44 (Бутаков: во всех абзацах основного текста widowControl выключен, часть
+#: абзацев разорвана между страницами), неотрывность заголовка 18 (там же),
+#: объём 6 (Прокси 108 страниц и 18341 слово, Смолина 52 страницы и 7237 слов,
+#: Дистель 52 страницы и 6548 слов), шрифт заголовков и начало раздела с новой
+#: страницы — 0 на корпусе (эти находки есть только в 3.docx, вне бюджета).
+STRUCTURE_RULE_NOISE_BASELINE = 68
+STRUCTURE_RULE_NOISE_BASELINE_BY_RULE: Dict[str, int] = {
+    "heading_font": 0,
+    "widow_control_body": 44,
+    "heading_keep_next": 18,
+    "heading_page_break": 0,
+    "document_volume": 6,
+}
+
+#: Бюджеты шума: не больше 20 % прежних текстовых нарушений и меньше 900 всего
+#: (492 нарушения набора 2.1.0 + 239 базовых правил 2.2.0 + 68 структурных
+#: правил 2.3.0).
 FONT_INDENT_BUDGET_SHARE = 0.20
-TOTAL_NOISE_BUDGET = 750
+TOTAL_NOISE_BUDGET = 900
 
 #: Итог корпуса после правок f1–f6: font 0, indent 36, остальное — реальные находки.
 TOTAL_NOISE_TARGET = 184
@@ -451,11 +481,13 @@ def test_bikchurkina_signature_line_10pt_has_no_font_noise(
 
 @requires_corpus
 def test_proxy_title_lines_have_no_indent_noise(corpus: Dict[str, CorpusDoc]) -> None:
-    """Титульные строки прокси-сервера не дают нарушений отступа.
+    """Титульные строки и подписи приложений прокси-сервера не дают шума отступа.
 
     Титул здесь разобран по DOCX: firstLine у реквизитов действительно 0, но это
-    служебная зона, а не основной текст. Настоящие нарушения отступа (подписи
-    таблиц и рисунков приложений) остаются.
+    служебная зона, а не основной текст. Единственными «нарушениями отступа» в
+    этом документе были подписи таблиц и рисунков приложений («Таблица А.1 …»,
+    «Рисунок Б.1 …»): после t9 они относятся к caption_like и в основной текст
+    не входят, поэтому шума отступа здесь не остаётся вовсе.
     """
     proxy = corpus["proxy"]
     title_ids = set(proxy.title_page_ids())
@@ -463,11 +495,9 @@ def test_proxy_title_lines_have_no_indent_noise(corpus: Dict[str, CorpusDoc]) ->
 
     indent_violations = proxy.violations(INDENT_RULE_ID)
     assert not title_ids & {violation.location.block_id for violation in indent_violations}
-
-    assert indent_violations, "реальные нарушения отступа в DOCX пропали"
-    assert all(
-        violation.found["first_line_mm"] == pytest.approx(0.0, abs=0.01)
-        for violation in indent_violations
+    assert not indent_violations, (
+        "в прокси-сервере остались нарушения отступа основного текста: "
+        f"{[(violation.location.block_id, violation.message) for violation in indent_violations]}"
     )
 
 
@@ -568,11 +598,12 @@ def test_broken_docx_body_still_fails_font_rule(docx_builder: DocxPackageBuilder
 
 @requires_corpus
 def test_corpus_noise_budget(corpus: Dict[str, CorpusDoc]) -> None:
-    """Суммарные font+indent по корпусу — меньше 20 % прежних, всего — меньше 750.
+    """Суммарные font+indent по корпусу — меньше 20 % прежних, всего — меньше 900.
 
     До фиксации: шрифт 1109 + отступ 1162 = 2271, всего 2613 нарушений.
-    После t4 в бюджет входят и базовые проверки оформления (набор 2.2.0):
-    их шум измеряется отдельным бюджетом ниже.
+    После t4 в бюджет входят и базовые проверки оформления (набор 2.2.0),
+    после t5 — структурные проверки (набор 2.3.0): их шум измеряется
+    отдельными бюджетами ниже.
     """
     font_total = sum(len(doc.violations(FONT_RULE_ID)) for doc in corpus.values())
     indent_total = sum(len(doc.violations(INDENT_RULE_ID)) for doc in corpus.values())
@@ -700,4 +731,46 @@ def test_basic_rules_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> Non
     assert BASIC_RULE_IDS <= applied, (
         "базовые проверки пропали из штатного набора: "
         f"{sorted(BASIC_RULE_IDS - applied)}"
+    )
+
+def _structure_rule_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
+    """Считает нарушения структурных проверок по правилам."""
+    counts: Dict[str, int] = {
+        rule_id: 0 for rule_id in STRUCTURE_RULE_NOISE_BASELINE_BY_RULE
+    }
+    for doc in corpus.values():
+        for violation in doc.report.violations:
+            if violation.rule_id in STRUCTURE_RULE_IDS:
+                counts[violation.rule_id] += 1
+    return counts
+
+
+@requires_corpus
+def test_structure_rules_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> None:
+    """Структурные проверки не шумят сверх первого замера на корпусе.
+
+    Набор 2.3.0 (t5) добавил шрифт заголовков, висячие строки, неотрывность
+    заголовка, начало раздела с новой страницы и объём работы. Первый замер:
+    widow_control_body 44, heading_keep_next 18, document_volume 6,
+    heading_font 0, heading_page_break 0 — всего 68 нарушений. Это настоящие
+    находки: в работе Бутакова выключен контроль висячих строк и не включена
+    неотрывность заголовков, три работы выходят за объявленные границы объёма.
+    Шрифт заголовков и начало раздела с новой страницы на корпусе соблюдены.
+    """
+    counts = _structure_rule_counts(corpus)
+    total = sum(counts.values())
+
+    for rule_id, baseline in STRUCTURE_RULE_NOISE_BASELINE_BY_RULE.items():
+        assert counts[rule_id] <= baseline, (
+            f"{rule_id}: нарушений {counts[rule_id]} при первом замере {baseline}"
+        )
+    assert total <= STRUCTURE_RULE_NOISE_BASELINE, (
+        f"нарушений структурных правил {total} при первом замере "
+        f"{STRUCTURE_RULE_NOISE_BASELINE}"
+    )
+
+    applied = {rule.rule_id for rule in load_default_ruleset().rules}
+    assert STRUCTURE_RULE_IDS <= applied, (
+        "структурные проверки пропали из штатного набора: "
+        f"{sorted(STRUCTURE_RULE_IDS - applied)}"
     )

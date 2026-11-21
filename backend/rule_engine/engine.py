@@ -93,6 +93,11 @@ from .checks.page import (
     _check_page_format_rule,
     _check_page_number_position_rule,
 )
+from .checks.pagination import (
+    _check_heading_page_break_rule,
+    _check_keep_next_rule,
+    _check_widow_control_rule,
+)
 from .checks.sections import _check_required_sections_rule
 from .checks.text import (
     _check_alignment_rule,
@@ -100,6 +105,7 @@ from .checks.text import (
     _check_indent_rule,
 )
 from .checks.toc import _check_toc_rule
+from .checks.volume import _check_document_volume_rule
 from .findings import (
     DocumentRef,
     RuleAssessment,
@@ -115,11 +121,14 @@ from .rules import (
     CaptionFormatRule,
     CaptionNumberingRule,
     CaptionReferenceRule,
+    DocumentVolumeRule,
     FontRule,
     HeadingFormatRule,
     HeadingLevelsRule,
     HeadingNumberingRule,
+    HeadingPageBreakRule,
     IndentRule,
+    KeepNextRule,
     LineSpacingRule,
     MarginRule,
     PageFormatRule,
@@ -128,6 +137,7 @@ from .rules import (
     Rule,
     RuleSet,
     TocRule,
+    WidowControlRule,
     load_ruleset,
 )
 from parser.core.schema import ParsedDocxDocument
@@ -224,4 +234,8 @@ class RuleEngine:
         CaptionFormatRule: _check_caption_format_rule,
         CaptionReferenceRule: _check_caption_reference_rule,
         AlignmentRule: _check_alignment_rule,
+        WidowControlRule: _check_widow_control_rule,
+        KeepNextRule: _check_keep_next_rule,
+        HeadingPageBreakRule: _check_heading_page_break_rule,
+        DocumentVolumeRule: _check_document_volume_rule,
     }

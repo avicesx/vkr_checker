@@ -16,12 +16,14 @@ from ..rules import (
 from .builders import _counted_assessment
 from .common import (
     _HeadingRecord,
+    _compare_font,
     _expected_number_depth,
     _format_section_number,
     _heading_records,
     _heading_section_number,
     _heading_violation,
     _is_pdf_only,
+    _is_symbolic_run,
     _parse_section_number,
 )
 from .constants import (
@@ -307,11 +309,43 @@ def _check_heading_format_rule(
                 expected_parts.append(ALIGNMENT_LABELS[expected.alignment])
                 found_parts.append(ALIGNMENT_LABELS.get(actual_alignment, "не задано"))
 
+        occurrences = 1
+        if expected.font is not None:
+            mismatched_font = []
+            for run in record.paragraph.runs:
+                if not run.visible_text.strip() or run.in_field:
+                    continue
+                if run.effective_props.vanish_hidden or _is_symbolic_run(run):
+                    continue
+                diff = _compare_font(
+                    run.effective_props,
+                    expected.font,
+                    check_family=True,
+                    check_complex_script=not _is_pdf_only(document),
+                )
+                if diff is not None:
+                    mismatched_font.append(diff)
+            if mismatched_font:
+                font_expected, font_found, font_expected_parts, font_found_parts = (
+                    mismatched_font[0]
+                )
+                expected_values["font"] = font_expected
+                found_values["font"] = font_found
+                expected_parts.extend(font_expected_parts)
+                found_parts.extend(font_found_parts)
+                occurrences = len(mismatched_font)
+
         if not expected_values:
             continue
         violations.append(
             _heading_violation(
-                rule, record, expected_values, found_values, expected_parts, found_parts
+                rule,
+                record,
+                expected_values,
+                found_values,
+                expected_parts,
+                found_parts,
+                occurrences=occurrences,
             )
         )
 

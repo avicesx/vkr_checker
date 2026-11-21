@@ -559,6 +559,7 @@ def _heading_violation(
     found_values: Dict[str, Any],
     expected_parts: List[str],
     found_parts: List[str],
+    occurrences: int = 1,
 ) -> Violation:
     """Формирует нарушение, привязанное к абзацу заголовка."""
     return _build_violation(
@@ -569,6 +570,7 @@ def _heading_violation(
         found=found_values,
         expected_text=", ".join(expected_parts),
         found_text=", ".join(found_parts),
+        occurrences=occurrences,
     )
 
 
@@ -579,6 +581,7 @@ def _document_violation(
     found_values: Dict[str, Any],
     expected_text: str,
     found_text: str,
+    confidence: Optional[str] = None,
 ) -> Violation:
     """Формирует нарушение уровня документа без привязки к абзацу."""
     return _build_violation(
@@ -589,4 +592,5 @@ def _document_violation(
         found=found_values,
         expected_text=expected_text,
         found_text=found_text,
+        confidence=confidence,
     )

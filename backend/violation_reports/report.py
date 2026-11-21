@@ -224,6 +224,11 @@ _KIND_DETAILS: dict[
         ReportSeverity.LOW,
         "Проверьте расположение нумерации страниц по выбранной методичке.",
     ),
+    "widow_control": (
+        ReportCategory.PAGE_LAYOUT,
+        ReportSeverity.LOW,
+        "Включите контроль висячих строк, чтобы одиночные строки не оставались на соседней странице.",
+    ),
     "heading_levels": (
         ReportCategory.STRUCTURE,
         ReportSeverity.MEDIUM,
@@ -239,6 +244,16 @@ _KIND_DETAILS: dict[
         ReportSeverity.LOW,
         "Приведите оформление заголовка к требуемому виду.",
     ),
+    "keep_next": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.LOW,
+        "Включите неотрывность заголовка от следующего абзаца.",
+    ),
+    "heading_page_break": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Начинайте структурный раздел с новой страницы.",
+    ),
     "required_sections": (
         ReportCategory.STRUCTURE,
         ReportSeverity.HIGH,
@@ -248,6 +263,11 @@ _KIND_DETAILS: dict[
         ReportCategory.STRUCTURE,
         ReportSeverity.MEDIUM,
         "Сверьте оглавление с заголовками и нумерацией страниц документа.",
+    ),
+    "document_volume": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Сверьте объём работы с методическими указаниями.",
     ),
     "bibliography_link": (
         ReportCategory.BIBLIOGRAPHY,

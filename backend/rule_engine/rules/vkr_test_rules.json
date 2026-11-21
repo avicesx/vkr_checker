@@ -1,7 +1,7 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "2.2.0",
-  "description": "Тестовый набор ВКР: шрифт, отступ и выравнивание основного текста, межстрочный интервал, поля и формат страницы, номер страницы, заголовки, разделы и оглавление, ссылки и список литературы, подписи рисунков и таблиц, выравнивание и шрифт в таблицах",
+  "ruleset_version": "2.3.0",
+  "description": "Тестовый набор ВКР: шрифт, отступ и выравнивание основного текста, межстрочный интервал, поля, формат и номер страницы, висячие строки, заголовки (уровни, нумерация, шрифт, регистр, неотрывность, новая страница), объём работы, разделы и оглавление, ссылки и список литературы, подписи рисунков и таблиц, выравнивание и шрифт в таблицах",
   "rules": [
     {
       "rule_id": "font_body_text",
@@ -107,6 +107,19 @@
       }
     },
     {
+      "rule_id": "widow_control_body",
+      "kind": "widow_control",
+      "severity": "warning",
+      "message": "В основном тексте включён контроль висячих строк",
+      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "target": {
+        "scope": "body_text"
+      },
+      "expected": {
+        "enabled": true
+      }
+    },
+    {
       "rule_id": "heading_levels",
       "kind": "heading_levels",
       "severity": "error",
@@ -155,6 +168,24 @@
       }
     },
     {
+      "rule_id": "heading_font",
+      "kind": "heading_format",
+      "severity": "warning",
+      "message": "Заголовки набираются гарнитурой Times New Roman, 14 pt, полужирным",
+      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "target": {
+        "scope": "headings",
+        "exclude_roles": ["title_page", "task_sheet"]
+      },
+      "expected": {
+        "font": {
+          "family": "Times New Roman",
+          "size_pt": 14.0,
+          "bold": true
+        }
+      }
+    },
+    {
       "rule_id": "heading_alignment",
       "kind": "heading_format",
       "severity": "warning",
@@ -166,6 +197,33 @@
       },
       "expected": {
         "alignment": "center"
+      }
+    },
+    {
+      "rule_id": "heading_page_break",
+      "kind": "heading_page_break",
+      "severity": "warning",
+      "message": "Структурный раздел начинается с новой страницы",
+      "requirement_ref": "Методические указания, требования к структуре работы",
+      "target": {
+        "scope": "headings"
+      },
+      "expected": {
+        "roles": ["main_chapter", "introduction", "conclusion", "bibliography", "appendix"]
+      }
+    },
+    {
+      "rule_id": "heading_keep_next",
+      "kind": "keep_next",
+      "severity": "warning",
+      "message": "Заголовок не отрывается от следующего за ним текста",
+      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "target": {
+        "scope": "headings"
+      },
+      "expected": {
+        "enabled": true,
+        "roles": ["main_chapter", "sub_section"]
       }
     },
     {
@@ -253,6 +311,22 @@
             "role": "bibliography"
           }
         ]
+      }
+    },
+    {
+      "rule_id": "document_volume",
+      "kind": "document_volume",
+      "severity": "warning",
+      "message": "Объём ВКР соответствует норме: 60–90 страниц и 8000–18000 слов",
+      "requirement_ref": "Методические указания, требования к объёму работы",
+      "target": {
+        "scope": "document"
+      },
+      "expected": {
+        "min_pages": 60,
+        "max_pages": 90,
+        "min_words": 8000,
+        "max_words": 18000
       }
     },
     {
