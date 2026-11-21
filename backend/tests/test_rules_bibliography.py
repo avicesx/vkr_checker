@@ -26,10 +26,16 @@ from parser.core.schema import (
     PageCountInfo,
     ParagraphBlock,
     ParsedDocxDocument,
+    RunFontPropertiesEffective,
     TextCrossReferenceMention,
+    TextRun,
     ThemeData,
 )
 from rule_engine import RuleEngine, RuleSet
+from rule_engine.checks.bibliography import (
+    _check_bibliography_format_rule,
+    _check_bibliography_link_rule,
+)
 from rule_engine.rules import (
     BibliographyCitedRule,
     BibliographyFormatRule,
@@ -42,7 +48,12 @@ from rule_engine.rules import (
 # ---------------------------------------------------------------------
 
 
-def _paragraph(block_id: str, text: str, page: int = 2) -> ParagraphBlock:
+def _paragraph(
+    block_id: str,
+    text: str,
+    page: int = 2,
+    runs: Sequence[TextRun] = (),
+) -> ParagraphBlock:
     """Создает абзац основного текста с заданной страницей."""
     return ParagraphBlock(
         block_id=block_id,
@@ -51,6 +62,26 @@ def _paragraph(block_id: str, text: str, page: int = 2) -> ParagraphBlock:
         page_end_est=page,
         text_raw=text,
         text_visible=text,
+        runs=list(runs),
+    )
+
+
+def _hyperlink_run(text: str, target: str) -> TextRun:
+    """Ран с гиперссылкой: видимый текст ссылки и ее адрес из rels."""
+    return TextRun(
+        run_id="r_0001",
+        text=text,
+        visible_text=text,
+        start_char=0,
+        end_char=len(text),
+        effective_props=RunFontPropertiesEffective(
+            font_ascii="Times New Roman",
+            font_hansi="Times New Roman",
+            font_cs="Times New Roman",
+            size_pt=14.0,
+        ),
+        is_hyperlink=True,
+        hyperlink_target=target,
     )
 
 
@@ -592,3 +623,138 @@ def test_bibliography_format_categories_are_deduplicated() -> None:
     rule = engine.ruleset.rules[0]
     assert isinstance(rule, BibliographyFormatRule)
     assert rule.expected.categories == ["electronic_resource"]
+
+
+# ---------------------------------------------------------------------
+# Ложные срабатывания: код, гиперссылки и мягкий перенос
+# ---------------------------------------------------------------------
+
+
+def test_code_listing_brackets_are_not_bibliography_links() -> None:
+    """Квадратные скобки листинга кода не считаются ссылками на источники.
+
+    Бикчуркина хранит в листинге Python ``data[1800]`` и ``data[2400]``:
+    обогащение видит в них ссылки, но в code_listing это индексы массивов.
+    Правило пропускает такие упоминания, а настоящую ссылку в прозе проверяет.
+    """
+    document = _document(
+        entries=[_entry()],
+        mentions=[
+            _mention("men_code", "p_0001", targets=("1800",), resolved=(), snippet="[1800]"),
+            _mention("men_text", "p_0002", targets=("1",), resolved=("bib_001",)),
+        ],
+        blocks=[
+            _paragraph("p_0001", "values = data[1800]"),
+            _paragraph("p_0002", "Источник [1] описывает метод."),
+        ],
+    )
+    rule = BibliographyLinkRule.model_validate(_link_rule())
+
+    violations, checked, assessment = _check_bibliography_link_rule(
+        rule, document, {"p_0001": "code_listing", "p_0002": "body"}
+    )
+
+    assert violations == []
+    assert checked == 1
+    assert assessment.status == "pass"
+    assert assessment.details["mentions_in_code"] == 1
+
+
+def test_only_code_listing_mentions_are_not_assessed() -> None:
+    """Если все скобки нашлись только в коде, правило не оценивается."""
+    document = _document(
+        entries=[_entry()],
+        mentions=[_mention("men_code", "p_0001", targets=("123",), resolved=())],
+        blocks=[_paragraph("p_0001", "return data[123]")],
+    )
+    rule = BibliographyLinkRule.model_validate(_link_rule())
+
+    violations, checked, assessment = _check_bibliography_link_rule(
+        rule, document, {"p_0001": "code_listing"}
+    )
+
+    assert violations == []
+    assert checked == 0
+    assert assessment.status == "not_assessed"
+    assert "листингах кода" in assessment.observed_text
+
+
+def _electronic_format_rule() -> BibliographyFormatRule:
+    """Правило формата электронного источника: URL и дата обращения."""
+    return BibliographyFormatRule.model_validate(
+        _format_rule(
+            {
+                "categories": ["electronic_resource"],
+                "require_url": True,
+                "require_access_date": True,
+            }
+        )
+    )
+
+
+def test_hyperlink_target_counts_as_entry_url() -> None:
+    """URL за текстом гиперссылки засчитывается как адрес электронного ресурса."""
+    entry = _entry(
+        category="electronic_resource",
+        raw_text="Allure Report Docs. – URL: Allure Report Docs (дата обращения: 15.03.2026).",
+        access_date_raw="дата обращения: 15.03.2026",
+    )
+    document = _document(
+        entries=[entry],
+        blocks=[
+            _paragraph(
+                "p_0002",
+                "Allure Report Docs. – URL: Allure Report Docs (дата обращения: 15.03.2026).",
+                runs=[_hyperlink_run("Allure Report Docs", "https://allurereport.org/docs/")],
+            )
+        ],
+    )
+
+    violations, checked, assessment = _check_bibliography_format_rule(
+        _electronic_format_rule(), document, {}
+    )
+
+    assert violations == []
+    assert checked == 1
+    assert assessment.status == "pass"
+
+
+def test_hyphenated_access_date_is_recognized() -> None:
+    """Дата обращения с мягким переносом внутри слова не теряется."""
+    entry = _entry(
+        category="electronic_resource",
+        raw_text=(
+            "Overview of WPF : сайт. – URL: https://learn.microsoft.com/wpf "
+            "(дата обра-щения: 10.04.2026)."
+        ),
+        urls=["https://learn.microsoft.com/wpf"],
+        access_date_raw=None,
+    )
+    document = _document(entries=[entry], blocks=[_paragraph("p_0002", entry.raw_text)])
+
+    violations, checked, assessment = _check_bibliography_format_rule(
+        _electronic_format_rule(), document, {}
+    )
+
+    assert violations == []
+    assert checked == 1
+    assert assessment.status == "pass"
+
+
+def test_arbitrary_date_is_not_access_date() -> None:
+    """Дата без фразы «дата обращения» не засчитывается как дата обращения."""
+    entry = _entry(
+        category="electronic_resource",
+        raw_text="Отчет. – 10.04.2026. – URL: https://example.org/report",
+        urls=["https://example.org/report"],
+        access_date_raw=None,
+    )
+    document = _document(entries=[entry], blocks=[_paragraph("p_0002", entry.raw_text)])
+
+    violations, checked, assessment = _check_bibliography_format_rule(
+        _electronic_format_rule(), document, {}
+    )
+
+    assert len(violations) == 1
+    assert _mismatched_field(violations[0]) == "access_date_raw"
+    assert assessment.status == "fail"

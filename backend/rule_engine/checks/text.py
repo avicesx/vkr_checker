@@ -1,6 +1,7 @@
 """Семейство основного текста: шрифт, абзацный отступ, выравнивание."""
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional, Set, Tuple
 
 from ..findings import (
@@ -104,6 +105,53 @@ def _check_font_rule(
     return violations, len(targets), assessment
 
 
+RE_DEFINITION_ITEM = re.compile(
+    r"^(?=[^\s]*[A-Za-zА-ЯЁа-яё])[A-Za-zА-ЯЁа-яё0-9]{1,12}\s+[-–—]\s+\S"
+)
+"""Строка списка определений: короткий термин, тире и определение.
+
+Термин — одно слово до 12 знаков (``БД``, ``DI``, ``СУБД``, ``WPF``), затем
+пробел, тире и текст определения. Проверяется только форма строки; решение
+принимает ``_definition_list_block_ids`` по паре с нулевым отступом.
+"""
+
+
+def _definition_list_block_ids(targets: List[ParagraphBlock]) -> Set[str]:
+    """Находит абзацы списка определений, которые не являются прозой.
+
+    Глоссарий («БД - база данных», «DI - Dependency Injection») набирают без
+    красной строки: это перечень, а не абзацы основного текста, поэтому
+    правило отступа не должно требовать в нем 12,5 мм. Список узнается по
+    двум признакам одновременно: строка вида «термин - определение» и
+    измеренный нулевой отступ первой строки. Дополнительно требуется, чтобы
+    такие строки шли подряд (от двух) или продолжали вводную фразу с
+    двоеточием: одиночная строка с тире в обычном абзаце остается прозой.
+
+    :param targets: абзацы области действия правила в порядке документа.
+    :return: ``block_id`` абзацев, которые правило отступа пропускает.
+    """
+    ordered = [paragraph for paragraph in targets if paragraph.text_visible.strip()]
+    excluded: Set[str] = set()
+    run: List[ParagraphBlock] = []
+
+    def flush(previous_text: str) -> None:
+        if run and (len(run) >= 2 or previous_text.endswith(":")):
+            excluded.update(paragraph.block_id for paragraph in run)
+        run.clear()
+
+    previous_text = ""
+    for paragraph in ordered:
+        text = paragraph.text_visible.strip()
+        indent = paragraph.effective_props.indent_first_line_mm or 0.0
+        if RE_DEFINITION_ITEM.match(text) and abs(indent) < 0.1:
+            run.append(paragraph)
+            continue
+        flush(previous_text)
+        previous_text = text
+    flush(previous_text)
+    return excluded
+
+
 def _check_indent_rule(
     rule: IndentRule,
     document: ParsedDocxDocument,
@@ -117,6 +165,11 @@ def _check_indent_rule(
     первую строку и дают ложные +20 мм и больше, — поэтому правило не создает
     нарушений и не увеличивает счетчик проверенных объектов. Измеренные
     значения остаются в разборе (`ParagraphPropertiesEffective`).
+
+    Строки списка определений/глоссария («БД - база данных») набирают без
+    красной строки намеренно: это перечень терминов, а не абзацы прозы. Такие
+    строки исключаются из области проверки по форме строки и нулевому отступу,
+    чтобы не требовать в них 12,5 мм.
     """
     if _is_pdf_only(document):
         return (
@@ -141,6 +194,13 @@ def _check_indent_rule(
 
     violations: List[Violation] = []
     targets = _paragraph_targets(document, rule.target, contexts)
+    definition_list_ids = _definition_list_block_ids(targets)
+    if definition_list_ids:
+        targets = [
+            paragraph
+            for paragraph in targets
+            if paragraph.block_id not in definition_list_ids
+        ]
 
     for paragraph in targets:
         props = paragraph.effective_props
@@ -182,7 +242,11 @@ def _check_indent_rule(
         expected_text=rule.message,
         confidence="high",
         empty_observed="в области действия правила нет абзацев",
-        details={"scope": rule.target.scope, "tolerance_mm": rule.expected.tolerance_mm},
+        details={
+            "scope": rule.target.scope,
+            "tolerance_mm": rule.expected.tolerance_mm,
+            "definition_list_paragraphs": len(definition_list_ids),
+        },
     )
     return violations, len(targets), assessment
 

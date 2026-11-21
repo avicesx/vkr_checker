@@ -229,3 +229,59 @@ def test_body_paragraphs_checks_headings_without_flags(
 
     assert len(report.violations) == 1
     assert report.violations[0].location.style_id == "Heading1"
+
+
+GLOSSARY_LEAD_IN = """
+<w:p><w:r><w:t>Принятые сокращения:</w:t></w:r></w:p>
+"""
+
+
+def _glossary_item(term: str, definition: str) -> str:
+    """Строка глоссария без красной строки: термин, тире и определение."""
+    return (
+        "<w:p><w:pPr><w:ind w:firstLine=\"0\"/></w:pPr>"
+        f"<w:r><w:t>{term} - {definition}</w:t></w:r></w:p>"
+    )
+
+
+def test_definition_list_without_indent_is_not_prose(
+    docx_builder: DocxPackageBuilder,
+) -> None:
+    """Строки глоссария не требуют красной строки, обычный абзац требует.
+
+    Бутаков набирает перечень сокращений без отступа: «БД - база данных» и
+    следующие строки — это список определений, а не абзацы основного текста.
+    Правило отступа пропускает такой перечень, но настоящий абзац без красной
+    строки рядом по-прежнему нарушение.
+    """
+    body = (
+        GLOSSARY_LEAD_IN
+        + _glossary_item("БД", "база данных")
+        + _glossary_item("ИС", "информационная система")
+        + ZERO_FIRST_LINE_PARAGRAPH
+    )
+    document = _parse(docx_builder, body)
+
+    report = _indent_engine().check(document)
+
+    assert len(report.violations) == 1
+    assert "Абзац без красной строки" in report.violations[0].location.snippet
+    # Проверены вводная строка и обычный абзац; две строки глоссария пропущены.
+    assert report.summary.objects_checked == 2
+    assert report.assessments[0].details["definition_list_paragraphs"] == 2
+
+
+def test_single_definition_after_colon_is_not_prose(
+    docx_builder: DocxPackageBuilder,
+) -> None:
+    """Одиночное определение после вводной фразы с двоеточием тоже пропускается."""
+    body = (
+        GLOSSARY_LEAD_IN
+        + _glossary_item("API", "программный интерфейс приложения")
+        + PLAIN_PARAGRAPH
+    )
+    document = _parse(docx_builder, body)
+
+    report = _indent_engine().check(document)
+
+    assert report.violations == []

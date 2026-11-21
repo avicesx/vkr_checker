@@ -45,6 +45,20 @@ STYLE_SUFFIX_TOKENS: frozenset[str] = frozenset(
 )
 """Стилевые маркеры PostScript-записи гарнитуры: начертание, а не часть имени."""
 
+LOCALE_SUFFIX_TOKENS: frozenset[str] = frozenset(
+    {
+        "cyr",
+        "cyrillic",
+        "rus",
+    }
+)
+"""Признак языковой версии гарнитуры: «Times New Roman CYR» — та же гарнитура.
+
+Word дописывает «CYR»/«Cyrillic» к имени шрифта кириллической версии, а PDF
+иногда — «Rus». Это не другая гарнитура, поэтому маркер отбрасывается при
+сравнении; стилевые маркеры (Bold/MT) отбрасываются отдельным списком.
+"""
+
 GLUED_STYLE_SUFFIXES: Tuple[str, ...] = (
     "bolditalicmt",
     "bolditalicps",
@@ -61,8 +75,14 @@ GLUED_STYLE_SUFFIXES: Tuple[str, ...] = (
     "psmt",
     "ps",
     "mt",
+    "cyrillic",
+    "cyr",
 )
-"""Маркеры, склеенные с именем без разделителя: TimesNewRomanPSMT, ArialMT."""
+"""Маркеры, склеенные с именем без разделителя: TimesNewRomanPSMT, ArialMT.
+
+Здесь же языковые маркеры (``TimesNewRomanCYR``): они тоже не входят в имя
+гарнитуры, но идут после стилевых.
+"""
 
 GLUED_REMAINDER_MIN = 3
 """Минимальная длина имени, остающегося после отбрасывания склеенного маркера."""
@@ -127,7 +147,9 @@ def family_keys(value: Optional[str]) -> Tuple[str, ...]:
         glued = stripped
 
     separated = tokens
-    while len(separated) > 1 and separated[-1].casefold() in STYLE_SUFFIX_TOKENS:
+    while len(separated) > 1 and separated[-1].casefold() in (
+        STYLE_SUFFIX_TOKENS | LOCALE_SUFFIX_TOKENS
+    ):
         separated = separated[:-1]
         tail = "".join(separated).casefold()
         if tail not in keys:
@@ -161,6 +183,7 @@ def is_symbolic_family(value: Optional[str]) -> bool:
 __all__ = [
     "GLUED_REMAINDER_MIN",
     "GLUED_STYLE_SUFFIXES",
+    "LOCALE_SUFFIX_TOKENS",
     "STYLE_SUFFIX_TOKENS",
     "SYMBOLIC_FAMILIES",
     "family_keys",

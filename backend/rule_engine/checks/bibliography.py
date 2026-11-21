@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Dict, List, Set, Tuple
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..findings import (
     RuleAssessment,
@@ -104,6 +105,50 @@ def _bibliography_field_present(value: Any) -> bool:
     return True
 
 
+#: Фраза даты обращения, в том числе с мягким переносом внутри слова.
+RE_ACCESS_DATE_PHRASE = re.compile(r"дата\s+(?:обращения|доступа)", re.IGNORECASE)
+#: Значение даты вида 10.04.2026 или 1.4.26.
+RE_ACCESS_DATE_VALUE = re.compile(r"\d{1,2}\.\d{1,2}\.\d{2,4}")
+#: Мягкий перенос/дефис между буквами: «обра-щения» → «обращения».
+RE_HYPHENATED_BREAK = re.compile(r"(?<=[А-Яа-яЁё])[-\u00ad]\s*(?=[А-Яа-яЁё])")
+
+
+def _hyperlink_urls(block: Optional[ParagraphBlock]) -> List[str]:
+    """Собирает адреса гиперссылок из ранов абзаца записи.
+
+    В DOCX адрес электронного ресурса часто оформлен гиперссылкой, а в
+    ``text_visible`` остается только ее текст («Allure Report Docs»). Парсер
+    уже сохраняет ``TextRun.hyperlink_target``, поэтому URL не теряется.
+    """
+    if block is None:
+        return []
+    urls: List[str] = []
+    for run in block.runs:
+        target = (run.hyperlink_target or "").strip()
+        if target and target not in urls:
+            urls.append(target)
+    return urls
+
+
+def _access_date_from_raw_text(raw_text: str) -> Optional[str]:
+    """Ищет дату обращения в тексте записи с мягким переносом.
+
+    Обогащение ищет дату регулярным выражением по исходной строке и не видит
+    «(дата обра-щения: 10.04.2026)»: перенос внутри слова рвет фразу. Здесь
+    дефис между буквами снимается только для поиска даты, сам текст записи не
+    меняется. Дата принимается лишь вместе с фразой «дата обращения/доступа»,
+    чтобы случайные числа в описании не считались датой.
+    """
+    normalized = RE_HYPHENATED_BREAK.sub("", raw_text.replace("\u00ad", ""))
+    phrase = RE_ACCESS_DATE_PHRASE.search(normalized)
+    if phrase is None:
+        return None
+    value = RE_ACCESS_DATE_VALUE.search(normalized, phrase.end())
+    if value is None:
+        return None
+    return f"дата обращения: {value.group(0)}"
+
+
 def _check_bibliography_link_rule(
     rule: BibliographyLinkRule,
     document: ParsedDocxDocument,
@@ -142,6 +187,17 @@ def _check_bibliography_link_rule(
         for mention in index.mentions
         if mention.ref_type == "bibliography" and mention.extracted_targets
     ]
+    # Квадратные скобки в листинге кода — индексы массивов, а не ссылки на
+    # источники. Контексты уже посчитаны один раз на документ; упоминания в
+    # code_listing из проверки выкидываются, но в отчете видно, сколько их.
+    mentions_in_code = sum(
+        1 for mention in mentions if contexts.get(mention.block_id) == "code_listing"
+    )
+    mentions = [
+        mention
+        for mention in mentions
+        if contexts.get(mention.block_id) != "code_listing"
+    ]
     if not mentions:
         return (
             [],
@@ -152,11 +208,17 @@ def _check_bibliography_link_rule(
                 expected_text=expected_text,
                 observed_text=(
                     "в тексте не найдено ссылок на источники списка литературы"
+                    if not mentions_in_code
+                    else (
+                        "ссылки на источники найдены только в листингах кода: "
+                        "квадратные скобки там — индексы, а не ссылки"
+                    )
                 ),
                 confidence="low",
                 details={
                     "bibliography_entries": len(entries),
                     "mentions_considered": 0,
+                    "mentions_in_code": mentions_in_code,
                 },
                 note="Ссылки на источники ищет слой обогащения parser.enrichment",
             ),
@@ -224,6 +286,7 @@ def _check_bibliography_link_rule(
                 "bibliography_entries": len(entries),
                 "mentions_considered": len(mentions),
                 "unresolved_mentions": len(violations),
+                "mentions_in_code": mentions_in_code,
             },
         ),
     )
@@ -329,6 +392,12 @@ def _check_bibliography_format_rule(
     Фильтр ``categories`` ограничивает выборку категориями источников:
     URL и дата обращения обычно обязательны для электронного ресурса, но
     не для книги.
+
+    Два поля восстанавливаются из того, что парсер уже сохранил, если
+    обогащение их не увидело: URL гиперссылки (``TextRun.hyperlink_target``)
+    при пустом ``entry.urls`` и дата обращения с мягким переносом внутри
+    слова («дата обра-щения»). Иначе запись с настоящим URL за текстом
+    ссылки и настоящей датой считалась бы неполной.
     """
     expected = rule.expected
     entries = list(document.cross_ref_index.bibliography)
@@ -369,11 +438,16 @@ def _check_bibliography_format_rule(
     violations: List[Violation] = []
     blocks = _paragraph_index(document)
     for entry in entries:
+        block = blocks.get(entry.block_id)
+        urls_value = entry.urls or _hyperlink_urls(block)
+        access_value = entry.access_date_raw or _access_date_from_raw_text(
+            entry.raw_text
+        )
         checks: List[Tuple[str, Any]] = []
         if expected.require_url:
-            checks.append(("urls", entry.urls))
+            checks.append(("urls", urls_value))
         if expected.require_access_date:
-            checks.append(("access_date_raw", entry.access_date_raw))
+            checks.append(("access_date_raw", access_value))
         if expected.require_year:
             checks.append(("year_extracted", entry.year_extracted))
         if expected.require_pages:
