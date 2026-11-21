@@ -109,7 +109,7 @@ def test_compliant_document_passes_all_default_rules(
     assert report.passed is True
     assert report.summary.rules_applied == 37
     assert report.summary.violations_total == 0
-    assert report.summary.by_kind == {}
+    assert report.summary.by_code == {}
     assert report.summary.objects_checked > 0
 
 
@@ -124,13 +124,13 @@ def test_document_with_three_text_problems_gets_three_violations(
 
     assert report.passed is False
     assert report.summary.violations_total == 3
-    assert report.summary.by_kind == {"font": 1, "indent": 1, "margin": 1}
+    assert report.summary.by_code == {"font": 1, "indent": 1, "margin": 1}
     assert report.summary.by_rule == {
         "font_body_text": 1,
         "indent_first_line": 1,
         "page_margins": 1,
     }
-    kinds = {violation.kind for violation in report.violations}
+    kinds = {violation.code for violation in report.violations}
     assert kinds == {"font", "indent", "margin"}
 
 
@@ -143,7 +143,7 @@ def test_document_without_structure_reports_missing_sections_and_toc(
     report = RuleEngine(load_default_ruleset()).check(document)
 
     assert report.passed is False
-    assert report.summary.by_kind == {"required_sections": 4, "toc": 1}
+    assert report.summary.by_code == {"required_sections": 4, "toc": 1}
     assert "required_sections:section:введение" in {
         violation.violation_id for violation in report.violations
     }
@@ -181,11 +181,11 @@ def test_warning_severity_does_not_fail_document(docx_builder: DocxPackageBuilde
         "rules": [
             {
                 "rule_id": "font_warning",
-                "kind": "font",
-                "severity": "warning",
+                "code": "font",
+                "strictness": "warning",
                 "message": "Желателен Times New Roman",
                 "target": {"scope": "body_text"},
-                "expected": {"family": "Times New Roman"},
+                "params": {"family": "Times New Roman"},
             }
         ],
     }

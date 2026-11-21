@@ -318,7 +318,7 @@ def _check_bibliography_cited_rule(
                 details={"entries_considered": 0},
             ),
         )
-    if not rule.expected.require_all_cited:
+    if not rule.params.require_all_cited:
         # Модель отвергает такую конфигурацию; защита от копирования правила.
         return (
             [],
@@ -399,7 +399,7 @@ def _check_bibliography_format_rule(
     слова («дата обра-щения»). Иначе запись с настоящим URL за текстом
     ссылки и настоящей датой считалась бы неполной.
     """
-    expected = rule.expected
+    expected = rule.params
     entries = list(document.cross_ref_index.bibliography)
     expected_text = "запись списка литературы содержит обязательные элементы"
     if expected.categories is not None:
@@ -532,7 +532,7 @@ def _check_bibliography_count_rule(
     """
     index = document.cross_ref_index
     entries = list(index.bibliography) if index is not None else []
-    expected = rule.expected
+    expected = rule.params
     expected_text = (
         f"источников не меньше {expected.min_sources}"
         if expected.max_sources is None
@@ -608,7 +608,7 @@ def _check_bibliography_order_rule(
     """
     index = document.cross_ref_index
     entries = list(index.bibliography) if index is not None else []
-    expected = rule.expected
+    expected = rule.params
     expected_text = f"записи пронумерованы подряд от {expected.start_at}"
     if not entries:
         return ([], 0, _counted_assessment(
@@ -678,7 +678,7 @@ def _check_bibliography_recency_rule(
     """
     index = document.cross_ref_index
     entries = list(index.bibliography) if index is not None else []
-    expected = rule.expected
+    expected = rule.params
     reference_year = expected.reference_year or date.today().year
     threshold_year = reference_year - expected.recent_years
     expected_text = (

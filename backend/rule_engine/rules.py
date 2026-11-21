@@ -40,7 +40,7 @@ from typing import Annotated, List, Literal, Optional, Set, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-RuleKind = Literal[
+RuleCode = Literal[
     "font",
     "indent",
     "margin",
@@ -69,7 +69,7 @@ RuleKind = Literal[
     "bibliography_order",
     "bibliography_recency",
 ]
-RuleSeverity = Literal["error", "warning", "info"]
+Strictness = Literal["error", "warning", "info"]
 
 HeadingRole = Literal[
     "title_page",
@@ -1322,9 +1322,9 @@ class _RuleBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rule_id: str = Field(description="Уникальный идентификатор правила внутри набора")
-    severity: RuleSeverity = "error"
+    strictness: Strictness = "error"
     message: str = Field(description="Формулировка требования для отчета")
-    requirement_ref: Optional[str] = Field(
+    quote: Optional[str] = Field(
         default=None,
         description="Ссылка на пункт методических указаний",
     )
@@ -1352,180 +1352,180 @@ class _RuleBase(BaseModel):
 class FontRule(_RuleBase):
     """Правило шрифтового оформления ранов."""
 
-    kind: Literal["font"] = "font"
-    expected: FontExpectation
+    code: Literal["font"] = "font"
+    params: FontExpectation
 
 
 class IndentRule(_RuleBase):
     """Правило отступов абзаца."""
 
-    kind: Literal["indent"] = "indent"
-    expected: IndentExpectation
+    code: Literal["indent"] = "indent"
+    params: IndentExpectation
 
 
 class MarginRule(_RuleBase):
     """Правило полей страницы секции."""
 
-    kind: Literal["margin"] = "margin"
-    expected: MarginExpectation
+    code: Literal["margin"] = "margin"
+    params: MarginExpectation
 
 
 class HeadingLevelsRule(_RuleBase):
     """Правило иерархии уровней заголовков."""
 
-    kind: Literal["heading_levels"] = "heading_levels"
+    code: Literal["heading_levels"] = "heading_levels"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="headings"))
-    expected: HeadingLevelsExpectation
+    params: HeadingLevelsExpectation
 
 
 class HeadingNumberingRule(_RuleBase):
     """Правило нумерации заголовков."""
 
-    kind: Literal["heading_numbering"] = "heading_numbering"
+    code: Literal["heading_numbering"] = "heading_numbering"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="headings"))
-    expected: HeadingNumberingExpectation
+    params: HeadingNumberingExpectation
 
 
 class HeadingFormatRule(_RuleBase):
     """Правило оформления заголовка: точка, регистр, выравнивание."""
 
-    kind: Literal["heading_format"] = "heading_format"
+    code: Literal["heading_format"] = "heading_format"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="headings"))
-    expected: HeadingFormatExpectation
+    params: HeadingFormatExpectation
 
 
 class RequiredSectionsRule(_RuleBase):
     """Правило состава и порядка разделов документа."""
 
-    kind: Literal["required_sections"] = "required_sections"
+    code: Literal["required_sections"] = "required_sections"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document_structure"))
-    expected: RequiredSectionsExpectation
+    params: RequiredSectionsExpectation
 
 
 class TocRule(_RuleBase):
     """Правило оглавления и его сверки с заголовками."""
 
-    kind: Literal["toc"] = "toc"
+    code: Literal["toc"] = "toc"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="toc"))
-    expected: TocExpectation
+    params: TocExpectation
 
 
 class PageNumberPositionRule(_RuleBase):
     """Правило положения печатного номера страницы в колонтитуле."""
 
-    kind: Literal["page_number_position"] = "page_number_position"
+    code: Literal["page_number_position"] = "page_number_position"
     target: RuleTarget = Field(
         default_factory=lambda: RuleTarget(scope="headers_footers")
     )
-    expected: PageNumberPositionExpectation
+    params: PageNumberPositionExpectation
 
 
 class PageFormatRule(_RuleBase):
     """Правило формата листа секции."""
 
-    kind: Literal["page_format"] = "page_format"
+    code: Literal["page_format"] = "page_format"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="sections"))
-    expected: PageFormatExpectation
+    params: PageFormatExpectation
 
 
 class LineSpacingRule(_RuleBase):
     """Правило межстрочного интервала абзаца."""
 
-    kind: Literal["line_spacing"] = "line_spacing"
-    expected: LineSpacingExpectation
+    code: Literal["line_spacing"] = "line_spacing"
+    params: LineSpacingExpectation
 
 
 class BibliographyLinkRule(_RuleBase):
     """Правило разрешения ссылок на источники списка литературы."""
 
-    kind: Literal["bibliography_link"] = "bibliography_link"
+    code: Literal["bibliography_link"] = "bibliography_link"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
-    expected: BibliographyLinkExpectation
+    params: BibliographyLinkExpectation
 
 
 class BibliographyCitedRule(_RuleBase):
     """Правило цитирования источников: каждая запись списка упомянута в тексте."""
 
-    kind: Literal["bibliography_cited"] = "bibliography_cited"
+    code: Literal["bibliography_cited"] = "bibliography_cited"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
-    expected: BibliographyCitedExpectation
+    params: BibliographyCitedExpectation
 
 
 class BibliographyFormatRule(_RuleBase):
     """Правило оформления записей списка литературы."""
 
-    kind: Literal["bibliography_format"] = "bibliography_format"
+    code: Literal["bibliography_format"] = "bibliography_format"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
-    expected: BibliographyFormatExpectation
+    params: BibliographyFormatExpectation
 
 
 class CaptionNumberingRule(_RuleBase):
     """Правило нумерации подписей рисунков, таблиц и приложений."""
 
-    kind: Literal["caption_numbering"] = "caption_numbering"
+    code: Literal["caption_numbering"] = "caption_numbering"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
-    expected: CaptionNumberingExpectation
+    params: CaptionNumberingExpectation
 
 
 class CaptionFormatRule(_RuleBase):
     """Правило оформления подписи: префикс, разделитель, точка, регистр."""
 
-    kind: Literal["caption_format"] = "caption_format"
+    code: Literal["caption_format"] = "caption_format"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
-    expected: CaptionFormatExpectation
+    params: CaptionFormatExpectation
 
 
 class CaptionReferenceRule(_RuleBase):
     """Правило ссылки на рисунок или таблицу в тексте работы."""
 
-    kind: Literal["caption_reference"] = "caption_reference"
+    code: Literal["caption_reference"] = "caption_reference"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
-    expected: CaptionReferenceExpectation
+    params: CaptionReferenceExpectation
 
 
 class AlignmentRule(_RuleBase):
     """Правило выравнивания абзаца: подписи, ячейки таблиц, основной текст."""
 
-    kind: Literal["alignment"] = "alignment"
+    code: Literal["alignment"] = "alignment"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
-    expected: AlignmentExpectation
+    params: AlignmentExpectation
 
 
 class WidowControlRule(_RuleBase):
     """Правило контроля висячих строк в абзацах основного текста."""
 
-    kind: Literal["widow_control"] = "widow_control"
-    expected: WidowControlExpectation
+    code: Literal["widow_control"] = "widow_control"
+    params: WidowControlExpectation
 
 
 class KeepNextRule(_RuleBase):
     """Правило неотрывности заголовка от следующего за ним текста."""
 
-    kind: Literal["keep_next"] = "keep_next"
+    code: Literal["keep_next"] = "keep_next"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="headings"))
-    expected: KeepNextExpectation
+    params: KeepNextExpectation
 
 
 class HeadingPageBreakRule(_RuleBase):
     """Правило начала структурного раздела с новой страницы."""
 
-    kind: Literal["heading_page_break"] = "heading_page_break"
+    code: Literal["heading_page_break"] = "heading_page_break"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="headings"))
-    expected: HeadingPageBreakExpectation
+    params: HeadingPageBreakExpectation
 
 
 class DocumentVolumeRule(_RuleBase):
     """Правило объема работы в страницах и словах."""
 
-    kind: Literal["document_volume"] = "document_volume"
+    code: Literal["document_volume"] = "document_volume"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
-    expected: DocumentVolumeExpectation
+    params: DocumentVolumeExpectation
 
 
 class MicroTypographyRule(_RuleBase):
     """Правило микротипографики абзацев основного текста."""
 
-    kind: Literal["microtypography"] = "microtypography"
+    code: Literal["microtypography"] = "microtypography"
     target: RuleTarget = Field(
         default_factory=lambda: RuleTarget(
             scope="body_paragraphs",
@@ -1538,39 +1538,39 @@ class MicroTypographyRule(_RuleBase):
             ],
         )
     )
-    expected: MicroTypographyExpectation
+    params: MicroTypographyExpectation
 
 
 class EquationNumberingRule(_RuleBase):
     """Правило нумерации вынесенных формул."""
 
-    kind: Literal["equation_numbering"] = "equation_numbering"
+    code: Literal["equation_numbering"] = "equation_numbering"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
-    expected: EquationNumberingExpectation
+    params: EquationNumberingExpectation
 
 
 class BibliographyCountRule(_RuleBase):
     """Правило количества источников в списке литературы."""
 
-    kind: Literal["bibliography_count"] = "bibliography_count"
+    code: Literal["bibliography_count"] = "bibliography_count"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
-    expected: BibliographyCountExpectation
+    params: BibliographyCountExpectation
 
 
 class BibliographyOrderRule(_RuleBase):
     """Правило сквозной нумерации списка литературы."""
 
-    kind: Literal["bibliography_order"] = "bibliography_order"
+    code: Literal["bibliography_order"] = "bibliography_order"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
-    expected: BibliographyOrderExpectation
+    params: BibliographyOrderExpectation
 
 
 class BibliographyRecencyRule(_RuleBase):
     """Правило свежести источников списка литературы."""
 
-    kind: Literal["bibliography_recency"] = "bibliography_recency"
+    code: Literal["bibliography_recency"] = "bibliography_recency"
     target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
-    expected: BibliographyRecencyExpectation
+    params: BibliographyRecencyExpectation
 
 
 Rule = Annotated[
@@ -1603,10 +1603,10 @@ Rule = Annotated[
         BibliographyOrderRule,
         BibliographyRecencyRule,
     ],
-    Field(discriminator="kind"),
+    Field(discriminator="code"),
 ]
 
-KIND_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
+CODE_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "font": PARAGRAPH_SCOPES | HEADING_SCOPES,
     "indent": PARAGRAPH_SCOPES | HEADING_SCOPES,
     "margin": frozenset({"sections"}),
@@ -1670,7 +1670,7 @@ class RuleSet(BaseModel):
                 )
             seen.add(rule.rule_id)
 
-            allowed_scopes = KIND_ALLOWED_SCOPES[rule.kind]
+            allowed_scopes = CODE_ALLOWED_SCOPES[rule.code]
             if isinstance(rule, MarginRule) and rule.target.scope != "sections":
                 raise ValueError(
                     f"Правило '{rule.rule_id}': margin проверяет секции, "
@@ -1682,7 +1682,7 @@ class RuleSet(BaseModel):
                 )
             if rule.target.scope not in allowed_scopes:
                 raise ValueError(
-                    f"Правило '{rule.rule_id}': kind '{rule.kind}' проверяет "
+                    f"Правило '{rule.rule_id}': code '{rule.code}' проверяет "
                     f"{SCOPE_LABELS.get(rule.target.scope, rule.target.scope)}, "
                     f"scope должен быть одним из: {sorted(allowed_scopes)}"
                 )

@@ -167,7 +167,7 @@ def _check_caption_numbering_rule(
     номера («2.1») в последовательности не участвуют: они видны в счетчике
     объектов, но сквозной арабской нумерацией не являются.
     """
-    expected = rule.expected
+    expected = rule.params
     entities = _caption_entities(document, expected.entity_type)
     entity_label = CAPTION_ENTITY_LABELS.get(
         expected.entity_type, "объект с подписью"
@@ -318,7 +318,7 @@ def _check_caption_format_rule(
     самого абзаца подписи; если абзаца нет в разборе, свойство
     пропускается, а не считается нарушением.
     """
-    expected = rule.expected
+    expected = rule.params
     entities = _caption_entities(document, expected.entity_type)
     entity_label = CAPTION_ENTITY_LABELS.get(
         expected.entity_type, "объект с подписью"
@@ -498,7 +498,7 @@ def _check_caption_reference_rule(
     сама называет объект, но ссылкой не считается. Приложения в выборку не
     входят — ссылка «приложение А» проверяется отдельно.
     """
-    expected = rule.expected
+    expected = rule.params
     entities = _referenced_caption_entities(document, expected.entity_type)
     entity_label = CAPTION_ENTITY_LABELS.get(expected.entity_type, "объект")
     expected_text = "объект упомянут в тексте работы"

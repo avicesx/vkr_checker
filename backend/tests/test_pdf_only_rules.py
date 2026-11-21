@@ -223,30 +223,30 @@ def _paragraph_by_prefix(document: ParsedDocument, prefix: str) -> ParagraphBloc
     raise AssertionError(f"Не найден абзац, начинающийся с {prefix!r}")
 
 
-def _indent_engine(first_line_mm: Optional[float] = 12.5, **expected: object) -> RuleEngine:
+def _indent_engine(first_line_mm: Optional[float] = 12.5, **params: object) -> RuleEngine:
     """Собирает движок с единственным правилом отступов."""
     indent_expected: Dict[str, object] = {
         "first_line_mm": first_line_mm,
         "tolerance_mm": 0.5,
     }
-    indent_expected.update(expected)
+    indent_expected.update(params)
     payload = {
         "ruleset_id": "pdf-only-indents",
         "ruleset_version": "1.0.0",
         "rules": [
             {
                 "rule_id": "indent_first_line",
-                "kind": "indent",
+                "code": "indent",
                 "message": "Абзац начинается с отступа 12,5 мм",
                 "target": {"scope": "body_text"},
-                "expected": indent_expected,
+                "params": indent_expected,
             }
         ],
     }
     return RuleEngine(RuleSet.model_validate(payload))
 
 
-def _font_engine(**expected: object) -> RuleEngine:
+def _font_engine(**params: object) -> RuleEngine:
     """Собирает движок с единственным правилом шрифта."""
     payload = {
         "ruleset_id": "pdf-only-fonts",
@@ -254,30 +254,30 @@ def _font_engine(**expected: object) -> RuleEngine:
         "rules": [
             {
                 "rule_id": "font_body_text",
-                "kind": "font",
+                "code": "font",
                 "message": "Основной текст набран Times New Roman, 14 pt",
                 "target": {"scope": "body_text"},
-                "expected": expected,
+                "params": params,
             }
         ],
     }
     return RuleEngine(RuleSet.model_validate(payload))
 
 
-def _margin_engine(**expected: object) -> RuleEngine:
+def _margin_engine(**params: object) -> RuleEngine:
     """Собирает движок с единственным правилом полей страницы."""
     margin_expected: Dict[str, object] = {"tolerance_mm": 1.0}
-    margin_expected.update(expected)
+    margin_expected.update(params)
     payload = {
         "ruleset_id": "pdf-only-margins",
         "ruleset_version": "1.0.0",
         "rules": [
             {
                 "rule_id": "page_margins",
-                "kind": "margin",
+                "code": "margin",
                 "message": "Поля страницы по методичке",
                 "target": {"scope": "sections"},
-                "expected": margin_expected,
+                "params": margin_expected,
             }
         ],
     }

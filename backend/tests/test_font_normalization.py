@@ -54,20 +54,20 @@ def _parse(builder: DocxPackageBuilder, body: str) -> ParsedDocxDocument:
     return DocxParserPipeline(builder.build()).parse()
 
 
-def _font_engine(**expected: object) -> RuleEngine:
+def _font_engine(**params: object) -> RuleEngine:
     """Собирает движок с единственным правилом шрифта Times New Roman 14 pt."""
     font_expected: Dict[str, object] = {"family": "Times New Roman", "size_pt": 14.0}
-    font_expected.update(expected)
+    font_expected.update(params)
     payload = {
         "ruleset_id": "font-normalization-test",
         "ruleset_version": "1.0.0",
         "rules": [
             {
                 "rule_id": "font_body_text",
-                "kind": "font",
+                "code": "font",
                 "message": "Основной текст набирается Times New Roman, 14 pt",
                 "target": {"scope": "body_text"},
-                "expected": font_expected,
+                "params": font_expected,
             }
         ],
     }
@@ -204,8 +204,8 @@ def test_normalize_family_defaults_to_true() -> None:
     """Нормализация гарнитуры включена по умолчанию и остается в схеме правила."""
     ruleset = load_default_ruleset()
     font_rule = ruleset.get_rule("font_body_text")
-    assert font_rule.expected.normalize_family is True
-    assert font_rule.expected.family == "Times New Roman"
+    assert font_rule.params.normalize_family is True
+    assert font_rule.params.family == "Times New Roman"
 
 
 def test_default_ruleset_still_loads() -> None:

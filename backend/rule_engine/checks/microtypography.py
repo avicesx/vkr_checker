@@ -187,7 +187,7 @@ def _check_microtypography_rule(
     ``bibliography_format``, а не правило прозы. PDF не хранит
     микротипографику, поэтому проверка для PDF не оценивается.
     """
-    checks = list(rule.expected.checks)
+    checks = list(rule.params.checks)
     expected_text = "; ".join(CHECK_LABELS[check] for check in checks)
     if _is_pdf_only(document):
         return ([], 0, _counted_assessment(

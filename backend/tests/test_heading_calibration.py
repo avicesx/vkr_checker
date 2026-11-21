@@ -144,10 +144,10 @@ def _tree_roles(document: ParsedDocument) -> Dict[str, str]:
 def _levels_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "heading_levels",
-        "kind": "heading_levels",
+        "code": "heading_levels",
         "message": "Иерархия заголовков",
         "target": {"scope": "headings"},
-        "expected": {"first_level": 1},
+        "params": {"first_level": 1},
     }
     rule.update(overrides)
     return rule
@@ -156,10 +156,10 @@ def _levels_rule(**overrides: object) -> dict:
 def _numbering_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "heading_numbering",
-        "kind": "heading_numbering",
+        "code": "heading_numbering",
         "message": "Нумерация заголовков",
         "target": {"scope": "headings"},
-        "expected": {"number_ending": "any", "require_number_for_roles": []},
+        "params": {"number_ending": "any", "require_number_for_roles": []},
     }
     rule.update(overrides)
     return rule
@@ -168,10 +168,10 @@ def _numbering_rule(**overrides: object) -> dict:
 def _sections_rule(sections: Sequence[dict]) -> dict:
     return {
         "rule_id": "required_sections",
-        "kind": "required_sections",
+        "code": "required_sections",
         "message": "Обязательные разделы",
         "target": {"scope": "document_structure"},
-        "expected": {"sections": list(sections)},
+        "params": {"sections": list(sections)},
     }
 
 
@@ -272,7 +272,7 @@ def test_consistent_numbering_has_no_level_violations(
         + TEXT
     )
 
-    report = _check(docx_builder, body, _levels_rule(expected={"first_level": 1, "max_level": 3}))
+    report = _check(docx_builder, body, _levels_rule(params={"first_level": 1, "max_level": 3}))
     numbering = _check(docx_builder, body, _numbering_rule())
 
     assert report.summary.violations_total == 0
@@ -293,7 +293,7 @@ def test_number_depth_mismatch_with_hierarchy_is_still_reported(
         docx_builder,
         body,
         _numbering_rule(
-            expected={
+            params={
                 "check_sequence": False,
                 "check_parent_number": False,
                 "require_number_for_roles": [],
@@ -315,7 +315,7 @@ def test_root_heading_number_depth_is_not_duplicated_by_numbering(
         docx_builder,
         _heading("1.1 Подраздел без раздела", level=2),
         _numbering_rule(
-            expected={
+            params={
                 "check_sequence": False,
                 "check_parent_number": False,
                 "require_number_for_roles": [],
@@ -641,11 +641,11 @@ def test_numberless_roles_constant_matches_contract() -> None:
         }
     )
     numbering_expected = load_default_ruleset().get_rule("heading_numbering")
-    assert numbering_expected.expected.require_number_for_roles == [
+    assert numbering_expected.params.require_number_for_roles == [
         "main_chapter",
         "sub_section",
     ]
-    assert not set(numbering_expected.expected.require_number_for_roles) & set(
+    assert not set(numbering_expected.params.require_number_for_roles) & set(
         NUMBERLESS_HEADING_ROLES
     )
 
@@ -661,7 +661,7 @@ def test_numberless_roles_do_not_require_number(docx_builder: DocxPackageBuilder
         + TEXT
     )
     rule = _numbering_rule(
-        expected={
+        params={
             "check_sequence": False,
             "check_parent_number": False,
             "require_number_for_roles": sorted(NUMBERLESS_HEADING_ROLES),
@@ -681,7 +681,7 @@ def test_numbered_chapter_still_requires_number(docx_builder: DocxPackageBuilder
     report = _check(
         docx_builder,
         body,
-        _numbering_rule(expected={"require_number_for_roles": ["main_chapter"]}),
+        _numbering_rule(params={"require_number_for_roles": ["main_chapter"]}),
     )
 
     assert report.summary.violations_total == 1
@@ -698,10 +698,10 @@ def test_heading_alignment_is_still_reported(docx_builder: DocxPackageBuilder) -
     body = _heading("1 Раздел", align="both") + TEXT
     rule = {
         "rule_id": "heading_alignment",
-        "kind": "heading_format",
+        "code": "heading_format",
         "message": "Заголовки выравниваются по центру",
         "target": {"scope": "headings"},
-        "expected": {"alignment": "center"},
+        "params": {"alignment": "center"},
     }
 
     report = _check(docx_builder, body, rule)

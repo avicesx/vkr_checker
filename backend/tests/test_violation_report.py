@@ -73,7 +73,7 @@ def _sample_parser_result() -> ParsedDocxDocument:
 
 def _assessment(
     rule_id: str,
-    kind: str,
+    code: str,
     status: str,
     *,
     expected_text: str = "требование методички",
@@ -83,7 +83,7 @@ def _assessment(
     """создаёт оценку правила с заданным статусом"""
     return RuleAssessment(
         rule_id=rule_id,
-        kind=kind,
+        code=code,
         status=status,
         expected_text=expected_text,
         observed_text=observed_text,
@@ -93,7 +93,7 @@ def _assessment(
 
 def _rule_violation(
     rule_id: str,
-    kind: str,
+    code: str,
     *,
     address: str = "p-12",
     block_id: str | None = "p-12",
@@ -112,7 +112,7 @@ def _rule_violation(
     return RuleViolation(
         violation_id=f"{rule_id}:{address}",
         rule_id=rule_id,
-        kind=kind,
+        code=code,
         severity=severity,
         message=message,
         location=RuleViolationLocation(
@@ -390,7 +390,7 @@ def test_table_numbering_duplicate_adds_violation() -> None:
 
 
 def test_new_rule_ids_inherit_category_from_kind() -> None:
-    """rule_id без отдельного маппинга получает категорию по kind правила"""
+    """rule_id без отдельного маппинга получает категорию по code правила"""
     document = _sample_parser_result()
     document.anomalies = DocumentAnomalies()
 

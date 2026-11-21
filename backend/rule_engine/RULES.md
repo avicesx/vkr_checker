@@ -117,17 +117,17 @@ python manual_test/check_rules.py manual_test/test.docx \
 ```json
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "2.4.0",
+  "ruleset_version": "3.0.0",
   "description": "Тестовый набор",
   "rules": [
     {
       "rule_id": "font_body_text",
-      "kind": "font",
-      "severity": "error",
+      "code": "font",
+      "strictness": "error",
       "message": "Основной текст набирается гарнитурой Times New Roman, 14 pt",
-      "requirement_ref": "Методические указания, п. 4.2",
+      "quote": "Методические указания, п. 4.2",
       "target": {"scope": "body_text"},
-      "expected": {"family": "Times New Roman", "size_pt": 14.0}
+      "params": {"family": "Times New Roman", "size_pt": 14.0}
     }
   ]
 }
@@ -138,12 +138,17 @@ python manual_test/check_rules.py manual_test/test.docx \
 | Поле | Обязательно | Смысл |
 |---|---|---|
 | `rule_id` | да | уникальный идентификатор внутри набора |
-| `kind` | да | `font`, `indent`, `margin`, `heading_levels`, `heading_numbering`, `heading_format`, `required_sections`, `toc`, `page_number_position`, `page_format`, `line_spacing`, `bibliography_link`, `bibliography_cited`, `bibliography_format`, `caption_numbering`, `caption_format`, `caption_reference`, `alignment` |
+| `code` | да | `font`, `indent`, `margin`, `heading_levels`, `heading_numbering`, `heading_format`, `required_sections`, `toc`, `page_number_position`, `page_format`, `line_spacing`, `bibliography_link`, `bibliography_cited`, `bibliography_format`, `caption_numbering`, `caption_format`, `caption_reference`, `alignment` |
 | `message` | да | формулировка требования для отчета |
-| `severity` | нет | `error` (по умолчанию), `warning`, `info` |
-| `requirement_ref` | нет | ссылка на пункт методических указаний |
+| `strictness` | нет | `error` (по умолчанию), `warning`, `info` |
+| `quote` | нет | ссылка на пункт методических указаний |
 | `target` | нет | область действия, по умолчанию `{"scope": "body_text"}` |
-| `expected` | да | ожидаемые значения, зависят от `kind` |
+| `params` | да | ожидаемые значения, зависят от `code` |
+
+Поля правила повторяют словарь ERD команды: `code` соответствует
+`Rule_Type.code`, `params` — `Rule.params`, `strictness` — `Rule.strictness`,
+`quote` — `Rule.quote`. Одинаковые имена в JSON-наборе, моделях `rules.py` и
+таблицах БД убирают маппинг между двумя описаниями одной сущности.
 
 `rule_id` в пределах набора уникальны; `ruleset_id` и `ruleset_version`
 попадают в отчет, поэтому по ним видно, чем именно проверяли документ.
@@ -268,14 +273,14 @@ python manual_test/check_rules.py manual_test/test.docx \
 ```json
 {
   "rule_id": "font_without_listings",
-  "kind": "font",
-  "severity": "error",
+  "code": "font",
+  "strictness": "error",
   "message": "Весь текст, включая титульный лист, набран Times New Roman, 14 pt",
   "target": {
     "scope": "body_text",
     "exclude_contexts": ["code_listing"]
   },
-  "expected": {"family": "Times New Roman", "size_pt": 14.0}
+  "params": {"family": "Times New Roman", "size_pt": 14.0}
 }
 ```
 
@@ -303,7 +308,7 @@ python manual_test/check_rules.py manual_test/test.docx \
 
 ---
 
-## 3. Виды правил и `expected`
+## 3. Виды правил и `params`
 
 ### `font` — шрифт рана
 
@@ -681,7 +686,7 @@ Webdings и подобные, а также раны, весь видимый т
 
 Поэтому перед сравнением измеренное значение делится на
 `PDF_SINGLE_LINE_FACTOR = 1.15` — одиночный интервал Times New Roman. После
-этого `expected.ratio` имеет единый смысл в обоих режимах: множитель Word
+этого `params.ratio` имеет единый смысл в обоих режимах: множитель Word
 `1.5 ± 0.25`. В `details` и `found` сохраняются оба значения: `median_ratio` —
 исходное типографское отношение, `word_multiplier` — приведенное к шкале Word;
 сам коэффициент отдается как `pdf_single_line_factor`. Вердикты DOCX и PDF для
@@ -777,12 +782,12 @@ Webdings и подобные, а также раны, весь видимый т
 ```json
 {
   "rule_id": "bibliography_links_resolved",
-  "kind": "bibliography_link",
-  "severity": "error",
+  "code": "bibliography_link",
+  "strictness": "error",
   "message": "Ссылки в тексте указывают на источники, включенные в список литературы",
-  "requirement_ref": "Методические указания, требования к ссылкам на источники",
+  "quote": "Методические указания, требования к ссылкам на источники",
   "target": {"scope": "bibliography"},
-  "expected": {"allow_unresolved": false}
+  "params": {"allow_unresolved": false}
 }
 ```
 
@@ -808,12 +813,12 @@ Webdings и подобные, а также раны, весь видимый т
 ```json
 {
   "rule_id": "bibliography_all_cited",
-  "kind": "bibliography_cited",
-  "severity": "error",
+  "code": "bibliography_cited",
+  "strictness": "error",
   "message": "Каждый источник списка литературы имеет ссылку в тексте работы",
-  "requirement_ref": "Методические указания, требования к списку литературы",
+  "quote": "Методические указания, требования к списку литературы",
   "target": {"scope": "bibliography"},
-  "expected": {"require_all_cited": true}
+  "params": {"require_all_cited": true}
 }
 ```
 
@@ -826,7 +831,7 @@ Webdings и подобные, а также раны, весь видимый т
 
 ### `bibliography_count`, `bibliography_order`, `bibliography_recency` — объём, порядок и свежесть списка
 
-| Вид | Поля `expected` | Смысл |
+| Вид | Поля `params` | Смысл |
 |---|---|---|
 | `bibliography_count` | `min_sources=20`, `max_sources=null` | нижняя и верхняя граница числа источников |
 | `bibliography_order` | `start_at=1`, `allow_gaps=false`, `allow_duplicates=false` | сквозная нумерация без пропусков и повторов |
@@ -881,12 +886,12 @@ Webdings и подобные, а также раны, весь видимый т
 [
   {
     "rule_id": "bibliography_format_electronic",
-    "kind": "bibliography_format",
-    "severity": "error",
+    "code": "bibliography_format",
+    "strictness": "error",
     "message": "Электронный ресурс в списке литературы содержит URL и дату обращения",
-    "requirement_ref": "Методические указания, требования к оформлению списка литературы",
+    "quote": "Методические указания, требования к оформлению списка литературы",
     "target": {"scope": "bibliography"},
-    "expected": {
+    "params": {
       "categories": ["electronic_resource"],
       "require_url": true,
       "require_access_date": true
@@ -894,11 +899,11 @@ Webdings и подобные, а также раны, весь видимый т
   },
   {
     "rule_id": "bibliography_format_article",
-    "kind": "bibliography_format",
-    "severity": "error",
+    "code": "bibliography_format",
+    "strictness": "error",
     "message": "Статья в списке литературы оформлена с разделителем «//» перед названием источника",
     "target": {"scope": "bibliography"},
-    "expected": {
+    "params": {
       "categories": ["journal_article"],
       "require_double_slash": true
     }
@@ -939,12 +944,12 @@ Webdings и подобные, а также раны, весь видимый т
 ```json
 {
   "rule_id": "caption_numbering_figures",
-  "kind": "caption_numbering",
-  "severity": "error",
+  "code": "caption_numbering",
+  "strictness": "error",
   "message": "Рисунки нумеруются сквозной арабской нумерацией без дублей, пропусков и нарушения порядка",
-  "requirement_ref": "Методические указания, требования к нумерации рисунков",
+  "quote": "Методические указания, требования к нумерации рисунков",
   "target": {"scope": "captions"},
-  "expected": {
+  "params": {
     "entity_type": "figure",
     "scheme": "continuous_arabic",
     "allow_gaps": false,
@@ -998,12 +1003,12 @@ Webdings и подобные, а также раны, весь видимый т
 [
   {
     "rule_id": "caption_format_figures",
-    "kind": "caption_format",
-    "severity": "error",
+    "code": "caption_format",
+    "strictness": "error",
     "message": "Номер и название рисунка разделены тире, точка в конце подписи не ставится",
-    "requirement_ref": "Методические указания, требования к оформлению подписей рисунков",
+    "quote": "Методические указания, требования к оформлению подписей рисунков",
     "target": {"scope": "captions"},
-    "expected": {
+    "params": {
       "entity_type": "figure",
       "separator": "dash",
       "require_trailing_dot": false
@@ -1011,12 +1016,12 @@ Webdings и подобные, а также раны, весь видимый т
   },
   {
     "rule_id": "caption_format_tables",
-    "kind": "caption_format",
-    "severity": "error",
+    "code": "caption_format",
+    "strictness": "error",
     "message": "Номер и название таблицы разделены тире",
-    "requirement_ref": "Методические указания, требования к оформлению подписей таблиц",
+    "quote": "Методические указания, требования к оформлению подписей таблиц",
     "target": {"scope": "captions"},
-    "expected": {
+    "params": {
       "entity_type": "table",
       "separator": "dash"
     }
@@ -1046,12 +1051,12 @@ Webdings и подобные, а также раны, весь видимый т
 ```json
 {
   "rule_id": "caption_reference_tables",
-  "kind": "caption_reference",
-  "severity": "error",
+  "code": "caption_reference",
+  "strictness": "error",
   "message": "На каждую таблицу есть ссылка в тексте работы",
-  "requirement_ref": "Методические указания, требования к ссылкам на таблицы",
+  "quote": "Методические указания, требования к ссылкам на таблицы",
   "target": {"scope": "captions"},
-  "expected": {"entity_type": "table", "required": true}
+  "params": {"entity_type": "table", "required": true}
 }
 ```
 
@@ -1076,21 +1081,21 @@ Webdings и подобные, а также раны, весь видимый т
 [
   {
     "rule_id": "alignment_captions",
-    "kind": "alignment",
-    "severity": "error",
+    "code": "alignment",
+    "strictness": "error",
     "message": "Подписи рисунков и таблиц выравниваются по центру",
-    "requirement_ref": "Методические указания, требования к оформлению подписей",
+    "quote": "Методические указания, требования к оформлению подписей",
     "target": {"scope": "captions"},
-    "expected": {"alignment": "center"}
+    "params": {"alignment": "center"}
   },
   {
     "rule_id": "alignment_table_cells",
-    "kind": "alignment",
-    "severity": "error",
+    "code": "alignment",
+    "strictness": "error",
     "message": "Текст в ячейках таблиц выравнивается по левому краю",
-    "requirement_ref": "Методические указания, требования к оформлению таблиц",
+    "quote": "Методические указания, требования к оформлению таблиц",
     "target": {"scope": "table_cells"},
-    "expected": {"alignment": "left"}
+    "params": {"alignment": "left"}
   }
 ]
 ```
@@ -1117,12 +1122,12 @@ Webdings и подобные, а также раны, весь видимый т
 ```json
 {
   "rule_id": "font_table_cells",
-  "kind": "font",
-  "severity": "error",
+  "code": "font",
+  "strictness": "error",
   "message": "Текст в таблицах набирается гарнитурой Times New Roman, 12 pt",
-  "requirement_ref": "Методические указания, требования к оформлению таблиц",
+  "quote": "Методические указания, требования к оформлению таблиц",
   "target": {"scope": "table_cells"},
-  "expected": {
+  "params": {
     "family": "Times New Roman",
     "size_pt": 12.0,
     "size_tolerance_pt": 0.5
@@ -1180,7 +1185,7 @@ Webdings и подобные, а также раны, весь видимый т
 | `heading_page_break` | `heading_page_break` | `headings` | разделы `main_chapter`, `introduction`, `conclusion`, `bibliography`, `appendix` начинаются с новой страницы |
 | `document_volume` | `document_volume` | `document` | 60–90 страниц и 8000–18000 слов |
 
-`heading_font` — расширение `heading_format`: добавлено поле `expected.font`
+`heading_font` — расширение `heading_format`: добавлено поле `params.font`
 (`FontExpectation`), проверяются видимые раны заголовка. В PDF запись шрифта
 нормализуется (`TimesNewRoman-BoldMT` → Times New Roman), поэтому проверка не
 зависит от того, как гарнитуру назвал PDF-слой. Титульный лист и лист задания
@@ -1303,7 +1308,7 @@ PDF-правила честно не оцениваются: микротипо�
 ```json
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "2.4.0",
+  "ruleset_version": "3.0.0",
   "parser_schema_version": "3.0.0",
   "document": {
     "filename": "vkr.docx",
@@ -1325,10 +1330,10 @@ PDF-правила честно не оцениваются: микротипо�
     {
       "violation_id": "font_body_text:p_00041",
       "rule_id": "font_body_text",
-      "kind": "font",
+      "code": "font",
       "severity": "error",
       "message": "Основной текст набирается гарнитурой Times New Roman, 14 pt",
-      "requirement_ref": "Методические указания, п. 4.2",
+      "quote": "Методические указания, п. 4.2",
       "location": {
         "block_id": "p_00041",
         "section_idx": 0,
@@ -1352,7 +1357,7 @@ PDF-правила честно не оцениваются: микротипо�
   "assessments": [
     {
       "rule_id": "page_number_position",
-      "kind": "page_number_position",
+      "code": "page_number_position",
       "status": "pass",
       "expected_text": "нижний колонтитул, по центру",
       "observed_text": "нижний колонтитул, по центру (78 из 80 страниц)",
@@ -1362,7 +1367,7 @@ PDF-правила честно не оцениваются: микротипо�
     },
     {
       "rule_id": "line_spacing_body",
-      "kind": "line_spacing",
+      "code": "line_spacing",
       "status": "not_assessed",
       "expected_text": "множитель 1,5, допуск ±0,25",
       "observed_text": "нет данных об интервале: в DOCX не найдены абзацы с множительным интервалом, в PDF интервал не оценен",
@@ -1399,7 +1404,7 @@ PDF-правила честно не оцениваются: микротипо�
   не найдено подписей», «выравнивание не измерено». Это не `pass`: отсутствие
   измерения не означает выполнения требования.
 - `passed` равен `true`, только если нет нарушений уровня `error`. Правила с
-  `severity="warning"` или `"info"` не блокируют документ.
+  `strictness="warning"` или `"info"` не блокируют документ.
 - `assessments` — статусы проверок, которым может не хватить данных: `status`
   равен `pass`, `fail` или `not_assessed`, а `confidence` — `high`, `medium` или
   `low`. `fail` всегда дублируется нарушением в `violations`, `pass` и
@@ -1526,9 +1531,9 @@ PDF-правила честно не оцениваются: микротипо�
 ## 6. Как добавить правило
 
 1. Возьмите существующий пример из `rule_engine/rules/vkr_test_rules.json`.
-2. Задайте `rule_id`, `kind`, `message` и `target.scope`: `kind` и `scope`
-   должны быть совместимы (`KIND_ALLOWED_SCOPES`), иначе набор не загрузится.
-3. Заполните `expected` только теми полями, которые действительно требует
+2. Задайте `rule_id`, `code`, `message` и `target.scope`: `code` и `scope`
+   должны быть совместимы (`CODE_ALLOWED_SCOPES`), иначе набор не загрузится.
+3. Заполните `params` только теми полями, которые действительно требует
    методичка: незаполненные поля не проверяются. Поля новых видов (ссылки,
    подписи, выравнивание) перечислены в разделе 3; конфигурация, отключающая
    проверку (`allow_unresolved: true`, `require_all_cited: false`,
@@ -1551,11 +1556,11 @@ python manual_test/check_rules.py manual_test/test.docx --rules my_rules.json --
 ```json
 {
   "rule_id": "font_captions",
-  "kind": "font",
-  "severity": "warning",
+  "code": "font",
+  "strictness": "warning",
   "message": "Подписи рисунков набираются 12 pt",
   "target": {"scope": "body_text", "include_captions": true},
-  "expected": {"size_pt": 12.0, "size_tolerance_pt": 0.5}
+  "params": {"size_pt": 12.0, "size_tolerance_pt": 0.5}
 }
 ```
 
@@ -1586,7 +1591,7 @@ python manual_test/check_rules.py manual_test/test.docx --rules my_rules.json --
 
 Задел на следующие шаги:
 
-- новые `kind` (`paragraph_spacing`, `table_layout`) добавляются как
+- новые `code` (`paragraph_spacing`, `table_layout`) добавляются как
   дискриминированные модели в `rules.py` и отдельный метод проверки в
   `engine.py`; так уже добавлены `bibliography_*`, `caption_*` и `alignment`;
 - `AlignmentExpectation` можно расширить признаком «строка шапки», если
@@ -1595,7 +1600,7 @@ python manual_test/check_rules.py manual_test/test.docx --rules my_rules.json --
 - структурные правила переиспользуют `SectionSpec`, поэтому новые проверки
   («аннотация», «перечень сокращений», «приложения») описываются данными без
   правки движка;
-- если понадобится «допустимый диапазон», в `expected` можно добавить
+- если понадобится «допустимый диапазон», в `params` можно добавить
   `min_mm`/`max_mm` без ломания существующих наборов;
 - `check_json_file()` позволяет прогонять правила на уже собранных JSON без
   повторного разбора и без LibreOffice.
@@ -1686,7 +1691,7 @@ PDF: `tests/test_rule_engine_page_layout.py` покрывает `pass`, `fail` �
 `urgpu.json`, `urfu.json`. Профили задают только текстовые и геометрические
 требования вуза и не переопределяют новые виды проверок (`bibliography_*`,
 `caption_*`, `alignment`, шрифт таблиц): они описаны в штатном наборе
-`vkr_test_rules.json` (версия 2.4.0), поэтому профили можно подключать
+`vkr_test_rules.json` (версия 3.0.0), поэтому профили можно подключать
 постепенно. Загрузка по id вуза:
 
 ```python
@@ -1715,16 +1720,16 @@ ruleset = load_profile_ruleset("urgpu")
 ```json
 {
   "rule_id": "page_number_position",
-  "kind": "page_number_position",
-  "severity": "warning",
+  "code": "page_number_position",
+  "strictness": "warning",
   "message": "Номер страницы печатается в нижнем колонтитуле по центру",
-  "requirement_ref": "Методические указания УрФУ, требования к нумерации страниц",
+  "quote": "Методические указания УрФУ, требования к нумерации страниц",
   "target": {"scope": "headers_footers"},
-  "expected": {"zone": "footer", "alignment": "center"}
+  "params": {"zone": "footer", "alignment": "center"}
 }
 ```
 
-`severity="warning"` у положения номера: требование обязательное, но
+`strictness="warning"` у положения номера: требование обязательное, но
 распознавание колонтитула зависит от того, как документ собран, поэтому
 нарушение не блокирует работу (см. `passed` в отчете). Остальные правила
 профиля — `error`.

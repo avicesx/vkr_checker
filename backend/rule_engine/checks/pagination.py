@@ -56,7 +56,7 @@ def _check_widow_control_rule(
             note="widowControl доступен только в DOCX",
         )
 
-    expected_enabled = rule.expected.enabled
+    expected_enabled = rule.params.enabled
     targets = _paragraph_targets(document, rule.target, contexts)
     violations: List[Violation] = []
 
@@ -119,8 +119,8 @@ def _check_keep_next_rule(
             note="keepNext доступен только в DOCX",
         )
 
-    expected_enabled = rule.expected.enabled
-    roles = set(rule.expected.roles)
+    expected_enabled = rule.params.enabled
+    roles = set(rule.params.roles)
     records = [
         record
         for record in _heading_records(document, rule.target)
@@ -199,7 +199,7 @@ def _check_heading_page_break_rule(
     содержимым: иначе глава, начатая сразу после пустой строки, выглядела бы
     нарушением. В PDF границы страниц точные, в DOCX — оценка по разрывам.
     """
-    roles = set(rule.expected.roles)
+    roles = set(rule.params.roles)
     records = [
         record
         for record in _heading_records(document, rule.target)

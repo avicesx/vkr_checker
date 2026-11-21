@@ -114,7 +114,7 @@ class NotAssessedRule(BaseModel):
     """правило, которое не удалось проверить из-за нехватки данных"""
 
     rule_id: str
-    kind: str
+    code: str
     observed_text: str = ""
     confidence: Confidence = "medium"
 
@@ -209,7 +209,7 @@ _CATEGORY_TITLES = {
     ReportCategory.CAPTIONS: "Подписи рисунков и таблиц",
 }
 
-_KIND_DETAILS: dict[
+_CODE_DETAILS: dict[
     str, tuple[ReportCategory, ReportSeverity, str]
 ] = {
     "font": (
@@ -349,8 +349,8 @@ _KIND_DETAILS: dict[
     ),
 }
 
-# резервные категории для семейств правил, которых нет в _KIND_DETAILS:
-# новые правила не должны оставаться без описания, даже если их kind
+# резервные категории для семейств правил, которых нет в _CODE_DETAILS:
+# новые правила не должны оставаться без описания, даже если их code
 # ещё не добавлен в точный маппинг
 _RULE_PREFIX_FALLBACKS: tuple[
     tuple[str, tuple[ReportCategory, ReportSeverity, str]], ...
@@ -426,22 +426,22 @@ _DEFAULT_DETAILS = (
 )
 
 
-def _kind_details(
-    kind: str,
+def _code_details(
+    code: str,
     rule_id: str,
 ) -> tuple[ReportCategory, ReportSeverity, str]:
-    """находит категорию, критичность и рекомендацию по kind правила
+    """находит категорию, критичность и рекомендацию по code правила
 
-    Маппинг общий для семейств правил: новое правило с уже известным ``kind``
-    попадает в свою категорию автоматически. Для незнакомого ``kind`` работает
+    Маппинг общий для семейств правил: новое правило с уже известным ``code``
+    попадает в свою категорию автоматически. Для незнакомого ``code`` работает
     резервный поиск по префиксу семейства, чтобы нарушение не осталось без
     описания.
     """
-    details = _KIND_DETAILS.get(kind)
+    details = _CODE_DETAILS.get(code)
     if details is not None:
         return details
     for prefix, fallback_details in _RULE_PREFIX_FALLBACKS:
-        if kind.startswith(prefix) or rule_id.startswith(prefix):
+        if code.startswith(prefix) or rule_id.startswith(prefix):
             return fallback_details
     return _DEFAULT_DETAILS
 
@@ -675,11 +675,11 @@ def _build_rule_violation(
     rule_violation: RuleViolation,
 ) -> Violation:
     """создаёт запись отчёта для одного нарушения движка"""
-    category, severity, recommendation = _kind_details(
-        rule_violation.kind, rule_violation.rule_id
+    category, severity, recommendation = _code_details(
+        rule_violation.code, rule_violation.rule_id
     )
     found = {}
-    if rule_violation.kind == "microtypography":
+    if rule_violation.code == "microtypography":
         found = {
             key: value
             for key, value in rule_violation.found.items()
@@ -881,7 +881,7 @@ def _engine_location(
     """переносит адрес нарушения движка в модель адреса отчёта"""
     source = rule_violation.location
     excerpt = source.snippet or None
-    if rule_violation.kind == "microtypography":
+    if rule_violation.code == "microtypography":
         excerpt = _microtypography_span_example(rule_violation.found_text) or excerpt
     location = _location(
         blocks,
@@ -919,7 +919,7 @@ def _build_coverage(assessments: Iterable[RuleAssessment]) -> ReportCoverage:
         not_assessed_rules=[
             NotAssessedRule(
                 rule_id=item.rule_id,
-                kind=item.kind,
+                code=item.code,
                 observed_text=item.observed_text,
                 confidence=item.confidence,
             )

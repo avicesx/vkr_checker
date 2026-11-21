@@ -73,7 +73,7 @@ def _parse(builder: DocxPackageBuilder, body: str) -> ParsedDocxDocument:
 
 def _report(
     document: ParsedDocxDocument,
-    expected: dict | None = None,
+    params: dict | None = None,
 ) -> RuleCheckReport:
     """Прогоняет разобранный документ по правилу оглавления."""
     payload = {
@@ -83,8 +83,8 @@ def _report(
         "check_completeness": True,
         "required_entries": REQUIRED_ENTRIES,
     }
-    if expected:
-        payload.update(expected)
+    if params:
+        payload.update(params)
     ruleset = RuleSet.model_validate(
         {
             "ruleset_id": "toc",
@@ -92,10 +92,10 @@ def _report(
             "rules": [
                 {
                     "rule_id": "toc",
-                    "kind": "toc",
+                    "code": "toc",
                     "message": "Оглавление",
                     "target": {"scope": "toc"},
-                    "expected": payload,
+                    "params": payload,
                 }
             ],
         }
@@ -106,10 +106,10 @@ def _report(
 def _check(
     builder: DocxPackageBuilder,
     body: str,
-    expected: dict | None = None,
+    params: dict | None = None,
 ) -> RuleCheckReport:
     """Разбирает документ и прогоняет по правилу оглавления."""
-    return _report(_parse(builder, body), expected)
+    return _report(_parse(builder, body), params)
 
 
 def test_compliant_toc_passes(docx_builder: DocxPackageBuilder) -> None:
@@ -178,7 +178,7 @@ def test_wrong_page_number_is_reported_when_checking_pages(
     entry.actual_heading_page_est = 1
     entry.is_page_number_match = False
 
-    report = _report(document, expected={"check_page_numbers": True})
+    report = _report(document, params={"check_page_numbers": True})
 
     assert report.summary.violations_total == 1
     violation = report.violations[0]
@@ -201,7 +201,7 @@ def test_heading_missing_from_toc_is_reported(docx_builder: DocxPackageBuilder) 
 
 def test_manual_toc_fails_automation_requirement(docx_builder: DocxPackageBuilder) -> None:
     """Ручное оглавление не проходит требование require_automated."""
-    report = _check(docx_builder, _body(), expected={"require_automated": True})
+    report = _check(docx_builder, _body(), params={"require_automated": True})
 
     assert report.summary.violations_total == 1
     violation = report.violations[0]
@@ -219,11 +219,11 @@ def test_dot_leader_requirement_is_checked(docx_builder: DocxPackageBuilder) -> 
         for title, _ in SECTIONS
     )
 
-    without_dots = _check(docx_builder, _body(), expected={"require_dot_leader": True})
+    without_dots = _check(docx_builder, _body(), params={"require_dot_leader": True})
     with_dots = _check(
         docx_builder,
         _body(toc_entries=dotted),
-        expected={"require_dot_leader": True},
+        params={"require_dot_leader": True},
     )
 
     assert without_dots.summary.violations_total == len(SECTIONS)

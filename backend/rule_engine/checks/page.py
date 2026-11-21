@@ -99,7 +99,7 @@ def _check_margin_rule(
     violations: List[Violation] = []
     sections = document.sections
     pdf_only = _is_pdf_only(document)
-    tolerance = rule.expected.tolerance_mm
+    tolerance = rule.params.tolerance_mm
     if pdf_only:
         tolerance = max(tolerance, PDF_ONLY_MARGIN_TOLERANCE_MM)
 
@@ -107,11 +107,11 @@ def _check_margin_rule(
         margins = section.margins
         expected_values, found_values, expected_parts, found_parts = _compare_measures(
             expected_values={
-                "left_mm": rule.expected.left_mm,
-                "right_mm": rule.expected.right_mm,
-                "top_mm": rule.expected.top_mm,
-                "bottom_mm": rule.expected.bottom_mm,
-                "gutter_mm": rule.expected.gutter_mm,
+                "left_mm": rule.params.left_mm,
+                "right_mm": rule.params.right_mm,
+                "top_mm": rule.params.top_mm,
+                "bottom_mm": rule.params.bottom_mm,
+                "gutter_mm": rule.params.gutter_mm,
             },
             actual_values={
                 "left_mm": margins.left_mm,
@@ -174,12 +174,12 @@ def _check_page_number_position_rule(
     по страницам к ним не применяется.
     """
     expected_text = (
-        f"{ZONE_LABELS[rule.expected.zone]}, "
-        f"{ALIGNMENT_LABELS.get(rule.expected.alignment, rule.expected.alignment)}"
+        f"{ZONE_LABELS[rule.params.zone]}, "
+        f"{ALIGNMENT_LABELS.get(rule.params.alignment, rule.params.alignment)}"
     )
     expected_values = {
-        "zone": rule.expected.zone,
-        "alignment": rule.expected.alignment,
+        "zone": rule.params.zone,
+        "alignment": rule.params.alignment,
     }
 
     if document.pdf_pages_audit:
@@ -318,7 +318,7 @@ def _check_page_format_rule(
     ориентации. Флаг парсера считает A4 с собственным допуском (±2 мм), и
     при допуске правила ±1 мм он не должен подменять измерение.
     """
-    expected = rule.expected
+    expected = rule.params
     sections = document.sections
     expected_size_text = (
         f"{_format_number(expected.width_mm)} × {_format_number(expected.height_mm)} мм"
@@ -463,7 +463,7 @@ def _check_line_spacing_rule(
     В `details` и `found` попадают оба значения: исходное типографическое
     (`median_ratio`) и приведенное к шкале Word (`word_multiplier`).
     """
-    expected = rule.expected
+    expected = rule.params
     expected_text = (
         f"множитель {_format_ratio(expected.ratio)}, "
         f"допуск ±{_format_ratio(expected.tolerance)}"

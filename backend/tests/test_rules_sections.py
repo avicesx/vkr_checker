@@ -53,10 +53,10 @@ def _check(
             "rules": [
                 {
                     "rule_id": "required_sections",
-                    "kind": "required_sections",
+                    "code": "required_sections",
                     "message": "Состав и порядок разделов",
                     "target": {"scope": "document_structure"},
-                    "expected": {"sections": sections or SECTIONS_SPEC},
+                    "params": {"sections": sections or SECTIONS_SPEC},
                 }
             ],
         }

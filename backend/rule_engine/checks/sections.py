@@ -30,7 +30,7 @@ def _check_required_sections_rule(
     position = -1
     previous_label: Optional[str] = None
 
-    for spec in rule.expected.sections:
+    for spec in rule.params.sections:
         matches = [
             index
             for index, record in enumerate(records)
@@ -73,7 +73,7 @@ def _check_required_sections_rule(
         position = following[0]
         previous_label = spec.label
 
-    checked = len(rule.expected.sections)
+    checked = len(rule.params.sections)
     assessment = _counted_assessment(
         rule,
         violations,
@@ -84,7 +84,7 @@ def _check_required_sections_rule(
         details={
             "sections_expected": checked,
             "sections_required": sum(
-                1 for spec in rule.expected.sections if spec.required
+                1 for spec in rule.params.sections if spec.required
             ),
             "headings": len(records),
         },

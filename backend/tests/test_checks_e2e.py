@@ -71,7 +71,7 @@ SAMPLE_TABLE_CAPTIONS = 6
 
 #: ``rule_id`` новых правил → вид правила. Порядок задает идентификаторы
 #: параметризации, поэтому это обычный словарь, а не множество.
-NEW_RULE_KINDS: Dict[str, str] = {
+NEW_RULE_CODES: Dict[str, str] = {
     "bibliography_links_resolved": "bibliography_link",
     "bibliography_all_cited": "bibliography_cited",
     "bibliography_format_electronic": "bibliography_format",
@@ -86,7 +86,7 @@ NEW_RULE_KINDS: Dict[str, str] = {
     "alignment_table_cells": "alignment",
     "font_table_cells": "font",
 }
-NEW_RULE_IDS = frozenset(NEW_RULE_KINDS)
+NEW_RULE_IDS = frozenset(NEW_RULE_CODES)
 
 #: Текст синтетического документа одного абзаца: ссылки на источники и объекты.
 SYNTHETIC_BODY_TEXT = (
@@ -102,7 +102,7 @@ TABLE_CELL_SIZE_PT = 12.0
 # ---------------------------------------------------------------------
 
 
-def _new_kind_violations(report: RuleCheckReport) -> List[Violation]:
+def _new_code_violations(report: RuleCheckReport) -> List[Violation]:
     """Возвращает нарушения только новых видов правил."""
     return [
         violation for violation in report.violations if violation.rule_id in NEW_RULE_IDS
@@ -201,7 +201,7 @@ def test_docx_sample_reports_uncited_sources(docx_sample: SampleCheck) -> None:
     assert {violation.violation_id for violation in violations} == {
         f"bibliography_all_cited:{entry.bib_id}" for entry in uncited
     }
-    assert all(violation.kind == "bibliography_cited" for violation in violations)
+    assert all(violation.code == "bibliography_cited" for violation in violations)
     assert all(
         violation.location.block_id == entry.block_id
         for violation, entry in zip(violations, uncited)
@@ -238,7 +238,7 @@ def test_docx_sample_has_two_unreferenced_figures(docx_sample: SampleCheck) -> N
     assert {violation.violation_id for violation in violations} == {
         f"caption_reference_figures:{figure.entity_id}" for figure in unmentioned
     }
-    assert all(violation.kind == "caption_reference" for violation in violations)
+    assert all(violation.code == "caption_reference" for violation in violations)
     assert all(
         "нет ссылки в тексте" in violation.found_text for violation in violations
     )
@@ -682,7 +682,7 @@ def test_synthetic_clean_document_passes_every_new_check(
     """Документ без дефектов: ни одного нарушения новых видов и все проверки pass."""
     report = standard_engine.check(_synthetic_document())
 
-    assert _new_kind_violations(report) == []
+    assert _new_code_violations(report) == []
 
     for rule_id in sorted(NEW_RULE_IDS):
         assessment = _assessment(report, rule_id)
@@ -708,21 +708,21 @@ def test_every_rule_returns_exactly_one_assessment(standard_engine: RuleEngine) 
         assert assessment.observed_text, f"{assessment.rule_id}: пустое наблюдение"
 
 
-@pytest.mark.parametrize("rule_id", tuple(NEW_RULE_KINDS))
+@pytest.mark.parametrize("rule_id", tuple(NEW_RULE_CODES))
 def test_synthetic_single_defect_gives_exactly_one_violation(
     standard_engine: RuleEngine, rule_id: str
 ) -> None:
     """Одна ошибка каждого вида дает ровно одно нарушение своего правила."""
     report = standard_engine.check(_synthetic_document({rule_id}))
 
-    violations = _new_kind_violations(report)
+    violations = _new_code_violations(report)
     assert len(violations) == 1, (
         f"{rule_id}: нарушений новых видов {len(violations)}, "
         f"ожидалось одно: {[v.violation_id for v in violations]}"
     )
     violation = violations[0]
     assert violation.rule_id == rule_id
-    assert violation.kind == NEW_RULE_KINDS[rule_id]
+    assert violation.code == NEW_RULE_CODES[rule_id]
 
 
 def test_synthetic_all_defects_give_one_violation_per_rule(
@@ -732,16 +732,16 @@ def test_synthetic_all_defects_give_one_violation_per_rule(
     report = standard_engine.check(_synthetic_document(NEW_RULE_IDS))
 
     counts: Dict[str, int] = {}
-    for violation in _new_kind_violations(report):
+    for violation in _new_code_violations(report):
         counts[violation.rule_id] = counts.get(violation.rule_id, 0) + 1
 
-    assert counts == {rule_id: 1 for rule_id in NEW_RULE_KINDS}
-    assert sum(counts.values()) == len(NEW_RULE_KINDS)
-    assert {violation.kind for violation in _new_kind_violations(report)} == set(
-        NEW_RULE_KINDS.values()
+    assert counts == {rule_id: 1 for rule_id in NEW_RULE_CODES}
+    assert sum(counts.values()) == len(NEW_RULE_CODES)
+    assert {violation.code for violation in _new_code_violations(report)} == set(
+        NEW_RULE_CODES.values()
     )
 
-    for rule_id in NEW_RULE_KINDS:
+    for rule_id in NEW_RULE_CODES:
         assert report.summary.by_rule[rule_id] == 1, (
             f"{rule_id}: сводка отчета расходится с нарушениями"
         )

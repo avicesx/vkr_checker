@@ -166,9 +166,9 @@ def _link_rule(**overrides: Any) -> Dict[str, Any]:
     """Описание правила разрешения ссылок на источники."""
     rule: Dict[str, Any] = {
         "rule_id": "bibliography_links",
-        "kind": "bibliography_link",
+        "code": "bibliography_link",
         "message": "Ссылки указывают на источники из списка литературы",
-        "expected": {},
+        "params": {},
     }
     rule.update(overrides)
     return rule
@@ -178,21 +178,21 @@ def _cited_rule(**overrides: Any) -> Dict[str, Any]:
     """Описание правила цитирования источников."""
     rule: Dict[str, Any] = {
         "rule_id": "bibliography_cited",
-        "kind": "bibliography_cited",
+        "code": "bibliography_cited",
         "message": "Каждый источник списка литературы цитируется в тексте",
-        "expected": {},
+        "params": {},
     }
     rule.update(overrides)
     return rule
 
 
-def _format_rule(expected: Dict[str, Any], **overrides: Any) -> Dict[str, Any]:
+def _format_rule(params: Dict[str, Any], **overrides: Any) -> Dict[str, Any]:
     """Описание правила оформления записи списка литературы."""
     rule: Dict[str, Any] = {
         "rule_id": "bibliography_format",
-        "kind": "bibliography_format",
+        "code": "bibliography_format",
         "message": "Запись списка литературы оформлена по требованию",
-        "expected": expected,
+        "params": params,
     }
     rule.update(overrides)
     return rule
@@ -229,7 +229,7 @@ def test_unresolved_citation_is_violation() -> None:
     assert report.summary.violations_total == 1
     violation = report.violations[0]
     assert violation.rule_id == "bibliography_links"
-    assert violation.kind == "bibliography_link"
+    assert violation.code == "bibliography_link"
     assert violation.location.block_id == "p_0003"
     assert violation.location.page_start_est == 3
     assert violation.expected["resolved_into_bibliography"] is True
@@ -273,7 +273,7 @@ def test_empty_bibliography_is_not_assessed() -> None:
     assert report.summary.objects_checked == 0
     assert report.summary.not_assessed_total == 1
     assessment = report.not_assessed[0]
-    assert assessment.kind == "bibliography_link"
+    assert assessment.code == "bibliography_link"
     assert "список литературы пуст" in assessment.observed_text
     assert assessment.confidence == "low"
     assert assessment.details["bibliography_entries"] == 0
@@ -355,7 +355,7 @@ def test_uncited_sources_are_violations() -> None:
     assert report.summary.violations_total == 1
     violation = report.violations[0]
     assert violation.violation_id == "bibliography_cited:bib_002"
-    assert violation.kind == "bibliography_cited"
+    assert violation.code == "bibliography_cited"
     assert violation.location.block_id == "p_0003"
     assert violation.location.page_start_est == 3
     assert violation.expected["is_cited_in_text"] is True
@@ -425,7 +425,7 @@ def test_bibliography_format_reports_each_missing_field() -> None:
     report = _engine(rule).check(document)
 
     assert report.summary.violations_total == 4
-    assert report.summary.by_kind == {"bibliography_format": 4}
+    assert report.summary.by_code == {"bibliography_format": 4}
     violation_ids = {violation.violation_id for violation in report.violations}
     assert violation_ids == {
         "bibliography_format:bib_001:urls",
@@ -563,7 +563,7 @@ def test_bibliography_format_without_matching_category_is_not_assessed() -> None
 # ---------------------------------------------------------------------
 
 
-def test_bibliography_kinds_load_with_own_scope() -> None:
+def test_bibliography_codes_load_with_own_scope() -> None:
     """Правила библиографии по умолчанию работают в области bibliography."""
     engine = _engine(_link_rule(), _cited_rule(), _format_rule({"require_year": True}))
 
@@ -589,10 +589,10 @@ def test_existing_kind_rejects_bibliography_scope() -> None:
         _engine(
             {
                 "rule_id": "font_body",
-                "kind": "font",
+                "code": "font",
                 "message": "Times New Roman",
                 "target": {"scope": "bibliography"},
-                "expected": {"family": "Times New Roman"},
+                "params": {"family": "Times New Roman"},
             }
         )
 
@@ -622,7 +622,7 @@ def test_bibliography_format_categories_are_deduplicated() -> None:
 
     rule = engine.ruleset.rules[0]
     assert isinstance(rule, BibliographyFormatRule)
-    assert rule.expected.categories == ["electronic_resource"]
+    assert rule.params.categories == ["electronic_resource"]
 
 
 # ---------------------------------------------------------------------

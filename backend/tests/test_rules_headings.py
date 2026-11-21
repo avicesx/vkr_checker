@@ -44,10 +44,10 @@ def _check(builder: DocxPackageBuilder, body: str, rule: dict) -> RuleCheckRepor
 def _levels_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "heading_levels",
-        "kind": "heading_levels",
+        "code": "heading_levels",
         "message": "Иерархия заголовков",
         "target": {"scope": "headings"},
-        "expected": {"first_level": 1},
+        "params": {"first_level": 1},
     }
     rule.update(overrides)
     return rule
@@ -56,10 +56,10 @@ def _levels_rule(**overrides: object) -> dict:
 def _numbering_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "heading_numbering",
-        "kind": "heading_numbering",
+        "code": "heading_numbering",
         "message": "Нумерация заголовков",
         "target": {"scope": "headings"},
-        "expected": {"number_ending": "any", "require_number_for_roles": []},
+        "params": {"number_ending": "any", "require_number_for_roles": []},
     }
     rule.update(overrides)
     return rule
@@ -68,10 +68,10 @@ def _numbering_rule(**overrides: object) -> dict:
 def _format_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "heading_format",
-        "kind": "heading_format",
+        "code": "heading_format",
         "message": "Оформление заголовка",
         "target": {"scope": "headings"},
-        "expected": {"trailing_dot": "forbid"},
+        "params": {"trailing_dot": "forbid"},
     }
     rule.update(overrides)
     return rule
@@ -85,7 +85,7 @@ def test_skipped_heading_level_is_reported(docx_builder: DocxPackageBuilder) -> 
 
     assert report.summary.violations_total == 1
     violation = report.violations[0]
-    assert violation.kind == "heading_levels"
+    assert violation.code == "heading_levels"
     assert violation.expected == {"max_level_after_previous": 2}
     assert violation.found == {"level": 3}
 
@@ -97,7 +97,7 @@ def test_skipped_levels_can_be_allowed(docx_builder: DocxPackageBuilder) -> None
     report = _check(
         docx_builder,
         body,
-        _levels_rule(expected={"allow_skipped_levels": True}),
+        _levels_rule(params={"allow_skipped_levels": True}),
     )
 
     assert report.summary.violations_total == 0
@@ -127,7 +127,7 @@ def test_heading_deeper_than_max_level_is_reported(
         + _heading("1.1.1.1 Подпункт", level=4)
     )
 
-    report = _check(docx_builder, body, _levels_rule(expected={"max_level": 3}))
+    report = _check(docx_builder, body, _levels_rule(params={"max_level": 3}))
 
     assert report.summary.violations_total == 1
     assert report.violations[0].found == {"level": 4}
@@ -191,7 +191,7 @@ def test_number_depth_must_match_heading_level(docx_builder: DocxPackageBuilder)
         docx_builder,
         body,
         _numbering_rule(
-            expected={
+            params={
                 "check_sequence": False,
                 "check_parent_number": False,
                 "require_number_for_roles": [],
@@ -212,7 +212,7 @@ def test_required_number_for_role_is_reported(docx_builder: DocxPackageBuilder) 
     report = _check(
         docx_builder,
         body,
-        _numbering_rule(expected={"require_number_for_roles": ["main_chapter"]}),
+        _numbering_rule(params={"require_number_for_roles": ["main_chapter"]}),
     )
 
     assert report.summary.violations_total == 1
@@ -228,7 +228,7 @@ def test_number_ending_requirement_is_checked(docx_builder: DocxPackageBuilder) 
         docx_builder,
         body,
         _numbering_rule(
-            expected={
+            params={
                 "check_sequence": False,
                 "check_parent_number": False,
                 "number_ending": "without_dot",
@@ -240,7 +240,7 @@ def test_number_ending_requirement_is_checked(docx_builder: DocxPackageBuilder) 
         docx_builder,
         body,
         _numbering_rule(
-            expected={
+            params={
                 "check_sequence": False,
                 "check_parent_number": False,
                 "number_ending": "with_dot",
@@ -269,7 +269,7 @@ def test_required_trailing_dot_is_reported(docx_builder: DocxPackageBuilder) -> 
     """Отсутствие обязательной точки в конце заголовка тоже нарушение."""
     body = _heading("1 Раздел без точки") + TEXT
 
-    report = _check(docx_builder, body, _format_rule(expected={"trailing_dot": "require"}))
+    report = _check(docx_builder, body, _format_rule(params={"trailing_dot": "require"}))
 
     assert report.summary.violations_total == 1
     assert report.violations[0].found == {"trailing_dot": "forbid"}
@@ -279,7 +279,7 @@ def test_uppercase_requirement_is_checked(docx_builder: DocxPackageBuilder) -> N
     """Заголовок со строчными буквами не проходит требование uppercase."""
     body = _heading("1 Раздел со строчными") + TEXT
 
-    report = _check(docx_builder, body, _format_rule(expected={"case": "uppercase"}))
+    report = _check(docx_builder, body, _format_rule(params={"case": "uppercase"}))
 
     assert report.summary.violations_total == 1
     assert report.violations[0].expected == {"case": "uppercase"}
@@ -292,7 +292,7 @@ def test_capitalized_requirement_rejects_uppercase_heading(
     """Полностью прописной заголовок не считается набранным с прописной буквы."""
     body = _heading("1 РАЗДЕЛ ЦЕЛИКОМ ПРОПИСНЫМИ") + TEXT
 
-    report = _check(docx_builder, body, _format_rule(expected={"case": "capitalized"}))
+    report = _check(docx_builder, body, _format_rule(params={"case": "capitalized"}))
 
     assert report.summary.violations_total == 1
     assert report.violations[0].found == {"case": "uppercase"}
@@ -302,7 +302,7 @@ def test_heading_alignment_is_checked(docx_builder: DocxPackageBuilder) -> None:
     """Выравнивание заголовка сравнивается с effective_props.alignment."""
     body = _heading("1 Раздел по левому краю", align="left") + TEXT
 
-    report = _check(docx_builder, body, _format_rule(expected={"alignment": "center"}))
+    report = _check(docx_builder, body, _format_rule(params={"alignment": "center"}))
 
     assert report.summary.violations_total == 1
     assert report.violations[0].expected == {"alignment": "center"}
@@ -313,7 +313,7 @@ def test_heading_rules_ignore_body_paragraphs(docx_builder: DocxPackageBuilder) 
     """Обычные абзацы не проверяются правилами заголовков."""
     body = _heading("1 Раздел") + TEXT + "<w:p><w:r><w:t>Абзац с точкой.</w:t></w:r></w:p>"
 
-    report = _check(docx_builder, body, _format_rule(expected={"alignment": "center"}))
+    report = _check(docx_builder, body, _format_rule(params={"alignment": "center"}))
 
     assert report.summary.violations_total == 0
     assert report.summary.objects_checked == 1

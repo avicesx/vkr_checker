@@ -80,10 +80,10 @@ def _body_alignment_rule() -> Dict[str, Any]:
     """Правило выравнивания основного текста по ширине."""
     return {
         "rule_id": "alignment_body_text",
-        "kind": "alignment",
+        "code": "alignment",
         "message": "Основной текст выравнивается по ширине",
         "target": {"scope": "body_text"},
-        "expected": {"alignment": "justify"},
+        "params": {"alignment": "justify"},
     }
 
 
