@@ -174,3 +174,69 @@ def test_schema_from_create_all_is_adopted_by_migrations(
         engine.dispose()
 
     _check_no_model_drift(empty_database_url)
+
+
+def test_incomplete_legacy_schema_is_completed_before_stamp(
+    empty_database_url: str,
+) -> None:
+    """Неполная база create_all досоздаётся, а не помечается актуальной."""
+    engine = create_database_engine(empty_database_url)
+    try:
+        Base.metadata.tables["user"].create(bind=engine)
+        assert _application_tables(engine) == {"user"}
+        assert not inspect(engine).has_table("alembic_version")
+
+        apply_migrations(engine)
+
+        inspector = inspect(engine)
+        assert inspector.has_table("alembic_version")
+        assert _application_tables(engine) == set(Base.metadata.tables)
+        assert {
+            column["name"] for column in inspector.get_columns("user")
+        } == {"id", "name", "role"}
+    finally:
+        engine.dispose()
+
+    _check_no_model_drift(empty_database_url)
+
+
+def test_legacy_schema_with_missing_column_is_rejected(
+    empty_database_url: str,
+) -> None:
+    """Недостающую колонку create_all не исправит: версия схемы не пишется."""
+    engine = create_database_engine(empty_database_url)
+    try:
+        Base.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            connection.execute(text('ALTER TABLE "user" DROP COLUMN role'))
+
+        with pytest.raises(RuntimeError) as error:
+            apply_migrations(engine)
+
+        message = str(error.value)
+        assert "user.role" in message
+        assert "ручную миграцию" in message
+        assert not inspect(engine).has_table("alembic_version")
+    finally:
+        engine.dispose()
+
+
+def test_incomplete_legacy_schema_with_missing_column_is_not_stamped(
+    empty_database_url: str,
+) -> None:
+    """Даже после досоздания таблиц неполная колонка блокирует штамп."""
+    engine = create_database_engine(empty_database_url)
+    try:
+        Base.metadata.tables["user"].create(bind=engine)
+        with engine.begin() as connection:
+            connection.execute(text('ALTER TABLE "user" DROP COLUMN role'))
+
+        with pytest.raises(RuntimeError) as error:
+            apply_migrations(engine)
+
+        assert "user.role" in str(error.value)
+        # Отсутствующие таблицы досозданы, но актуальной база не объявлена.
+        assert _application_tables(engine) == set(Base.metadata.tables)
+        assert not inspect(engine).has_table("alembic_version")
+    finally:
+        engine.dispose()
