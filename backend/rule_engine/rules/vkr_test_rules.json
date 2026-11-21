@@ -1,7 +1,7 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "2.1.0",
-  "description": "Тестовый набор ВКР: текст, поля страницы, заголовки, разделы и оглавление, ссылки и список литературы, подписи рисунков и таблиц, выравнивание и шрифт в таблицах",
+  "ruleset_version": "2.2.0",
+  "description": "Тестовый набор ВКР: шрифт, отступ и выравнивание основного текста, межстрочный интервал, поля и формат страницы, номер страницы, заголовки, разделы и оглавление, ссылки и список литературы, подписи рисунков и таблиц, выравнивание и шрифт в таблицах",
   "rules": [
     {
       "rule_id": "font_body_text",
@@ -33,6 +33,33 @@
       }
     },
     {
+      "rule_id": "alignment_body_text",
+      "kind": "alignment",
+      "severity": "error",
+      "message": "Основной текст выравнивается по ширине",
+      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "target": {
+        "scope": "body_text"
+      },
+      "expected": {
+        "alignment": "justify"
+      }
+    },
+    {
+      "rule_id": "line_spacing_body",
+      "kind": "line_spacing",
+      "severity": "error",
+      "message": "Основной текст печатается с полуторным межстрочным интервалом",
+      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "target": {
+        "scope": "body_text"
+      },
+      "expected": {
+        "ratio": 1.5,
+        "tolerance": 0.25
+      }
+    },
+    {
       "rule_id": "page_margins",
       "kind": "margin",
       "severity": "error",
@@ -47,6 +74,36 @@
         "top_mm": 20.0,
         "bottom_mm": 20.0,
         "tolerance_mm": 1.0
+      }
+    },
+    {
+      "rule_id": "page_number_position",
+      "kind": "page_number_position",
+      "severity": "error",
+      "message": "Номер страницы проставляется в нижнем колонтитуле по центру",
+      "requirement_ref": "Методические указания, требования к нумерации страниц",
+      "target": {
+        "scope": "headers_footers"
+      },
+      "expected": {
+        "zone": "footer",
+        "alignment": "center"
+      }
+    },
+    {
+      "rule_id": "page_format",
+      "kind": "page_format",
+      "severity": "error",
+      "message": "Страница имеет формат A4 (210 × 297 мм), книжная ориентация",
+      "requirement_ref": "Методические указания, требования к формату страницы",
+      "target": {
+        "scope": "sections"
+      },
+      "expected": {
+        "width_mm": 210.0,
+        "height_mm": 297.0,
+        "tolerance_mm": 1.0,
+        "orientation": "portrait"
       }
     },
     {

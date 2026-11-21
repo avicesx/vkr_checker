@@ -137,9 +137,36 @@ NEW_KIND_RULE_IDS: frozenset = frozenset(
     }
 )
 
-#: Бюджеты шума: не больше 20 % прежних текстовых нарушений и меньше 600 всего.
+#: Базовые проверки оформления, добавленные в штатный набор 2.2.0 (t4):
+#: выравнивание основного текста, межстрочный интервал, номер страницы и
+#: формат листа. У них отдельный бюджет: это не текстовый шум и не находки
+#: новых видов проверок, а проверки, которых в наборе 2.1.0 не было.
+BASIC_RULE_IDS: frozenset = frozenset(
+    {
+        "alignment_body_text",
+        "line_spacing_body",
+        "page_number_position",
+        "page_format",
+    }
+)
+
+#: Первый замер базовых правил на корпусе (t4, набор 2.2.0): выравнивание тела
+#: 237 (по ширине не выровнены 202 абзаца в DOCX и 47 в PDF), формат листа 2
+#: (PDF Letter 215,9 × 279,4 мм и альбомная секция 567,3 × 186,3 мм),
+#: межстрочный интервал и номер страницы — 0. Числа детерминированы, поэтому
+#: это потолок: снижение допустимо, рост — регрессия правил или разбора.
+BASIC_RULE_NOISE_BASELINE = 239
+BASIC_RULE_NOISE_BASELINE_BY_FAMILY: Dict[str, int] = {
+    "alignment_body_text": 237,
+    "line_spacing_body": 0,
+    "page_number_position": 0,
+    "page_format": 2,
+}
+
+#: Бюджеты шума: не больше 20 % прежних текстовых нарушений и меньше 750 всего
+#: (492 нарушения набора 2.1.0 + 239 базовых правил 2.2.0).
 FONT_INDENT_BUDGET_SHARE = 0.20
-TOTAL_NOISE_BUDGET = 600
+TOTAL_NOISE_BUDGET = 750
 
 #: Итог корпуса после правок f1–f6: font 0, indent 36, остальное — реальные находки.
 TOTAL_NOISE_TARGET = 184
@@ -541,9 +568,11 @@ def test_broken_docx_body_still_fails_font_rule(docx_builder: DocxPackageBuilder
 
 @requires_corpus
 def test_corpus_noise_budget(corpus: Dict[str, CorpusDoc]) -> None:
-    """Суммарные font+indent по корпусу — меньше 20 % прежних, всего — меньше 600.
+    """Суммарные font+indent по корпусу — меньше 20 % прежних, всего — меньше 750.
 
     До фиксации: шрифт 1109 + отступ 1162 = 2271, всего 2613 нарушений.
+    После t4 в бюджет входят и базовые проверки оформления (набор 2.2.0):
+    их шум измеряется отдельным бюджетом ниже.
     """
     font_total = sum(len(doc.violations(FONT_RULE_ID)) for doc in corpus.values())
     indent_total = sum(len(doc.violations(INDENT_RULE_ID)) for doc in corpus.values())
@@ -632,4 +661,43 @@ def test_new_check_kinds_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) ->
     assert NEW_KIND_RULE_IDS <= applied, (
         "новые виды проверок пропали из штатного набора: "
         f"{sorted(NEW_KIND_RULE_IDS - applied)}"
+    )
+
+
+def _basic_rule_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
+    """Считает нарушения базовых проверок оформления по правилам."""
+    counts: Dict[str, int] = {rule_id: 0 for rule_id in BASIC_RULE_NOISE_BASELINE_BY_FAMILY}
+    for doc in corpus.values():
+        for violation in doc.report.violations:
+            if violation.rule_id in BASIC_RULE_IDS:
+                counts[violation.rule_id] += 1
+    return counts
+
+
+@requires_corpus
+def test_basic_rules_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> None:
+    """Базовые проверки не шумят сверх первого замера на корпусе.
+
+    Набор 2.2.0 (t4) добавил выравнивание основного текста по ширине,
+    полуторный интервал, номер страницы в нижнем колонтитуле и формат A4.
+    Первый замер: alignment_body_text 237, page_format 2, line_spacing_body 0,
+    page_number_position 0 — всего 239 нарушений. Выравнивание — настоящие
+    находки (абзацы, набранные по левому краю), формат листа — PDF Letter и
+    альбомная секция; интервал и номер страницы на корпусе соблюдены.
+    """
+    counts = _basic_rule_counts(corpus)
+    total = sum(counts.values())
+
+    for rule_id, baseline in BASIC_RULE_NOISE_BASELINE_BY_FAMILY.items():
+        assert counts[rule_id] <= baseline, (
+            f"{rule_id}: нарушений {counts[rule_id]} при первом замере {baseline}"
+        )
+    assert total <= BASIC_RULE_NOISE_BASELINE, (
+        f"нарушений базовых правил {total} при первом замере {BASIC_RULE_NOISE_BASELINE}"
+    )
+
+    applied = {rule.rule_id for rule in load_default_ruleset().rules}
+    assert BASIC_RULE_IDS <= applied, (
+        "базовые проверки пропали из штатного набора: "
+        f"{sorted(BASIC_RULE_IDS - applied)}"
     )

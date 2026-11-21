@@ -25,10 +25,11 @@
 `parser.docx`: роли разделов и номера уже вычислены на этапе разбора.
 
 Геометрические правила (`page_number_position`, `page_format`) и межстрочный
-интервал (`line_spacing`) добавлены для вузовских профилей оформления: наборы
+интервал (`line_spacing`) входят и в набор по умолчанию
+(`rules/vkr_test_rules.json`), и в вузовские профили оформления: наборы
 `rules/mpgu.json`, `rules/urgpu.json`, `rules/urfu.json` загружаются по
-идентификатору вуза через `load_profile_ruleset()`. Набор по умолчанию
-(`rules/vkr_test_rules.json`) от этих правил не зависит.
+идентификатору вуза через `load_profile_ruleset()` и отличаются ожидаемыми
+значениями (например, колонтитулом номера страницы).
 """
 from __future__ import annotations
 

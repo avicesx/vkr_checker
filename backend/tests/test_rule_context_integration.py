@@ -464,7 +464,7 @@ def test_heading_and_toc_rules_are_not_regressed(
     """Правила заголовков, оглавления и разделов отрабатывают без нарушений."""
     report = RuleEngine(load_default_ruleset()).check(vkr_document)
 
-    assert report.summary.rules_applied == 22
+    assert report.summary.rules_applied == 26
     for rule_id in (
         "page_margins",
         "heading_levels",

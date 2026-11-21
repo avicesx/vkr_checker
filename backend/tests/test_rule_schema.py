@@ -144,11 +144,15 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "2.1.0"
+    assert ruleset.ruleset_version == "2.2.0"
     assert [rule.rule_id for rule in ruleset.rules] == [
         "font_body_text",
         "indent_first_line",
+        "alignment_body_text",
+        "line_spacing_body",
         "page_margins",
+        "page_number_position",
+        "page_format",
         "heading_levels",
         "heading_numbering",
         "heading_format_text",
@@ -171,26 +175,36 @@ def test_default_ruleset_describes_all_checks() -> None:
     ]
     assert isinstance(ruleset.rules[0], FontRule)
     assert isinstance(ruleset.rules[1], IndentRule)
-    assert isinstance(ruleset.rules[2], MarginRule)
-    assert isinstance(ruleset.rules[3], HeadingLevelsRule)
-    assert isinstance(ruleset.rules[4], HeadingNumberingRule)
-    assert isinstance(ruleset.rules[5], HeadingFormatRule)
-    assert isinstance(ruleset.rules[6], HeadingFormatRule)
-    assert isinstance(ruleset.rules[7], RequiredSectionsRule)
-    assert isinstance(ruleset.rules[8], TocRule)
-    assert isinstance(ruleset.rules[9], BibliographyLinkRule)
-    assert isinstance(ruleset.rules[10], BibliographyCitedRule)
-    assert isinstance(ruleset.rules[11], BibliographyFormatRule)
-    assert isinstance(ruleset.rules[12], BibliographyFormatRule)
-    assert isinstance(ruleset.rules[13], CaptionNumberingRule)
-    assert isinstance(ruleset.rules[14], CaptionNumberingRule)
-    assert isinstance(ruleset.rules[15], CaptionFormatRule)
-    assert isinstance(ruleset.rules[16], CaptionFormatRule)
-    assert isinstance(ruleset.rules[17], CaptionReferenceRule)
-    assert isinstance(ruleset.rules[18], CaptionReferenceRule)
-    assert isinstance(ruleset.rules[19], AlignmentRule)
-    assert isinstance(ruleset.rules[20], AlignmentRule)
-    assert isinstance(ruleset.rules[21], FontRule)
+    assert isinstance(ruleset.rules[2], AlignmentRule)
+    assert isinstance(ruleset.rules[3], LineSpacingRule)
+    assert isinstance(ruleset.rules[4], MarginRule)
+    assert isinstance(ruleset.rules[5], PageNumberPositionRule)
+    assert isinstance(ruleset.rules[6], PageFormatRule)
+    assert isinstance(ruleset.rules[7], HeadingLevelsRule)
+    assert isinstance(ruleset.rules[8], HeadingNumberingRule)
+    assert isinstance(ruleset.rules[9], HeadingFormatRule)
+    assert isinstance(ruleset.rules[10], HeadingFormatRule)
+    assert isinstance(ruleset.rules[11], RequiredSectionsRule)
+    assert isinstance(ruleset.rules[12], TocRule)
+    assert isinstance(ruleset.rules[13], BibliographyLinkRule)
+    assert isinstance(ruleset.rules[14], BibliographyCitedRule)
+    assert isinstance(ruleset.rules[15], BibliographyFormatRule)
+    assert isinstance(ruleset.rules[16], BibliographyFormatRule)
+    assert isinstance(ruleset.rules[17], CaptionNumberingRule)
+    assert isinstance(ruleset.rules[18], CaptionNumberingRule)
+    assert isinstance(ruleset.rules[19], CaptionFormatRule)
+    assert isinstance(ruleset.rules[20], CaptionFormatRule)
+    assert isinstance(ruleset.rules[21], CaptionReferenceRule)
+    assert isinstance(ruleset.rules[22], CaptionReferenceRule)
+    assert isinstance(ruleset.rules[23], AlignmentRule)
+    assert isinstance(ruleset.rules[24], AlignmentRule)
+    assert isinstance(ruleset.rules[25], FontRule)
+    assert ruleset.get_rule("alignment_body_text").expected.alignment == "justify"
+    assert ruleset.get_rule("line_spacing_body").expected.ratio == 1.5
+    assert ruleset.get_rule("page_number_position").expected.zone == "footer"
+    assert ruleset.get_rule("page_number_position").expected.alignment == "center"
+    assert ruleset.get_rule("page_format").expected.width_mm == 210.0
+    assert ruleset.get_rule("page_format").expected.height_mm == 297.0
 
 
 def test_default_ruleset_excludes_front_matter_from_heading_rules() -> None:
@@ -703,11 +717,12 @@ def test_unknown_profile_is_rejected() -> None:
 
 
 def test_profile_rulesets_do_not_change_default_ruleset() -> None:
-    """Набор по умолчанию остается прежним и не подмешивает профильные правила."""
+    """Набор по умолчанию самодостаточен и не подменяется профилем вуза."""
     default_ruleset = load_default_ruleset()
     default_kinds = {rule.kind for rule in default_ruleset.rules}
+    profile_ruleset = load_profile_ruleset("urfu")
 
-    assert "page_number_position" not in default_kinds
-    assert "page_format" not in default_kinds
-    assert "line_spacing" not in default_kinds
+    assert {"page_number_position", "page_format", "line_spacing"} <= default_kinds
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
+    assert default_ruleset.ruleset_version == "2.2.0"
+    assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

@@ -97,7 +97,7 @@ def test_compliant_document_passes_all_default_rules(
     report = RuleEngine(load_default_ruleset()).check(document)
 
     assert report.passed is True
-    assert report.summary.rules_applied == 22
+    assert report.summary.rules_applied == 26
     assert report.summary.violations_total == 0
     assert report.summary.by_kind == {}
     assert report.summary.objects_checked > 0
