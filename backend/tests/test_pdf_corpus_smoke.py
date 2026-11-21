@@ -15,9 +15,6 @@ from typing import List, Optional, Set
 import pytest
 
 from rule_engine import (
-    LineSpacingRule,
-    PageFormatRule,
-    PageNumberPositionRule,
     RuleEngine,
     load_profile_ruleset,
 )
@@ -27,7 +24,6 @@ VKR_DIR = PROJECT_ROOT.parent / "documents" / "vkr"
 PROFILES = ("mpgu", "urgpu", "urfu")
 CHECK_STATUSES = {"pass", "fail", "not_assessed"}
 CONFIDENCE_LEVELS = {"high", "medium", "low"}
-NEW_CHECK_KINDS = (PageNumberPositionRule, PageFormatRule, LineSpacingRule)
 
 REAL_VKR_PDFS = sorted(
     path for path in VKR_DIR.glob("*.pdf") if any(ord(char) > 127 for char in path.name)
@@ -51,9 +47,9 @@ def _parse_pdf(path: Path):
 
 
 def _profiled_check_ids(profile_id: str) -> Set[str]:
-    """Возвращает id правил профиля, для которых движок пишет assessment."""
+    """Возвращает id всех правил профиля: каждое правило дает assessment."""
     ruleset = load_profile_ruleset(profile_id)
-    return {rule.rule_id for rule in ruleset.rules if isinstance(rule, NEW_CHECK_KINDS)}
+    return {rule.rule_id for rule in ruleset.rules}
 
 
 @pytest.mark.integration
@@ -87,7 +83,7 @@ def test_real_vkr_pdf_is_checked_with_profile_ruleset(
 
     assessments = {assessment.rule_id: assessment for assessment in report.assessments}
     assert set(assessments) == _profiled_check_ids(profile_id), (
-        "движок должен оценивать ровно те новые правила, которые есть в профиле"
+        "движок должен оценивать каждое правило профиля ровно один раз"
     )
     assert report.summary.not_assessed_total == len(report.not_assessed)
 

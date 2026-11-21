@@ -67,7 +67,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from parser.core.schema import (
     BibliographyEntry,
@@ -90,6 +90,8 @@ from ._fonts import (
     same_family as _same_family,
 )
 from .findings import (
+    CheckStatus,
+    Confidence,
     DocumentRef,
     RuleAssessment,
     RuleCheckReport,
@@ -1162,6 +1164,124 @@ def _run_location(paragraph: ParagraphBlock, run: TextRun) -> ViolationLocation:
     )
 
 
+def _build_violation(
+    rule: Rule,
+    *,
+    address: str,
+    location: ViolationLocation,
+    expected: Dict[str, Any],
+    found: Dict[str, Any],
+    expected_text: str,
+    found_text: str,
+    occurrences: int = 1,
+    confidence: Optional[Confidence] = None,
+) -> Violation:
+    """Единая сборка нарушения: поля правила и идентификатор — в одном месте.
+
+    ``address`` — суффикс идентификатора после ``rule_id:`` (block_id абзаца,
+    ``section:{idx}``, ``toc:{block_id}:entry{n}`` и т. п.); префикс правила
+    добавляется здесь, чтобы чекеры не дублировали его вручную.
+    """
+    return Violation(
+        violation_id=f"{rule.rule_id}:{address}",
+        rule_id=rule.rule_id,
+        kind=rule.kind,
+        severity=rule.severity,
+        message=rule.message,
+        requirement_ref=rule.requirement_ref,
+        location=location,
+        expected=expected,
+        found=found,
+        expected_text=expected_text,
+        found_text=found_text,
+        occurrences=occurrences,
+        confidence=confidence,
+    )
+
+
+def _build_assessment(
+    rule: Rule,
+    status: CheckStatus,
+    *,
+    expected_text: str,
+    observed_text: str,
+    confidence: Confidence = "medium",
+    details: Optional[Dict[str, Any]] = None,
+    note: Optional[str] = None,
+) -> RuleAssessment:
+    """Единая сборка оценки правила: каждое правило дает ровно одну оценку."""
+    return RuleAssessment(
+        rule_id=rule.rule_id,
+        kind=rule.kind,
+        status=status,
+        expected_text=expected_text,
+        observed_text=observed_text,
+        confidence=confidence,
+        details=details if details is not None else {},
+        note=note,
+    )
+
+
+def _counted_assessment(
+    rule: Rule,
+    violations: List[Violation],
+    checked: int,
+    *,
+    expected_text: str,
+    confidence: Confidence,
+    empty_observed: str,
+    details: Optional[Dict[str, Any]] = None,
+    note: Optional[str] = None,
+) -> RuleAssessment:
+    """Оценка правила по числу проверенных объектов и нарушений.
+
+    Общий итог для чекеров-счетов: есть нарушения — ``fail``; проверенных
+    объектов нет — ``not_assessed`` с причиной ``empty_observed``; иначе
+    ``pass``. Счетчики ``objects_checked``/``violations`` добавляются в
+    ``details`` автоматически.
+    """
+    merged: Dict[str, Any] = {"objects_checked": checked, "violations": len(violations)}
+    if details:
+        merged.update(details)
+    if violations:
+        return _build_assessment(
+            rule,
+            "fail",
+            expected_text=expected_text,
+            observed_text=f"нарушений: {len(violations)}; проверено объектов: {checked}",
+            confidence=confidence,
+            details=merged,
+            note=note,
+        )
+    if checked == 0:
+        return _build_assessment(
+            rule,
+            "not_assessed",
+            expected_text=expected_text,
+            observed_text=empty_observed,
+            confidence="low",
+            details=merged,
+            note=note,
+        )
+    return _build_assessment(
+        rule,
+        "pass",
+        expected_text=expected_text,
+        observed_text=f"проверено объектов: {checked}, нарушений нет",
+        confidence=confidence,
+        details=merged,
+        note=note,
+    )
+
+
+# Единый контракт чекера: (правило, документ, контексты) -> нарушения,
+# число проверенных объектов, оценка правила. Оценка возвращается всегда.
+_CheckerHandler = Callable[
+    ["RuleEngine", Rule, ParsedDocxDocument, Dict[str, str]],
+    Tuple[List[Violation], int, RuleAssessment],
+]
+
+
 class RuleEngine:
     """Проверяет разобранный документ по набору правил и формирует отчет."""
 
@@ -1183,83 +1303,13 @@ class RuleEngine:
         contexts = _document_contexts(document, caption_ids)
 
         for rule in self.ruleset.rules:
-            if isinstance(rule, FontRule):
-                rule_violations, checked = self._check_font_rule(rule, document, contexts)
-            elif isinstance(rule, IndentRule):
-                rule_violations, checked = self._check_indent_rule(rule, document, contexts)
-            elif isinstance(rule, MarginRule):
-                rule_violations, checked = self._check_margin_rule(rule, document)
-            elif isinstance(rule, HeadingLevelsRule):
-                rule_violations, checked = self._check_heading_levels_rule(rule, document)
-            elif isinstance(rule, HeadingNumberingRule):
-                rule_violations, checked = self._check_heading_numbering_rule(rule, document)
-            elif isinstance(rule, HeadingFormatRule):
-                rule_violations, checked = self._check_heading_format_rule(rule, document)
-            elif isinstance(rule, RequiredSectionsRule):
-                rule_violations, checked = self._check_required_sections_rule(rule, document)
-            elif isinstance(rule, TocRule):
-                rule_violations, checked = self._check_toc_rule(rule, document)
-            elif isinstance(rule, PageNumberPositionRule):
-                rule_violations, checked, assessment = self._check_page_number_position_rule(
-                    rule, document
-                )
-                assessments.append(assessment)
-            elif isinstance(rule, PageFormatRule):
-                rule_violations, checked, assessment = self._check_page_format_rule(
-                    rule, document
-                )
-                assessments.append(assessment)
-            elif isinstance(rule, LineSpacingRule):
-                rule_violations, checked, assessment = self._check_line_spacing_rule(
-                    rule, document, contexts
-                )
-                assessments.append(assessment)
-            elif isinstance(rule, BibliographyLinkRule):
-                rule_violations, checked, assessment = self._check_bibliography_link_rule(
-                    rule, document
-                )
-                if assessment is not None:
-                    assessments.append(assessment)
-            elif isinstance(rule, BibliographyCitedRule):
-                rule_violations, checked, assessment = self._check_bibliography_cited_rule(
-                    rule, document
-                )
-                if assessment is not None:
-                    assessments.append(assessment)
-            elif isinstance(rule, BibliographyFormatRule):
-                rule_violations, checked, assessment = self._check_bibliography_format_rule(
-                    rule, document
-                )
-                if assessment is not None:
-                    assessments.append(assessment)
-            elif isinstance(rule, CaptionNumberingRule):
-                rule_violations, checked, assessment = self._check_caption_numbering_rule(
-                    rule, document
-                )
-                if assessment is not None:
-                    assessments.append(assessment)
-            elif isinstance(rule, CaptionFormatRule):
-                rule_violations, checked, assessment = self._check_caption_format_rule(
-                    rule, document
-                )
-                if assessment is not None:
-                    assessments.append(assessment)
-            elif isinstance(rule, CaptionReferenceRule):
-                rule_violations, checked, assessment = self._check_caption_reference_rule(
-                    rule, document
-                )
-                if assessment is not None:
-                    assessments.append(assessment)
-            elif isinstance(rule, AlignmentRule):
-                rule_violations, checked, assessment = self._check_alignment_rule(
-                    rule, document, contexts
-                )
-                if assessment is not None:
-                    assessments.append(assessment)
-            else:
+            handler = self._CHECKERS.get(type(rule))
+            if handler is None:
                 continue
+            rule_violations, checked, assessment = handler(self, rule, document, contexts)
             violations.extend(rule_violations)
             objects_checked += checked
+            assessments.append(assessment)
 
         meta = document.meta
         total_pages = document.sections[-1].page_end_est if document.sections else 0
@@ -1375,7 +1425,7 @@ class RuleEngine:
         rule: FontRule,
         document: ParsedDocxDocument,
         contexts: Dict[str, str],
-    ) -> Tuple[List[Violation], int]:
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Сравнивает эффективный шрифт видимых ранов с ожиданием правила.
 
         Гарнитура сверяется в обоих режимах. В ``pdf_only`` имя приходит из PDF
@@ -1412,13 +1462,9 @@ class RuleEngine:
 
             run, (expected_values, found_values, expected_parts, found_parts) = mismatched[0]
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:{paragraph.block_id}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=paragraph.block_id,
                     location=_run_location(paragraph, run),
                     expected=expected_values,
                     found=found_values,
@@ -1428,14 +1474,23 @@ class RuleEngine:
                 )
             )
 
-        return violations, len(targets)
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            len(targets),
+            expected_text=rule.message,
+            confidence="medium" if pdf_only else "high",
+            empty_observed="в области действия правила нет абзацев",
+            details={"scope": rule.target.scope, "pdf_only": pdf_only},
+        )
+        return violations, len(targets), assessment
 
     def _check_indent_rule(
         self,
         rule: IndentRule,
         document: ParsedDocxDocument,
         contexts: Dict[str, str],
-    ) -> Tuple[List[Violation], int]:
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Сравнивает эффективные отступы абзацев с ожиданием правила.
 
         В ``pdf_only`` отступы абзаца не проверяются, хотя измерение есть: парсер
@@ -1446,7 +1501,25 @@ class RuleEngine:
         значения остаются в разборе (`ParagraphPropertiesEffective`).
         """
         if _is_pdf_only(document):
-            return [], 0
+            return (
+                [],
+                0,
+                _build_assessment(
+                    rule,
+                    "not_assessed",
+                    expected_text=rule.message,
+                    observed_text=(
+                        "отступы абзацев в pdf_only не оцениваются: "
+                        "источник измерения ненадежен"
+                    ),
+                    confidence="low",
+                    details={"objects_checked": 0, "violations": 0, "source": "pdf_only"},
+                    note=(
+                        "Красная строка в PDF — сдвиг первой строки относительно второй; "
+                        "маркер списка или выключка дают ложные отклонения"
+                    ),
+                ),
+            )
 
         violations: List[Violation] = []
         targets = self._paragraph_targets(document, rule.target, contexts)
@@ -1473,13 +1546,9 @@ class RuleEngine:
 
             found_values["first_line_source"] = props.indent_first_line_source
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:{paragraph.block_id}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=paragraph.block_id,
                     location=_paragraph_location(paragraph),
                     expected=expected_values,
                     found=found_values,
@@ -1488,13 +1557,23 @@ class RuleEngine:
                 )
             )
 
-        return violations, len(targets)
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            len(targets),
+            expected_text=rule.message,
+            confidence="high",
+            empty_observed="в области действия правила нет абзацев",
+            details={"scope": rule.target.scope, "tolerance_mm": rule.expected.tolerance_mm},
+        )
+        return violations, len(targets), assessment
 
     def _check_margin_rule(
         self,
         rule: MarginRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Сравнивает поля страниц каждой секции с ожиданием правила.
 
         В pdf_only поля измерены по геометрии текста, поэтому допуск правила
@@ -1506,8 +1585,9 @@ class RuleEngine:
         """
         violations: List[Violation] = []
         sections = document.sections
+        pdf_only = _is_pdf_only(document)
         tolerance = rule.expected.tolerance_mm
-        if _is_pdf_only(document):
+        if pdf_only:
             tolerance = max(tolerance, PDF_ONLY_MARGIN_TOLERANCE_MM)
 
         for section in sections:
@@ -1535,13 +1615,9 @@ class RuleEngine:
                 continue
 
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:section:{section.section_idx}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=f"section:{section.section_idx}",
                     location=ViolationLocation(
                         section_idx=section.section_idx,
                         page_start_est=section.page_start_est,
@@ -1559,12 +1635,22 @@ class RuleEngine:
                 )
             )
 
-        return violations, len(sections)
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            len(sections),
+            expected_text=rule.message,
+            confidence="medium" if pdf_only else "high",
+            empty_observed="в документе нет секций с измеренными полями",
+            details={"tolerance_mm": tolerance, "pdf_only": pdf_only},
+        )
+        return violations, len(sections), assessment
 
     def _check_page_number_position_rule(
         self,
         rule: PageNumberPositionRule,
         document: ParsedDocxDocument,
+        contexts: Dict[str, str],
     ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Сверяет преобладающее положение номера страницы с ожиданием правила.
 
@@ -1592,10 +1678,9 @@ class RuleEngine:
                 return (
                     [],
                     number_count,
-                    RuleAssessment(
-                        rule_id=rule.rule_id,
-                        kind=rule.kind,
-                        status="not_assessed",
+                    _build_assessment(
+                        rule,
+                        "not_assessed",
                         expected_text=expected_text,
                         observed_text=(
                             f"распознано номеров страниц: {number_count} из {total_pages}; "
@@ -1629,10 +1714,9 @@ class RuleEngine:
                 return (
                     [],
                     0,
-                    RuleAssessment(
-                        rule_id=rule.rule_id,
-                        kind=rule.kind,
-                        status="not_assessed",
+                    _build_assessment(
+                        rule,
+                        "not_assessed",
                         expected_text=expected_text,
                         observed_text=reason,
                         confidence="low",
@@ -1670,10 +1754,9 @@ class RuleEngine:
             return (
                 [],
                 number_count,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="pass",
+                _build_assessment(
+                    rule,
+                    "pass",
                     expected_text=expected_text,
                     observed_text=observed_text,
                     confidence=confidence,
@@ -1681,13 +1764,9 @@ class RuleEngine:
                 ),
             )
 
-        violation = Violation(
-            violation_id=f"{rule.rule_id}:document",
-            rule_id=rule.rule_id,
-            kind=rule.kind,
-            severity=rule.severity,
-            message=rule.message,
-            requirement_ref=rule.requirement_ref,
+        violation = _build_violation(
+            rule,
+            address="document",
             location=ViolationLocation(snippet="положение номера страницы"),
             expected=expected_values,
             found={
@@ -1703,10 +1782,9 @@ class RuleEngine:
         return (
             [violation],
             number_count,
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status="fail",
+            _build_assessment(
+                rule,
+                "fail",
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence=confidence,
@@ -1761,6 +1839,7 @@ class RuleEngine:
         self,
         rule: PageFormatRule,
         document: ParsedDocxDocument,
+        contexts: Dict[str, str],
     ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Сверяет размеры и ориентацию каждой секции с ожидаемым форматом листа.
 
@@ -1786,10 +1865,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text="секции в документе не найдены",
                     confidence="low",
@@ -1838,13 +1916,9 @@ class RuleEngine:
             found_values["is_a4_standard"] = section.is_a4_standard
 
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:section:{section.section_idx}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=f"section:{section.section_idx}",
                     location=ViolationLocation(
                         section_idx=section.section_idx,
                         page_start_est=section.page_start_est,
@@ -1875,10 +1949,9 @@ class RuleEngine:
             return (
                 violations,
                 checked,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="fail",
+                _build_assessment(
+                    rule,
+                    "fail",
                     expected_text=expected_text,
                     observed_text=observed_text,
                     confidence="high",
@@ -1888,10 +1961,9 @@ class RuleEngine:
         return (
             [],
             checked,
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status="pass",
+            _build_assessment(
+                rule,
+                "pass",
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence="high",
@@ -1970,10 +2042,9 @@ class RuleEngine:
                 return (
                     [],
                     0,
-                    RuleAssessment(
-                        rule_id=rule.rule_id,
-                        kind=rule.kind,
-                        status="not_assessed",
+                    _build_assessment(
+                        rule,
+                        "not_assessed",
                         expected_text=expected_text,
                         observed_text=(
                             "нет данных об интервале: в DOCX не найдены абзацы "
@@ -2042,13 +2113,9 @@ class RuleEngine:
                 found_values["word_multiplier"] = round(float(median_ratio), 4)
                 found_values["pdf_single_line_factor"] = PDF_SINGLE_LINE_FACTOR
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:document",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address="document",
                     location=ViolationLocation(snippet="межстрочный интервал основного текста"),
                     expected={"ratio": expected.ratio, "tolerance": expected.tolerance},
                     found=found_values,
@@ -2061,10 +2128,9 @@ class RuleEngine:
         return (
             violations,
             sample_count,
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence=confidence,
@@ -2109,13 +2175,9 @@ class RuleEngine:
         found_parts: List[str],
     ) -> Violation:
         """Формирует нарушение, привязанное к абзацу заголовка."""
-        return Violation(
-            violation_id=f"{rule.rule_id}:{record.paragraph.block_id}",
-            rule_id=rule.rule_id,
-            kind=rule.kind,
-            severity=rule.severity,
-            message=rule.message,
-            requirement_ref=rule.requirement_ref,
+        return _build_violation(
+            rule,
+            address=record.paragraph.block_id,
             location=_paragraph_location(record.paragraph),
             expected=expected_values,
             found=found_values,
@@ -2126,20 +2188,16 @@ class RuleEngine:
     @staticmethod
     def _document_violation(
         rule: Rule,
-        violation_id: str,
+        address: str,
         expected_values: Dict[str, Any],
         found_values: Dict[str, Any],
         expected_text: str,
         found_text: str,
     ) -> Violation:
         """Формирует нарушение уровня документа без привязки к абзацу."""
-        return Violation(
-            violation_id=violation_id,
-            rule_id=rule.rule_id,
-            kind=rule.kind,
-            severity=rule.severity,
-            message=rule.message,
-            requirement_ref=rule.requirement_ref,
+        return _build_violation(
+            rule,
+            address=address,
             location=ViolationLocation(snippet="структура документа"),
             expected=expected_values,
             found=found_values,
@@ -2147,12 +2205,12 @@ class RuleEngine:
             found_text=found_text,
         )
 
-
     def _check_heading_levels_rule(
         self,
         rule: HeadingLevelsRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет, что уровни заголовков растут без пропусков и не глубже лимита."""
         records = self._heading_records(document, rule.target)
         expected = rule.expected
@@ -2197,14 +2255,24 @@ class RuleEngine:
                 )
             )
 
-        return violations, len(records)
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            len(records),
+            expected_text=rule.message,
+            confidence="medium" if _is_pdf_only(document) else "high",
+            empty_observed="заголовки в области действия правила не найдены",
+            details={"headings": len(records)},
+        )
+        return violations, len(records), assessment
 
 
     def _check_heading_numbering_rule(
         self,
         rule: HeadingNumberingRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет последовательность, родителя, глубину и запись номеров заголовков."""
         records = self._heading_records(document, rule.target)
         expected = rule.expected
@@ -2319,14 +2387,24 @@ class RuleEngine:
                 )
             )
 
-        return violations, len(records)
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            len(records),
+            expected_text=rule.message,
+            confidence="medium" if _is_pdf_only(document) else "high",
+            empty_observed="заголовки в области действия правила не найдены",
+            details={"headings": len(records)},
+        )
+        return violations, len(records), assessment
 
 
     def _check_heading_format_rule(
         self,
         rule: HeadingFormatRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет точку в конце заголовка, регистр и выравнивание."""
         records = self._heading_records(document, rule.target)
         expected = rule.expected
@@ -2412,14 +2490,24 @@ class RuleEngine:
                 )
             )
 
-        return violations, len(records)
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            len(records),
+            expected_text=rule.message,
+            confidence="medium" if _is_pdf_only(document) else "high",
+            empty_observed="заголовки в области действия правила не найдены",
+            details={"headings": len(records)},
+        )
+        return violations, len(records), assessment
 
 
     def _check_required_sections_rule(
         self,
         rule: RequiredSectionsRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет наличие и порядок обязательных разделов документа."""
         records = self._heading_records(document, rule.target)
         violations: List[Violation] = []
@@ -2437,7 +2525,7 @@ class RuleEngine:
                     violations.append(
                         self._document_violation(
                             rule,
-                            f"{rule.rule_id}:section:{spec.label}",
+                            f"section:{spec.label}",
                             {"section": spec.label, "present": True},
                             {"section": spec.label, "present": False},
                             f"раздел «{spec.label}» присутствует",
@@ -2469,32 +2557,59 @@ class RuleEngine:
             position = following[0]
             previous_label = spec.label
 
-        return violations, len(rule.expected.sections)
+        checked = len(rule.expected.sections)
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            checked,
+            expected_text=rule.message,
+            confidence="medium" if _is_pdf_only(document) else "high",
+            empty_observed="список ожидаемых разделов пуст",
+            details={
+                "sections_expected": checked,
+                "sections_required": sum(
+                    1 for spec in rule.expected.sections if spec.required
+                ),
+                "headings": len(records),
+            },
+        )
+        return violations, checked, assessment
 
 
     def _check_toc_rule(
         self,
         rule: TocRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет оглавление и сверяет его записи с заголовками документа."""
         expected = rule.expected
         tocs = self._toc_blocks(document)
         violations: List[Violation] = []
+        confidence: Confidence = "medium" if _is_pdf_only(document) else "high"
 
         if not tocs:
             if expected.require_toc:
                 violations.append(
                     self._document_violation(
                         rule,
-                        f"{rule.rule_id}:toc",
+                        "toc",
                         {"toc": True},
                         {"toc": False},
                         "оглавление присутствует",
                         "оглавление не найдено",
                     )
                 )
-            return violations, 0
+            assessment = _counted_assessment(
+                rule,
+                violations,
+                0,
+                expected_text=rule.message,
+                confidence=confidence,
+                empty_observed="оглавление в документе не найдено",
+                details={"toc_blocks": 0, "entries_checked": 0, "headings_compared": 0},
+            )
+            return violations, 0, assessment
 
         headings = self._heading_records(document, rule.target)
         headings_by_block = {record.paragraph.block_id: record for record in headings}
@@ -2546,17 +2661,15 @@ class RuleEngine:
                 text_matched_entries.add(entry.block_id)
                 matched_ids.add(heading_block_id)
 
+        entries_checked = 0
         for toc in tocs:
             checked += len(toc.entries)
+            entries_checked += len(toc.entries)
             if expected.require_automated and not toc.is_automated_field_or_sdt:
                 violations.append(
-                    Violation(
-                        violation_id=f"{rule.rule_id}:toc:{toc.block_id}:automated",
-                        rule_id=rule.rule_id,
-                        kind=rule.kind,
-                        severity=rule.severity,
-                        message=rule.message,
-                        requirement_ref=rule.requirement_ref,
+                    _build_violation(
+                        rule,
+                        address=f"toc:{toc.block_id}:automated",
                         location=ViolationLocation(
                             block_id=toc.block_id,
                             section_idx=toc.section_idx,
@@ -2632,15 +2745,9 @@ class RuleEngine:
                 if not expected_values:
                     continue
                 violations.append(
-                    Violation(
-                        violation_id=(
-                            f"{rule.rule_id}:toc:{toc.block_id}:entry{entry.entry_index}"
-                        ),
-                        rule_id=rule.rule_id,
-                        kind=rule.kind,
-                        severity=rule.severity,
-                        message=rule.message,
-                        requirement_ref=rule.requirement_ref,
+                    _build_violation(
+                        rule,
+                        address=f"toc:{toc.block_id}:entry{entry.entry_index}",
                         location=ViolationLocation(
                             block_id=entry.block_id,
                             section_idx=toc.section_idx,
@@ -2675,13 +2782,9 @@ class RuleEngine:
                         continue
                     reported.add(block_id)
                     violations.append(
-                        Violation(
-                            violation_id=f"{rule.rule_id}:toc:missing:{block_id}",
-                            rule_id=rule.rule_id,
-                            kind=rule.kind,
-                            severity=rule.severity,
-                            message=rule.message,
-                            requirement_ref=rule.requirement_ref,
+                        _build_violation(
+                            rule,
+                            address=f"toc:missing:{block_id}",
                             location=_paragraph_location(record.paragraph),
                             expected={"toc_entry": True, "section": spec.label},
                             found={"toc_entry": False, "section": spec.label},
@@ -2690,7 +2793,20 @@ class RuleEngine:
                         )
                     )
 
-        return violations, checked
+        assessment = _counted_assessment(
+            rule,
+            violations,
+            checked,
+            expected_text=rule.message,
+            confidence=confidence,
+            empty_observed="оглавление не содержит записей",
+            details={
+                "toc_blocks": len(tocs),
+                "entries_checked": entries_checked,
+                "headings_compared": len(headings) if expected.check_completeness else 0,
+            },
+        )
+        return violations, checked, assessment
 
     # -----------------------------------------------------------------
     # Список литературы: ссылки, цитирование и формат записи
@@ -2700,7 +2816,8 @@ class RuleEngine:
         self,
         rule: BibliographyLinkRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Ищет ссылки на источники, которых нет в списке литературы.
 
         Упоминание ``ref_type="bibliography"`` с непустыми
@@ -2719,10 +2836,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text="список литературы пуст: разрешать ссылки не с чем",
                     confidence="low",
@@ -2739,10 +2855,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text=(
                         "в тексте не найдено ссылок на источники списка литературы"
@@ -2773,13 +2888,9 @@ class RuleEngine:
                 )
             )
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:{mention.mention_id}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=mention.mention_id,
                     location=ViolationLocation(
                         block_id=mention.block_id,
                         page_start_est=_safe_page_est(mention.page_est),
@@ -2812,10 +2923,9 @@ class RuleEngine:
         return (
             violations,
             len(mentions),
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence="high",
@@ -2831,7 +2941,8 @@ class RuleEngine:
         self,
         rule: BibliographyCitedRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Ищет источники списка литературы, на которые нет ссылок в тексте.
 
         Признак ``is_cited_in_text`` вычисляет слой обогащения: запись, у
@@ -2844,10 +2955,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text="список литературы пуст: проверять цитирование нечего",
                     confidence="low",
@@ -2859,10 +2969,9 @@ class RuleEngine:
             return (
                 [],
                 len(entries),
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="pass",
+                _build_assessment(
+                    rule,
+                    "pass",
                     expected_text=expected_text,
                     observed_text="проверка цитирования отключена требованием правила",
                     confidence="high",
@@ -2876,13 +2985,9 @@ class RuleEngine:
             if entry.is_cited_in_text:
                 continue
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:{entry.bib_id}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=entry.bib_id,
                     location=_bibliography_location(entry, blocks),
                     expected={"is_cited_in_text": True},
                     found={
@@ -2907,10 +3012,9 @@ class RuleEngine:
         return (
             violations,
             len(entries),
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence="high",
@@ -2925,7 +3029,8 @@ class RuleEngine:
         self,
         rule: BibliographyFormatRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет разобранные поля записей списка литературы.
 
         Каждое включенное требование — отдельная проверка: запись без URL и без
@@ -2950,10 +3055,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text=(
                         f"в списке литературы нет записей{category_text}: "
@@ -2997,13 +3101,9 @@ class RuleEngine:
                     continue
                 label = BIBLIOGRAPHY_FORMAT_LABELS[field]
                 violations.append(
-                    Violation(
-                        violation_id=f"{rule.rule_id}:{entry.bib_id}:{field}",
-                        rule_id=rule.rule_id,
-                        kind=rule.kind,
-                        severity=rule.severity,
-                        message=rule.message,
-                        requirement_ref=rule.requirement_ref,
+                    _build_violation(
+                        rule,
+                        address=f"{entry.bib_id}:{field}",
                         location=_bibliography_location(entry, blocks),
                         expected={field: True},
                         found={
@@ -3025,10 +3125,9 @@ class RuleEngine:
         return (
             violations,
             len(entries),
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence="high",
@@ -3052,7 +3151,8 @@ class RuleEngine:
         self,
         rule: CaptionNumberingRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет сквозную арабскую нумерацию подписей выбранного вида.
 
         Проверка реализована здесь, а не берется из
@@ -3077,10 +3177,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text=(
                         f"в документе не найдено подписей ({entity_label}): "
@@ -3138,15 +3237,9 @@ class RuleEngine:
                 issue_kind, number_str, previous_str
             )
             violations.append(
-                Violation(
-                    violation_id=(
-                        f"{rule.rule_id}:{entity.entity_id}:{issue_kind}:{number_str}"
-                    ),
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=f"{entity.entity_id}:{issue_kind}:{number_str}",
                     location=ViolationLocation(
                         block_id=entity.caption_block_id,
                         page_start_est=_safe_page_est(entity.page_est),
@@ -3177,10 +3270,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text=(
                         "среди подписей нет сквозных арабских номеров "
@@ -3199,10 +3291,9 @@ class RuleEngine:
         return (
             violations,
             len(entities),
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence="high",
@@ -3214,7 +3305,8 @@ class RuleEngine:
         self,
         rule: CaptionFormatRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Проверяет оформление подписи: префикс, разделитель, точка, регистр.
 
         Все расхождения одной подписи собираются в одно нарушение (как у
@@ -3232,10 +3324,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text="подпись оформлена по требованию",
                     observed_text=(
                         f"в документе не найдено подписей ({entity_label}): "
@@ -3330,13 +3421,9 @@ class RuleEngine:
             if not expected_values:
                 continue
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:{entity.entity_id}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=entity.entity_id,
                     location=ViolationLocation(
                         block_id=entity.caption_block_id,
                         page_start_est=_safe_page_est(entity.page_est),
@@ -3365,10 +3452,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text="подпись оформлена по требованию",
                     observed_text=(
                         "оформление подписей не измерено: абзацы подписей "
@@ -3387,10 +3473,9 @@ class RuleEngine:
         return (
             violations,
             len(entities),
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text="подпись оформлена по требованию",
                 observed_text=observed_text,
                 confidence="high",
@@ -3402,7 +3487,8 @@ class RuleEngine:
         self,
         rule: CaptionReferenceRule,
         document: ParsedDocxDocument,
-    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+        contexts: Dict[str, str],
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Ищет рисунки и таблицы, на которые нет ссылки в тексте работы.
 
         Признак ``is_mentioned_in_text`` вычисляет слой обогащения: подпись
@@ -3417,10 +3503,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text=(
                         f"в документе не найдено подписей ({entity_label}): "
@@ -3435,10 +3520,9 @@ class RuleEngine:
             return (
                 [],
                 len(entities),
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="pass",
+                _build_assessment(
+                    rule,
+                    "pass",
                     expected_text=expected_text,
                     observed_text="проверка ссылок отключена требованием правила",
                     confidence="high",
@@ -3451,13 +3535,9 @@ class RuleEngine:
             if entity.is_mentioned_in_text:
                 continue
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:{entity.entity_id}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=entity.entity_id,
                     location=ViolationLocation(
                         block_id=entity.caption_block_id,
                         page_start_est=_safe_page_est(entity.page_est),
@@ -3485,10 +3565,9 @@ class RuleEngine:
         return (
             violations,
             len(entities),
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence="high",
@@ -3509,7 +3588,7 @@ class RuleEngine:
         rule: AlignmentRule,
         document: ParsedDocxDocument,
         contexts: Dict[str, str],
-    ) -> Tuple[List[Violation], int, Optional[RuleAssessment]]:
+    ) -> Tuple[List[Violation], int, RuleAssessment]:
         """Сверяет выравнивание абзацев выбранной области с ожиданием.
 
         Область ``captions`` берет абзацы подписей по ``caption_block_id``,
@@ -3550,13 +3629,9 @@ class RuleEngine:
             if _alignment_matches(expected_alignment, actual_alignment):
                 continue
             violations.append(
-                Violation(
-                    violation_id=f"{rule.rule_id}:{paragraph.block_id}",
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    severity=rule.severity,
-                    message=rule.message,
-                    requirement_ref=rule.requirement_ref,
+                _build_violation(
+                    rule,
+                    address=paragraph.block_id,
                     location=_paragraph_location(paragraph),
                     expected={"alignment": expected_alignment},
                     found={
@@ -3582,10 +3657,9 @@ class RuleEngine:
             return (
                 [],
                 0,
-                RuleAssessment(
-                    rule_id=rule.rule_id,
-                    kind=rule.kind,
-                    status="not_assessed",
+                _build_assessment(
+                    rule,
+                    "not_assessed",
                     expected_text=expected_text,
                     observed_text=(
                         "выравнивание не измерено ни для одного объекта области "
@@ -3607,15 +3681,39 @@ class RuleEngine:
         return (
             violations,
             checked,
-            RuleAssessment(
-                rule_id=rule.rule_id,
-                kind=rule.kind,
-                status=status,
+            _build_assessment(
+                rule,
+                status,
                 expected_text=expected_text,
                 observed_text=observed_text,
                 confidence="high",
                 details=details,
             ),
         )
+
+    # -----------------------------------------------------------------
+    # Реестр чекеров: тип правила -> обработчик с единым контрактом
+    # -----------------------------------------------------------------
+
+    _CHECKERS: Dict[type, _CheckerHandler] = {
+        FontRule: _check_font_rule,
+        IndentRule: _check_indent_rule,
+        MarginRule: _check_margin_rule,
+        PageNumberPositionRule: _check_page_number_position_rule,
+        PageFormatRule: _check_page_format_rule,
+        LineSpacingRule: _check_line_spacing_rule,
+        HeadingLevelsRule: _check_heading_levels_rule,
+        HeadingNumberingRule: _check_heading_numbering_rule,
+        HeadingFormatRule: _check_heading_format_rule,
+        RequiredSectionsRule: _check_required_sections_rule,
+        TocRule: _check_toc_rule,
+        BibliographyLinkRule: _check_bibliography_link_rule,
+        BibliographyCitedRule: _check_bibliography_cited_rule,
+        BibliographyFormatRule: _check_bibliography_format_rule,
+        CaptionNumberingRule: _check_caption_numbering_rule,
+        CaptionFormatRule: _check_caption_format_rule,
+        CaptionReferenceRule: _check_caption_reference_rule,
+        AlignmentRule: _check_alignment_rule,
+    }
 
 
