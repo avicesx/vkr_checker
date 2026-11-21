@@ -87,8 +87,6 @@ NEW_RULE_KINDS: Dict[str, str] = {
     "font_table_cells": "font",
 }
 NEW_RULE_IDS = frozenset(NEW_RULE_KINDS)
-#: Шрифтовое правило не возвращает ``RuleAssessment``: у него только нарушения.
-UNASSESSED_NEW_RULE_IDS = frozenset({"font_table_cells"})
 
 #: Текст синтетического документа одного абзаца: ссылки на источники и объекты.
 SYNTHETIC_BODY_TEXT = (
@@ -686,16 +684,28 @@ def test_synthetic_clean_document_passes_every_new_check(
 
     assert _new_kind_violations(report) == []
 
-    for rule_id in sorted(NEW_RULE_IDS - UNASSESSED_NEW_RULE_IDS):
+    for rule_id in sorted(NEW_RULE_IDS):
         assessment = _assessment(report, rule_id)
         assert assessment.status == "pass", (
             f"{rule_id}: {assessment.status} ({assessment.observed_text})"
         )
         assert assessment.details, f"{rule_id}: проверка не измерила ни одного объекта"
 
-    # Шрифтовое правило не имеет RuleAssessment, но нарушений в нем быть не должно.
-    assert report.summary.by_rule.get("font_table_cells", 0) == 0
     assert report.summary.objects_checked > 0
+
+
+def test_every_rule_returns_exactly_one_assessment(standard_engine: RuleEngine) -> None:
+    """Каждое правило набора дает ровно одну оценку с допустимым статусом."""
+    report = standard_engine.check(_synthetic_document())
+
+    expected_ids = [rule.rule_id for rule in standard_engine.ruleset.rules]
+    assessed_ids = [assessment.rule_id for assessment in report.assessments]
+    assert sorted(assessed_ids) == sorted(expected_ids), "оценки не покрывают набор"
+    assert len(assessed_ids) == len(set(assessed_ids)), "правило оценивалось дважды"
+    for assessment in report.assessments:
+        assert assessment.status in {"pass", "fail", "not_assessed"}
+        assert assessment.expected_text, f"{assessment.rule_id}: пустое ожидание"
+        assert assessment.observed_text, f"{assessment.rule_id}: пустое наблюдение"
 
 
 @pytest.mark.parametrize("rule_id", tuple(NEW_RULE_KINDS))

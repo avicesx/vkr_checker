@@ -409,8 +409,13 @@ def test_pdf_without_page_numbers_is_not_assessed(tmp_path: Path) -> None:
     assert number_check.confidence == "low"
     assert number_check.details["pages_with_number"] == 0
     assert number_check.details["threshold"] == max(3, PAGE_COUNT // 3)
-    assert [item.rule_id for item in report.not_assessed] == ["page_number_position"]
-    assert report.summary.not_assessed_total == 1
+    # Отступ первой строки в pdf_only не оценивается (ненадежный источник),
+    # поэтому not_assessed два правила: отступ и положение номера страницы.
+    assert [item.rule_id for item in report.not_assessed] == [
+        "indent_first_line",
+        "page_number_position",
+    ]
+    assert report.summary.not_assessed_total == 2
 
 
 @pytest.mark.parametrize("profile_id", ["mpgu", "urgpu", "urfu"])

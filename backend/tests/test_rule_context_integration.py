@@ -94,7 +94,7 @@ SECTION_BODY: Dict[str, Tuple[str, ...]] = {
         "В ходе работы разработана информационная система учёта заявок.",
     ),
     "СПИСОК ЛИТЕРАТУРЫ": (
-        "Иванов И. И. Проектирование информационных систем. Москва: Юрайт, 2023. 320 с.",
+        "Иванов Иван. Проектирование информационных систем. Москва: Юрайт, 2023. 320 с.",
     ),
     "ПРИЛОЖЕНИЕ А": (
         "Ниже приведён фрагмент контроллера системы учёта заявок.",
@@ -156,7 +156,8 @@ LISTING_STYLE_XML = f"""
 #: Титул «Содержание» над записями оглавления.
 TOC_TITLE_XML = (
     '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
-    "<w:r><w:t>СОДЕРЖАНИЕ</w:t></w:r></w:p>"
+    '<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>'
+    '<w:sz w:val="28"/><w:b/></w:rPr><w:t>СОДЕРЖАНИЕ</w:t></w:r></w:p>'
 )
 
 
@@ -198,15 +199,19 @@ def _bad_body_paragraph(text: str) -> str:
 
 
 def _heading_paragraph(text: str, level: int, *, alignment: str = "center") -> str:
-    """Собирает заголовок: стиль Heading1 или явный outlineLvl для подраздела."""
+    """Собирает заголовок: стиль Heading1 или outlineLvl, 14 pt полужирным."""
     props = (
         '<w:pStyle w:val="Heading1"/>'
         if level == 1
-        else f'<w:outlineLvl w:val="{level - 1}"/>'
+        else f'<w:keepNext/><w:outlineLvl w:val="{level - 1}"/>'
+    )
+    run_props = (
+        '<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>'
+        '<w:sz w:val="28"/><w:b/></w:rPr>'
     )
     return (
         f'<w:p><w:pPr>{props}<w:jc w:val="{alignment}"/></w:pPr>'
-        f'<w:r><w:t xml:space="preserve">{_xml_text(text)}</w:t></w:r></w:p>'
+        f'<w:r>{run_props}<w:t xml:space="preserve">{_xml_text(text)}</w:t></w:r></w:p>'
     )
 
 
@@ -464,7 +469,7 @@ def test_heading_and_toc_rules_are_not_regressed(
     """Правила заголовков, оглавления и разделов отрабатывают без нарушений."""
     report = RuleEngine(load_default_ruleset()).check(vkr_document)
 
-    assert report.summary.rules_applied == 22
+    assert report.summary.rules_applied == 37
     for rule_id in (
         "page_margins",
         "heading_levels",

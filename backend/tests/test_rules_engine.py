@@ -45,7 +45,12 @@ BAD_MARGINS = """
 """
 
 TOC_TITLE = """
-<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>СОДЕРЖАНИЕ</w:t></w:r></w:p>
+<w:p><w:pPr><w:jc w:val="center"/></w:pPr>
+  <w:r>
+    <w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="28"/><w:b/></w:rPr>
+    <w:t>СОДЕРЖАНИЕ</w:t>
+  </w:r>
+</w:p>
 """
 
 SECTIONS = (
@@ -58,15 +63,20 @@ SECTIONS = (
 
 
 def _heading(text: str, level: int = 1) -> str:
-    """Собирает абзац заголовка с явным уровнем: стиль Heading1 или outlineLvl."""
+    """Собирает абзац заголовка: стиль Heading1 или outlineLvl, 14 pt полужирным."""
+    run_props = (
+        '<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>'
+        '<w:sz w:val="28"/><w:b/></w:rPr>'
+    )
     if level == 1:
         return (
             '<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/></w:pPr>'
-            f"<w:r><w:t>{text}</w:t></w:r></w:p>"
+            f"<w:r>{run_props}<w:t>{text}</w:t></w:r></w:p>"
         )
     return (
-        f'<w:p><w:pPr><w:outlineLvl w:val="{level - 1}"/><w:jc w:val="center"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
+        f'<w:p><w:pPr><w:keepNext/><w:outlineLvl w:val="{level - 1}"/>'
+        f'<w:jc w:val="center"/></w:pPr>'
+        f"<w:r>{run_props}<w:t>{text}</w:t></w:r></w:p>"
     )
 
 
@@ -97,7 +107,7 @@ def test_compliant_document_passes_all_default_rules(
     report = RuleEngine(load_default_ruleset()).check(document)
 
     assert report.passed is True
-    assert report.summary.rules_applied == 22
+    assert report.summary.rules_applied == 37
     assert report.summary.violations_total == 0
     assert report.summary.by_kind == {}
     assert report.summary.objects_checked > 0

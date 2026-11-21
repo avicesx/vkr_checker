@@ -14,20 +14,29 @@ from rule_engine import (
     DEFAULT_RULESET_PATH,
     AlignmentRule,
     BibliographyCitedRule,
+    BibliographyCountRule,
     BibliographyFormatRule,
     BibliographyLinkRule,
+    BibliographyOrderRule,
+    BibliographyRecencyRule,
     CaptionFormatRule,
     CaptionNumberingRule,
     CaptionReferenceRule,
+    DocumentVolumeRule,
+    EquationNumberingRule,
     FontRule,
     HeadingFormatRule,
     HeadingLevelsRule,
     HeadingNumberingRule,
+    HeadingPageBreakRule,
     IndentRule,
+    KeepNextRule,
     MarginRule,
+    MicroTypographyRule,
     RequiredSectionsRule,
     RuleSet,
     TocRule,
+    WidowControlRule,
     load_default_ruleset,
     load_ruleset,
 )
@@ -139,24 +148,39 @@ def _page_format_rule(**overrides: object) -> dict:
 
 def test_default_ruleset_describes_all_checks() -> None:
     """Штатный набор описывает все проверки: текст и поля, заголовки и разделы,
-    оглавление, ссылки и список литературы, подписи рисунков и таблиц,
+    оглавление, объём, ссылки и список литературы, подписи рисунков и таблиц,
     выравнивание и шрифт в таблицах."""
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "2.1.0"
+    assert ruleset.ruleset_version == "2.4.0"
     assert [rule.rule_id for rule in ruleset.rules] == [
         "font_body_text",
         "indent_first_line",
+        "alignment_body_text",
+        "line_spacing_body",
+        "microtypography_prose",
+        "microtypography_nbsp",
         "page_margins",
+        "page_number_position",
+        "page_format",
+        "widow_control_body",
         "heading_levels",
         "heading_numbering",
         "heading_format_text",
+        "heading_font",
         "heading_alignment",
+        "heading_page_break",
+        "heading_keep_next",
         "required_sections",
         "toc",
+        "document_volume",
+        "equation_numbering",
         "bibliography_links_resolved",
         "bibliography_all_cited",
+        "bibliography_count",
+        "bibliography_order",
+        "bibliography_recency",
         "bibliography_format_electronic",
         "bibliography_format_article",
         "caption_numbering_figures",
@@ -169,28 +193,83 @@ def test_default_ruleset_describes_all_checks() -> None:
         "alignment_table_cells",
         "font_table_cells",
     ]
-    assert isinstance(ruleset.rules[0], FontRule)
-    assert isinstance(ruleset.rules[1], IndentRule)
-    assert isinstance(ruleset.rules[2], MarginRule)
-    assert isinstance(ruleset.rules[3], HeadingLevelsRule)
-    assert isinstance(ruleset.rules[4], HeadingNumberingRule)
-    assert isinstance(ruleset.rules[5], HeadingFormatRule)
-    assert isinstance(ruleset.rules[6], HeadingFormatRule)
-    assert isinstance(ruleset.rules[7], RequiredSectionsRule)
-    assert isinstance(ruleset.rules[8], TocRule)
-    assert isinstance(ruleset.rules[9], BibliographyLinkRule)
-    assert isinstance(ruleset.rules[10], BibliographyCitedRule)
-    assert isinstance(ruleset.rules[11], BibliographyFormatRule)
-    assert isinstance(ruleset.rules[12], BibliographyFormatRule)
-    assert isinstance(ruleset.rules[13], CaptionNumberingRule)
-    assert isinstance(ruleset.rules[14], CaptionNumberingRule)
-    assert isinstance(ruleset.rules[15], CaptionFormatRule)
-    assert isinstance(ruleset.rules[16], CaptionFormatRule)
-    assert isinstance(ruleset.rules[17], CaptionReferenceRule)
-    assert isinstance(ruleset.rules[18], CaptionReferenceRule)
-    assert isinstance(ruleset.rules[19], AlignmentRule)
-    assert isinstance(ruleset.rules[20], AlignmentRule)
-    assert isinstance(ruleset.rules[21], FontRule)
+    expected_types = [
+        FontRule,
+        IndentRule,
+        AlignmentRule,
+        LineSpacingRule,
+        MicroTypographyRule,
+        MicroTypographyRule,
+        MarginRule,
+        PageNumberPositionRule,
+        PageFormatRule,
+        WidowControlRule,
+        HeadingLevelsRule,
+        HeadingNumberingRule,
+        HeadingFormatRule,
+        HeadingFormatRule,
+        HeadingFormatRule,
+        HeadingPageBreakRule,
+        KeepNextRule,
+        RequiredSectionsRule,
+        TocRule,
+        DocumentVolumeRule,
+        EquationNumberingRule,
+        BibliographyLinkRule,
+        BibliographyCitedRule,
+        BibliographyCountRule,
+        BibliographyOrderRule,
+        BibliographyRecencyRule,
+        BibliographyFormatRule,
+        BibliographyFormatRule,
+        CaptionNumberingRule,
+        CaptionNumberingRule,
+        CaptionFormatRule,
+        CaptionFormatRule,
+        CaptionReferenceRule,
+        CaptionReferenceRule,
+        AlignmentRule,
+        AlignmentRule,
+        FontRule,
+    ]
+    assert len(expected_types) == len(ruleset.rules)
+    for rule, expected_type in zip(ruleset.rules, expected_types):
+        assert isinstance(rule, expected_type), rule.rule_id
+    assert ruleset.get_rule("alignment_body_text").expected.alignment == "justify"
+    assert ruleset.get_rule("line_spacing_body").expected.ratio == 1.5
+    assert ruleset.get_rule("page_number_position").expected.zone == "footer"
+    assert ruleset.get_rule("page_number_position").expected.alignment == "center"
+    assert ruleset.get_rule("page_format").expected.width_mm == 210.0
+    assert ruleset.get_rule("page_format").expected.height_mm == 297.0
+    heading_font = ruleset.get_rule("heading_font").expected.font
+    assert heading_font.family == "Times New Roman"
+    assert heading_font.size_pt == 14.0
+    assert heading_font.bold is True
+    assert ruleset.get_rule("widow_control_body").expected.enabled is True
+    assert ruleset.get_rule("heading_page_break").expected.roles == [
+        "main_chapter",
+        "introduction",
+        "conclusion",
+        "bibliography",
+        "appendix",
+    ]
+    volume = ruleset.get_rule("document_volume").expected
+    assert (volume.min_pages, volume.max_pages) == (60, 90)
+    assert (volume.min_words, volume.max_words) == (8000, 18000)
+    prose = ruleset.get_rule("microtypography_prose").expected
+    assert prose.checks == [
+        "wrong_quotes",
+        "wrong_dashes",
+        "multiple_spaces",
+        "space_before_punctuation",
+    ]
+    assert ruleset.get_rule("microtypography_nbsp").expected.checks == ["missing_nbsp"]
+    assert ruleset.get_rule("equation_numbering").expected.require_numbering is True
+    assert ruleset.get_rule("bibliography_count").expected.min_sources == 20
+    order = ruleset.get_rule("bibliography_order").expected
+    assert (order.start_at, order.allow_gaps, order.allow_duplicates) == (1, False, False)
+    recency = ruleset.get_rule("bibliography_recency").expected
+    assert (recency.min_recent_share, recency.recent_years) == (0.3, 5)
 
 
 def test_default_ruleset_excludes_front_matter_from_heading_rules() -> None:
@@ -703,11 +782,25 @@ def test_unknown_profile_is_rejected() -> None:
 
 
 def test_profile_rulesets_do_not_change_default_ruleset() -> None:
-    """Набор по умолчанию остается прежним и не подмешивает профильные правила."""
+    """Набор по умолчанию самодостаточен и не подменяется профилем вуза."""
     default_ruleset = load_default_ruleset()
     default_kinds = {rule.kind for rule in default_ruleset.rules}
+    profile_ruleset = load_profile_ruleset("urfu")
 
-    assert "page_number_position" not in default_kinds
-    assert "page_format" not in default_kinds
-    assert "line_spacing" not in default_kinds
+    assert {
+        "page_number_position",
+        "page_format",
+        "line_spacing",
+        "widow_control",
+        "keep_next",
+        "heading_page_break",
+        "document_volume",
+        "microtypography",
+        "equation_numbering",
+        "bibliography_count",
+        "bibliography_order",
+        "bibliography_recency",
+    } <= default_kinds
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
+    assert default_ruleset.ruleset_version == "2.4.0"
+    assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

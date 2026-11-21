@@ -112,10 +112,20 @@ def test_legacy_ruleset_without_field_gets_defaults() -> None:
     assert ruleset.get_rule("font_body_text").target.exclude_contexts == [
         "title_page",
         "code_listing",
+        "structural_title",
+        "appendix_label",
+        "caption_like",
+        "table_title",
+        "text_formula",
     ]
     assert ruleset.get_rule("indent_first_line").target.exclude_contexts == [
         "title_page",
         "code_listing",
+        "structural_title",
+        "appendix_label",
+        "caption_like",
+        "table_title",
+        "text_formula",
     ]
 
 

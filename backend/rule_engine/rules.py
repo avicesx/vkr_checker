@@ -25,10 +25,11 @@
 `parser.docx`: роли разделов и номера уже вычислены на этапе разбора.
 
 Геометрические правила (`page_number_position`, `page_format`) и межстрочный
-интервал (`line_spacing`) добавлены для вузовских профилей оформления: наборы
+интервал (`line_spacing`) входят и в набор по умолчанию
+(`rules/vkr_test_rules.json`), и в вузовские профили оформления: наборы
 `rules/mpgu.json`, `rules/urgpu.json`, `rules/urfu.json` загружаются по
-идентификатору вуза через `load_profile_ruleset()`. Набор по умолчанию
-(`rules/vkr_test_rules.json`) от этих правил не зависит.
+идентификатору вуза через `load_profile_ruleset()` и отличаются ожидаемыми
+значениями (например, колонтитулом номера страницы).
 """
 from __future__ import annotations
 
@@ -58,6 +59,15 @@ RuleKind = Literal[
     "caption_format",
     "caption_reference",
     "alignment",
+    "widow_control",
+    "keep_next",
+    "heading_page_break",
+    "document_volume",
+    "microtypography",
+    "equation_numbering",
+    "bibliography_count",
+    "bibliography_order",
+    "bibliography_recency",
 ]
 RuleSeverity = Literal["error", "warning", "info"]
 
@@ -119,6 +129,7 @@ Scope = Literal[
     "toc",                # блоки оглавления и их записи
     "bibliography",       # список литературы и ссылки на его источники
     "captions",           # подписи рисунков, таблиц и приложений
+    "document",           # документ целиком: объем, количество страниц и слов
 ]
 
 PARAGRAPH_SCOPES: frozenset[str] = frozenset(
@@ -154,6 +165,7 @@ SCOPE_LABELS: dict[str, str] = {
     "toc": "оглавление",
     "bibliography": "список литературы",
     "captions": "подписи рисунков и таблиц",
+    "document": "документ",
 }
 
 DEFAULT_RULESET_PATH = Path(__file__).resolve().parent / "rules" / "vkr_test_rules.json"
@@ -218,10 +230,22 @@ class RuleTarget(BaseModel):
         description="Проверять пустые абзацы и абзацы только с графикой/формулой",
     )
     exclude_contexts: List[str] = Field(
-        default_factory=lambda: ["title_page", "code_listing"],
+        default_factory=lambda: [
+            "title_page",
+            "code_listing",
+            "structural_title",
+            "appendix_label",
+            "caption_like",
+            "table_title",
+            "text_formula",
+        ],
         description=(
             "Не проверять блоки этих контекстов в областях body_text и body_paragraphs: "
-            "'title_page' — титульный лист, 'code_listing' — листинг кода. "
+            "'title_page' — титульный лист, 'code_listing' — листинг кода, "
+            "'structural_title' — название элемента структуры («Содержание», «Приложение»), "
+            "'appendix_label' — метка продолжения приложения, 'caption_like' — подпись "
+            "рисунка/таблицы по текстовому маркеру, 'table_title' — заголовок таблицы, "
+            "'text_formula' — формула, набранная текстом. "
             "Пусто — прежнее поведение без контекстной фильтрации"
         ),
     )
@@ -414,7 +438,7 @@ class HeadingNumberingExpectation(BaseModel):
 
 
 class HeadingFormatExpectation(BaseModel):
-    """Ожидаемое оформление заголовка: точка в конце, регистр и выравнивание."""
+    """Ожидаемое оформление заголовка: шрифт, точка, регистр и выравнивание."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -437,6 +461,13 @@ class HeadingFormatExpectation(BaseModel):
         default=None,
         description="Ожидаемое выравнивание абзаца заголовка (effective_props.alignment)",
     )
+    font: Optional[FontExpectation] = Field(
+        default=None,
+        description=(
+            "Ожидаемое шрифтовое оформление заголовка: гарнитура, кегль, полужирность. "
+            "Сравниваются видимые раны заголовка, а при их отсутствии — знак абзаца"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "HeadingFormatExpectation":
@@ -446,10 +477,11 @@ class HeadingFormatExpectation(BaseModel):
             and self.trailing_dot_in_number == "any"
             and self.case == "any"
             and self.alignment is None
+            and self.font is None
         ):
             raise ValueError(
                 "HeadingFormatExpectation пусто: задайте trailing_dot, "
-                "trailing_dot_in_number, case или alignment"
+                "trailing_dot_in_number, case, alignment или font"
             )
         return self
 
@@ -675,6 +707,311 @@ class LineSpacingExpectation(BaseModel):
         le=5.0,
         description="Допуск по множителю интервала",
     )
+
+
+class WidowControlExpectation(BaseModel):
+    """Требование контролировать висячие строки в абзацах.
+
+    Абзац считается разделенным между страницами, если разрыв страницы попадает
+    внутрь его текста. При выключенном контроле первая или последняя строка
+    такого абзаца может остаться на соседней странице в одиночестве.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description="Ожидаемое значение widowControl: true — висячие строки запрещены",
+    )
+
+
+class KeepNextExpectation(BaseModel):
+    """Требование не отрывать заголовок от следующего за ним текста.
+
+    Проверяется свойство keepNext абзаца заголовка: Word переносит заголовок на
+    следующую страницу вместе с первым абзацем, если свойство включено.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description="Ожидаемое значение keepNext: true — заголовок не отрывается от текста",
+    )
+    roles: List[HeadingRole] = Field(
+        default_factory=lambda: ["main_chapter", "sub_section"],
+        description="Роли заголовков, к которым применяется требование",
+    )
+
+    @field_validator("roles")
+    @classmethod
+    def _validate_roles(cls, value: List[HeadingRole]) -> List[HeadingRole]:
+        """Проверяет, что перечень ролей непустой."""
+        if not value:
+            raise ValueError("KeepNextExpectation: перечень roles не может быть пустым")
+        return value
+
+
+class HeadingPageBreakExpectation(BaseModel):
+    """Требование начинать структурный раздел с новой страницы.
+
+    Начало раздела сравнивается со страницей, на которой заканчивается
+    предыдущий непустой абзац документа: заголовок обязан оказаться на
+    следующей странице.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    roles: List[HeadingRole] = Field(
+        default_factory=lambda: [
+            "main_chapter",
+            "introduction",
+            "conclusion",
+            "bibliography",
+            "appendix",
+        ],
+        description="Роли заголовков, которые обязаны начинаться с новой страницы",
+    )
+
+    @field_validator("roles")
+    @classmethod
+    def _validate_roles(cls, value: List[HeadingRole]) -> List[HeadingRole]:
+        """Проверяет, что перечень ролей непустой."""
+        if not value:
+            raise ValueError("HeadingPageBreakExpectation: перечень roles не может быть пустым")
+        return value
+
+
+class DocumentVolumeExpectation(BaseModel):
+    """Требование к объему работы в страницах и словах.
+
+    Границы задаются методическими указаниями и различаются для бакалаврской и
+    магистерской ВКР, поэтому значения настраиваются правилом. Число слов
+    берется из статистики DOCX или из извлеченного текста PDF; если парсер его
+    не посчитал, проверка слов честно пропускается.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_pages: Optional[int] = Field(default=None, ge=1, description="Минимум страниц")
+    max_pages: Optional[int] = Field(default=None, ge=1, description="Максимум страниц")
+    min_words: Optional[int] = Field(default=None, ge=1, description="Минимум слов")
+    max_words: Optional[int] = Field(default=None, ge=1, description="Максимум слов")
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> "DocumentVolumeExpectation":
+        """Требует хотя бы одну границу и согласованность минимума с максимумом."""
+        if (
+            self.min_pages is None
+            and self.max_pages is None
+            and self.min_words is None
+            and self.max_words is None
+        ):
+            raise ValueError(
+                "DocumentVolumeExpectation пусто: задайте min_pages, max_pages, "
+                "min_words или max_words"
+            )
+        if (
+            self.min_pages is not None
+            and self.max_pages is not None
+            and self.min_pages > self.max_pages
+        ):
+            raise ValueError("DocumentVolumeExpectation: min_pages больше max_pages")
+        if (
+            self.min_words is not None
+            and self.max_words is not None
+            and self.min_words > self.max_words
+        ):
+            raise ValueError("DocumentVolumeExpectation: min_words больше max_words")
+        return self
+
+
+MicroTypographyCheck = Literal[
+    "wrong_quotes",
+    "wrong_dashes",
+    "multiple_spaces",
+    "space_before_punctuation",
+    "missing_nbsp",
+]
+"""Вид микротипографической ошибки, которую проверяет правило."""
+
+
+class MicroTypographyExpectation(BaseModel):
+    """Требование к микротипографике абзаца: кавычки, тире, пробелы.
+
+    Проверяются уже размеченные парсером нарушения ``MicroTypographyReport``,
+    поэтому правило ничего не пересчитывает по тексту, а только отбирает виды
+    ошибок. ``checks`` перечисляет проверяемые виды: например, основную
+    проверку текста интересуют кавычки, тире и лишние пробелы, а неразрывные
+    пробелы выносятся в отдельное правило, чтобы не смешивать важность.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    checks: List[MicroTypographyCheck] = Field(
+        default_factory=lambda: [
+            "wrong_quotes",
+            "wrong_dashes",
+            "multiple_spaces",
+            "space_before_punctuation",
+        ],
+        description="Виды микротипографических ошибок, которые проверяет правило",
+    )
+
+    @field_validator("checks")
+    @classmethod
+    def _validate_checks(cls, value: List[MicroTypographyCheck]) -> List[MicroTypographyCheck]:
+        """Убирает повторы и отвергает пустой перечень видов ошибок."""
+        unique: List[MicroTypographyCheck] = []
+        for check in value:
+            if check not in unique:
+                unique.append(check)
+        if not unique:
+            raise ValueError(
+                "MicroTypographyExpectation пусто: перечислите виды ошибок в checks"
+            )
+        return unique
+
+
+class EquationNumberingExpectation(BaseModel):
+    """Требование к нумерации формул.
+
+    Выключенная проверка не имеет смысла: правило без требования ничего не
+    сообщает о документе, поэтому ``require_numbering=False`` отвергается.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_numbering: bool = Field(
+        default=True,
+        description="Требовать номер у вынесенной в отдельную строку формулы",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "EquationNumberingExpectation":
+        """Запрещает набор, в котором требование нумерации отключено."""
+        if not self.require_numbering:
+            raise ValueError(
+                "EquationNumberingExpectation пусто: require_numbering=False отключает "
+                "проверку нумерации формул"
+            )
+        return self
+
+
+class BibliographyCountExpectation(BaseModel):
+    """Требование к количеству источников в списке литературы.
+
+    Нормативы различаются по уровню работы, поэтому нижняя и верхняя границы
+    задаются правилом; ``max_sources=None`` означает, что верхняя граница не
+    проверяется. Пустое ожидание отвергается: правило без границ бесполезно.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_sources: Optional[int] = Field(
+        default=20,
+        ge=1,
+        description="Минимальное количество источников в списке литературы",
+    )
+    max_sources: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Максимальное количество источников (None — не проверять)",
+    )
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> "BibliographyCountExpectation":
+        """Требует хотя бы одну границу и согласованность минимума с максимумом."""
+        if self.min_sources is None and self.max_sources is None:
+            raise ValueError(
+                "BibliographyCountExpectation пусто: задайте min_sources или max_sources"
+            )
+        if (
+            self.min_sources is not None
+            and self.max_sources is not None
+            and self.min_sources > self.max_sources
+        ):
+            raise ValueError("BibliographyCountExpectation: min_sources больше max_sources")
+        return self
+
+
+class BibliographyOrderExpectation(BaseModel):
+    """Требование к сквозной нумерации списка литературы.
+
+    Номера записей обязаны идти подряд от ``start_at`` без пропусков и
+    повторов: на эти номера ссылается текст работы. Отключенные проверки
+    пропусков и повторов одновременно оставляют правило без требований, поэтому
+    такой набор отвергается.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start_at: int = Field(default=1, ge=0, description="Номер первой записи списка")
+    allow_gaps: bool = Field(
+        default=False,
+        description="Разрешить пропуски в нумерации (False — номера идут подряд)",
+    )
+    allow_duplicates: bool = Field(
+        default=False,
+        description="Разрешить повторяющиеся номера записей (False — номера уникальны)",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "BibliographyOrderExpectation":
+        """Запрещает набор, в котором пропуски и повторы разрешены одновременно."""
+        if self.allow_gaps and self.allow_duplicates:
+            raise ValueError(
+                "BibliographyOrderExpectation пусто: allow_gaps и allow_duplicates "
+                "одновременно отключают проверку нумерации"
+            )
+        return self
+
+
+class BibliographyRecencyExpectation(BaseModel):
+    """Требование к свежести источников списка литературы.
+
+    Доля источников не старше ``recent_years`` лет считается от года,
+    указанного в ``reference_year``, а при ``None`` — от текущего года. Год
+    издания разобран не у всех записей, поэтому при покрытии годами ниже
+    ``min_year_coverage`` проверка честно не оценивается, а не додумывает
+    свежесть.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_recent_share: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Минимальная доля источников не старше recent_years лет",
+    )
+    recent_years: int = Field(
+        default=5,
+        ge=1,
+        description="Сколько лет считать свежими: год источника не старше reference_year - recent_years",
+    )
+    reference_year: Optional[int] = Field(
+        default=None,
+        ge=1900,
+        le=2100,
+        description="Год отсчёта свежести (None — текущий год)",
+    )
+    min_year_coverage: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Минимальная доля записей с известным годом для оценки свежести",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "BibliographyRecencyExpectation":
+        """Запрещает набор, в котором доля свежих источников не проверяется."""
+        if self.min_recent_share == 0.0:
+            raise ValueError(
+                "BibliographyRecencyExpectation пусто: min_recent_share=0 отключает "
+                "проверку свежести источников"
+            )
+        return self
 
 
 BibliographyCategory = Literal[
@@ -1154,6 +1491,88 @@ class AlignmentRule(_RuleBase):
     expected: AlignmentExpectation
 
 
+class WidowControlRule(_RuleBase):
+    """Правило контроля висячих строк в абзацах основного текста."""
+
+    kind: Literal["widow_control"] = "widow_control"
+    expected: WidowControlExpectation
+
+
+class KeepNextRule(_RuleBase):
+    """Правило неотрывности заголовка от следующего за ним текста."""
+
+    kind: Literal["keep_next"] = "keep_next"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="headings"))
+    expected: KeepNextExpectation
+
+
+class HeadingPageBreakRule(_RuleBase):
+    """Правило начала структурного раздела с новой страницы."""
+
+    kind: Literal["heading_page_break"] = "heading_page_break"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="headings"))
+    expected: HeadingPageBreakExpectation
+
+
+class DocumentVolumeRule(_RuleBase):
+    """Правило объема работы в страницах и словах."""
+
+    kind: Literal["document_volume"] = "document_volume"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    expected: DocumentVolumeExpectation
+
+
+class MicroTypographyRule(_RuleBase):
+    """Правило микротипографики абзацев основного текста."""
+
+    kind: Literal["microtypography"] = "microtypography"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(
+            scope="body_paragraphs",
+            exclude_contexts=[
+                "title_page",
+                "code_listing",
+                "structural_title",
+                "appendix_label",
+                "text_formula",
+            ],
+        )
+    )
+    expected: MicroTypographyExpectation
+
+
+class EquationNumberingRule(_RuleBase):
+    """Правило нумерации вынесенных формул."""
+
+    kind: Literal["equation_numbering"] = "equation_numbering"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    expected: EquationNumberingExpectation
+
+
+class BibliographyCountRule(_RuleBase):
+    """Правило количества источников в списке литературы."""
+
+    kind: Literal["bibliography_count"] = "bibliography_count"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyCountExpectation
+
+
+class BibliographyOrderRule(_RuleBase):
+    """Правило сквозной нумерации списка литературы."""
+
+    kind: Literal["bibliography_order"] = "bibliography_order"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyOrderExpectation
+
+
+class BibliographyRecencyRule(_RuleBase):
+    """Правило свежести источников списка литературы."""
+
+    kind: Literal["bibliography_recency"] = "bibliography_recency"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyRecencyExpectation
+
+
 Rule = Annotated[
     Union[
         FontRule,
@@ -1174,6 +1593,15 @@ Rule = Annotated[
         CaptionFormatRule,
         CaptionReferenceRule,
         AlignmentRule,
+        WidowControlRule,
+        KeepNextRule,
+        HeadingPageBreakRule,
+        DocumentVolumeRule,
+        MicroTypographyRule,
+        EquationNumberingRule,
+        BibliographyCountRule,
+        BibliographyOrderRule,
+        BibliographyRecencyRule,
     ],
     Field(discriminator="kind"),
 ]
@@ -1197,6 +1625,15 @@ KIND_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "caption_format": CAPTION_SCOPES,
     "caption_reference": CAPTION_SCOPES,
     "alignment": ALIGNMENT_SCOPES,
+    "widow_control": frozenset({"body_text", "body_paragraphs"}),
+    "keep_next": HEADING_SCOPES,
+    "heading_page_break": HEADING_SCOPES,
+    "document_volume": frozenset({"document"}),
+    "microtypography": frozenset({"body_text", "body_paragraphs", "all_paragraphs"}),
+    "equation_numbering": frozenset({"document"}),
+    "bibliography_count": BIBLIOGRAPHY_SCOPES,
+    "bibliography_order": BIBLIOGRAPHY_SCOPES,
+    "bibliography_recency": BIBLIOGRAPHY_SCOPES,
 }
 """Какие scope допустимы для каждого вида правила (проверяется при загрузке набора)."""
 

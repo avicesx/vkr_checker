@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from enum import Enum
@@ -19,7 +20,12 @@ from parser.core.schema import (
     TrackChangeArtifact,
     VisualObject,
 )
-from rule_engine.findings import RuleAssessment
+from rule_engine.findings import (
+    Confidence,
+    RuleAssessment,
+    RuleCheckReport,
+    Violation as RuleViolation,
+)
 
 
 class ReportCategory(str, Enum):
@@ -48,6 +54,7 @@ class ViolationLocation(BaseModel):
     """наиболее точное доступное место обнаруженного нарушения"""
 
     block_id: Optional[str] = None
+    section_idx: Optional[int] = Field(default=None, ge=0)
     page_start: Optional[int] = Field(default=None, ge=1)
     page_end: Optional[int] = Field(default=None, ge=1)
     text_excerpt: Optional[str] = None
@@ -55,12 +62,31 @@ class ViolationLocation(BaseModel):
 
 
 class Violation(BaseModel):
-    """одно обнаруженное нарушение с рекомендацией по исправлению"""
+    """обнаруженное нарушение или группа однотипных нарушений
+
+    ``count`` — сколько находок движка представляет запись, ``locations`` —
+    полный список адресов группы (без обрезки; в Markdown показываются примеры).
+    Для одиночного нарушения ``count`` равен единице, а адрес лежит в ``location``.
+    ``occurrences`` — число дефектных фрагментов внутри адресов, ``found`` —
+    сводка по подтипам (для микротипографики: кавычки, тире, пробелы).
+    """
 
     id: str
+    rule_id: Optional[str] = None
+    count: int = Field(default=1, ge=1)
+    occurrences: int = Field(
+        default=1,
+        ge=1,
+        description="Сколько дефектных фрагментов внутри адреса (для группы — сумма)",
+    )
+    found: dict[str, int] = Field(
+        default_factory=dict,
+        description="Сводка находок по подтипам (для микротипографики — суммы)",
+    )
     category: ReportCategory
     severity: ReportSeverity
     location: ViolationLocation
+    locations: list[ViolationLocation] = Field(default_factory=list)
     description: str
     recommendation: str
     source: str
@@ -84,6 +110,29 @@ class ViolationSummary(BaseModel):
     low: int = Field(ge=0)
 
 
+class NotAssessedRule(BaseModel):
+    """правило, которое не удалось проверить из-за нехватки данных"""
+
+    rule_id: str
+    kind: str
+    observed_text: str = ""
+    confidence: Confidence = "medium"
+
+
+class ReportCoverage(BaseModel):
+    """сводка покрытия: сколько правил проверено, выполнено и не оценено
+
+    Нарушения в отчёт попадают из ``RuleCheckReport.violations``, а оценки
+    отвечают только за этот блок: ``not_assessed`` не превращается в нарушение.
+    """
+
+    rules_assessed: int = Field(default=0, ge=0)
+    passed: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    not_assessed: int = Field(default=0, ge=0)
+    not_assessed_rules: list[NotAssessedRule] = Field(default_factory=list)
+
+
 class ViolationReport(BaseModel):
     """отчёт для страницы результата или скачивания в Markdown"""
 
@@ -91,6 +140,7 @@ class ViolationReport(BaseModel):
     document_name: str
     generated_at: datetime
     summary: ViolationSummary
+    coverage: ReportCoverage = Field(default_factory=ReportCoverage)
     groups: list[ViolationGroup] = Field(default_factory=list)
 
     def to_markdown(self) -> str:
@@ -107,7 +157,21 @@ class ViolationReport(BaseModel):
                 f"средние — {self.summary.medium}, "
                 f"низкие — {self.summary.low}"
             ),
+            (
+                "- Покрытие правил: "
+                f"проверено — {self.coverage.rules_assessed}, "
+                f"выполнено — {self.coverage.passed}, "
+                f"не оценено — {self.coverage.not_assessed}"
+            ),
         ]
+        if self.coverage.not_assessed_rules:
+            lines.append(
+                "- Не оценены: "
+                + ", ".join(
+                    _escape_markdown(item.rule_id)
+                    for item in self.coverage.not_assessed_rules
+                )
+            )
         if not self.groups:
             lines.extend(["", "Нарушений не найдено."])
             return "\n".join(lines) + "\n"
@@ -115,6 +179,9 @@ class ViolationReport(BaseModel):
         for group in self.groups:
             lines.extend(["", f"## {_category_title(group.category)}"])
             for violation in group.violations:
+                if violation.count > 1 and violation.rule_id:
+                    lines.extend(_format_grouped_violation(violation))
+                    continue
                 location = _format_location(violation.location)
                 lines.extend(
                     [
@@ -142,99 +209,157 @@ _CATEGORY_TITLES = {
     ReportCategory.CAPTIONS: "Подписи рисунков и таблиц",
 }
 
-_RULE_DETAILS = {
-    "font_body_text": (
+_KIND_DETAILS: dict[
+    str, tuple[ReportCategory, ReportSeverity, str]
+] = {
+    "font": (
         ReportCategory.FORMATTING,
         ReportSeverity.MEDIUM,
-        "Форматирование шрифта основного текста не соответствует требованию.",
-        "Проверьте гарнитуру и размер шрифта основного текста по методичке.",
+        "Проверьте гарнитуру, кегль и начертание текста по методичке.",
     ),
-    "line_spacing_body": (
-        ReportCategory.FORMATTING,
-        ReportSeverity.MEDIUM,
-        "Межстрочный интервал не соответствует требованию.",
-        "Проверьте межстрочный интервал основного текста по методичке.",
-    ),
-    "indent_first_line": (
+    "indent": (
         ReportCategory.FORMATTING,
         ReportSeverity.LOW,
-        "Абзацный отступ не соответствует требованию.",
         "Проверьте отступ первой строки абзаца в исходном документе.",
     ),
-    "page_margins": (
+    "line_spacing": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Проверьте межстрочный интервал основного текста по методичке.",
+    ),
+    "alignment": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Проверьте выравнивание абзаца по методичке.",
+    ),
+    "margin": (
         ReportCategory.PAGE_LAYOUT,
         ReportSeverity.MEDIUM,
-        "Поля страницы не соответствуют требованию.",
         "Проверьте размеры полей страницы по методичке.",
     ),
     "page_format": (
         ReportCategory.PAGE_LAYOUT,
         ReportSeverity.MEDIUM,
-        "Формат страницы не соответствует требованию.",
         "Проверьте формат страницы по методичке.",
     ),
     "page_number_position": (
         ReportCategory.PAGE_LAYOUT,
         ReportSeverity.LOW,
-        "Номер страницы расположен не в ожидаемой зоне.",
         "Проверьте расположение нумерации страниц по выбранной методичке.",
+    ),
+    "widow_control": (
+        ReportCategory.PAGE_LAYOUT,
+        ReportSeverity.LOW,
+        "Включите контроль висячих строк, чтобы одиночные строки не оставались на соседней странице.",
+    ),
+    "heading_levels": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Приведите иерархию заголовков к непрерывной: старт с первого уровня, без перескоков.",
+    ),
+    "heading_numbering": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Проверьте последовательность и глубину нумерации разделов.",
+    ),
+    "heading_format": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.LOW,
+        "Приведите оформление заголовка к требуемому виду.",
+    ),
+    "keep_next": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.LOW,
+        "Включите неотрывность заголовка от следующего абзаца.",
+    ),
+    "heading_page_break": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Начинайте структурный раздел с новой страницы.",
+    ),
+    "required_sections": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.HIGH,
+        "Добавьте обязательные разделы и расположите их в требуемом порядке.",
+    ),
+    "toc": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Сверьте оглавление с заголовками и нумерацией страниц документа.",
+    ),
+    "document_volume": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Сверьте объём работы с методическими указаниями.",
+    ),
+    "microtypography": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Приведите кавычки, тире и пробелы к типографской норме: «ёлочки», длинное тире, одиночные пробелы.",
+    ),
+    "equation_numbering": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Пронумеруйте вынесенные формулы и проверьте ссылки на них в тексте.",
+    ),
+    "bibliography_count": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.MEDIUM,
+        "Дополните список литературы до требуемого числа источников.",
+    ),
+    "bibliography_order": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.HIGH,
+        "Перенумеруйте источники подряд, без пропусков и повторяющихся номеров.",
+    ),
+    "bibliography_recency": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.LOW,
+        "Добавьте свежие источники: не менее трети списка должны составлять издания последних лет.",
     ),
     "bibliography_link": (
         ReportCategory.BIBLIOGRAPHY,
         ReportSeverity.HIGH,
-        "Ссылка на источник в тексте не соответствует ни одной записи списка литературы.",
         "Проверьте, что ссылка указывает на существующий источник и оформлена по методичке.",
     ),
     "bibliography_cited": (
         ReportCategory.BIBLIOGRAPHY,
         ReportSeverity.MEDIUM,
-        "Источник из списка литературы не цитируется в тексте работы.",
         "Добавьте ссылку на источник в тексте или удалите неиспользуемую запись списка.",
     ),
     "bibliography_format": (
         ReportCategory.BIBLIOGRAPHY,
         ReportSeverity.MEDIUM,
-        "Запись списка литературы оформлена не по требованиям.",
         "Оформите библиографическую запись по образцу из методички.",
     ),
     "caption_numbering": (
         ReportCategory.CAPTIONS,
         ReportSeverity.MEDIUM,
-        "Нумерация подписей рисунков и таблиц нарушена.",
         "Проверьте сквозную нумерацию подписей и устраните дубли, пропуски и нарушения порядка.",
     ),
     "caption_format": (
         ReportCategory.CAPTIONS,
         ReportSeverity.MEDIUM,
-        "Подпись объекта оформлена не по требованиям.",
         "Приведите подпись к требуемому виду: положение, шрифт, завершающие знаки.",
     ),
     "caption_reference": (
         ReportCategory.CAPTIONS,
         ReportSeverity.MEDIUM,
-        "Ссылка на объект в тексте отсутствует или не соответствует подписи.",
         "Добавьте в текст корректную ссылку на рисунок или таблицу.",
-    ),
-    "alignment": (
-        ReportCategory.FORMATTING,
-        ReportSeverity.MEDIUM,
-        "Выравнивание абзаца не соответствует требованию.",
-        "Проверьте выравнивание абзаца по методичке.",
     ),
 }
 
-# резервные категории для семейств правил, которых нет в _RULE_DETAILS:
-# новые правила не должны оставаться без описания, даже если их rule_id
+# резервные категории для семейств правил, которых нет в _KIND_DETAILS:
+# новые правила не должны оставаться без описания, даже если их kind
 # ещё не добавлен в точный маппинг
 _RULE_PREFIX_FALLBACKS: tuple[
-    tuple[str, tuple[ReportCategory, ReportSeverity, str, str]], ...
+    tuple[str, tuple[ReportCategory, ReportSeverity, str]], ...
 ] = (
     (
         "bibliography_",
         (
             ReportCategory.BIBLIOGRAPHY,
             ReportSeverity.MEDIUM,
-            "Нарушение в оформлении ссылок на источники или списка литературы.",
             "Сверьте ссылки и записи списка литературы с требованиями методички.",
         ),
     ),
@@ -243,7 +368,6 @@ _RULE_PREFIX_FALLBACKS: tuple[
         (
             ReportCategory.CAPTIONS,
             ReportSeverity.MEDIUM,
-            "Нарушение в оформлении подписи рисунка или таблицы.",
             "Сверьте оформление и нумерацию подписи с требованиями методички.",
         ),
     ),
@@ -252,8 +376,23 @@ _RULE_PREFIX_FALLBACKS: tuple[
         (
             ReportCategory.FORMATTING,
             ReportSeverity.MEDIUM,
-            "Оформление таблицы не соответствует требованию.",
             "Проверьте шрифт и оформление текста в таблице по методичке.",
+        ),
+    ),
+    (
+        "heading_",
+        (
+            ReportCategory.STRUCTURE,
+            ReportSeverity.MEDIUM,
+            "Сверьте заголовки с требованиями методички.",
+        ),
+    ),
+    (
+        "page_",
+        (
+            ReportCategory.PAGE_LAYOUT,
+            ReportSeverity.MEDIUM,
+            "Сверьте разметку страницы с требованиями методички.",
         ),
     ),
     (
@@ -261,36 +400,78 @@ _RULE_PREFIX_FALLBACKS: tuple[
         (
             ReportCategory.FORMATTING,
             ReportSeverity.MEDIUM,
-            "Шрифт текста не соответствует требованию.",
             "Проверьте гарнитуру, кегль и начертание текста по методичке.",
         ),
     ),
 )
 
+_GROUP_MIN_SIZE = 4
+_GROUP_EXAMPLES_LIMIT = 10
+_GROUP_TYPOGRAPHY_EXAMPLES_LIMIT = 3
+_MICROTYPOGRAPHY_LABELS = {
+    "wrong_quotes": "кавычки",
+    "wrong_dashes": "тире",
+    "multiple_spaces": "лишние пробелы",
+    "space_before_punctuation": "пробел перед знаком препинания",
+    "missing_nbsp": "неразрывные пробелы",
+}
+_MICROTYPOGRAPHY_ORDER = tuple(_MICROTYPOGRAPHY_LABELS)
+_GROUP_EXAMPLE_EXCERPT = 80
+_TABLE_BLOCK_RE = re.compile(r"^tbl_(\d+)_")
 
-def _rule_details(
+_DEFAULT_DETAILS = (
+    ReportCategory.FORMATTING,
+    ReportSeverity.MEDIUM,
+    "Сверьте оформление с выбранной методичкой.",
+)
+
+
+def _kind_details(
+    kind: str,
     rule_id: str,
-) -> Optional[tuple[ReportCategory, ReportSeverity, str, str]]:
-    """находит описание нарушения по rule_id или по префиксу его семейства"""
-    details = _RULE_DETAILS.get(rule_id)
+) -> tuple[ReportCategory, ReportSeverity, str]:
+    """находит категорию, критичность и рекомендацию по kind правила
+
+    Маппинг общий для семейств правил: новое правило с уже известным ``kind``
+    попадает в свою категорию автоматически. Для незнакомого ``kind`` работает
+    резервный поиск по префиксу семейства, чтобы нарушение не осталось без
+    описания.
+    """
+    details = _KIND_DETAILS.get(kind)
     if details is not None:
         return details
-    for known_id, known_details in _RULE_DETAILS.items():
-        if rule_id.startswith(f"{known_id}_"):
-            return known_details
     for prefix, fallback_details in _RULE_PREFIX_FALLBACKS:
-        if rule_id.startswith(prefix):
+        if kind.startswith(prefix) or rule_id.startswith(prefix):
             return fallback_details
-    return None
+    return _DEFAULT_DETAILS
+
+
+def _engine_description(violation: RuleViolation) -> str:
+    """собирает описание нарушения движка из сообщения правила и ожиданий"""
+    parts = [violation.message.strip().rstrip(".")]
+    expected = violation.expected_text.strip().rstrip(".")
+    found = violation.found_text.strip().rstrip(".")
+    if expected:
+        parts.append(f"Ожидалось: {expected}")
+    if found:
+        parts.append(f"Обнаружено: {found}")
+    return ". ".join(parts) + "."
 
 
 def build_violation_report(
     document: ParsedDocxDocument,
-    rule_assessments: Iterable[RuleAssessment] = (),
+    rule_report: Optional[RuleCheckReport] = None,
     *,
     generated_at: Optional[datetime] = None,
 ) -> ViolationReport:
-    """преобразует аномалии парсера и нарушения движка правил в отчёт"""
+    """преобразует аномалии парсера и нарушения движка правил в отчёт.
+
+    Каждое нарушение ``RuleCheckReport`` попадает в отчёт с адресом (блок,
+    страница, фрагмент текста). Однотипные находки одного правила (четыре и
+    более) сворачиваются в одну запись с полным списком адресов в ``locations``;
+    ``summary`` при этом считает исходные находки, а не записи. Оценки правил
+    нужны только для сводки покрытия ``pass``/``not_assessed``.
+    """
     violations: list[Violation] = []
     blocks = _index_blocks(document.blocks)
 
@@ -305,13 +486,14 @@ def build_violation_report(
         page: Optional[int] = None,
         excerpt: Optional[str] = None,
         source: str = "parser",
+        location: Optional[ViolationLocation] = None,
     ) -> None:
         violations.append(
             Violation(
                 id=violation_id,
                 category=category,
                 severity=severity,
-                location=_location(blocks, block_id, page, excerpt),
+                location=location or _location(blocks, block_id, page, excerpt),
                 description=description,
                 recommendation=recommendation,
                 source=source,
@@ -471,32 +653,279 @@ def build_violation_report(
             source="parser",
         )
 
-    for finding in rule_assessments:
-        if finding.status != "fail":
-            continue
-        details = _rule_details(finding.rule_id)
-        if details is None:
-            category, severity = ReportCategory.FORMATTING, ReportSeverity.MEDIUM
-            description = f"Не выполнено требование оформления: {finding.rule_id}."
-            recommendation = "Сверьте оформление с выбранной методичкой."
-        else:
-            category, severity, description, recommendation = details
-        add(
-            f"pdf:{finding.rule_id}",
-            category,
-            severity,
-            (
-                f"{description} Ожидалось: {finding.expected_text}. "
-                f"Обнаружено: {finding.observed_text}."
-            ),
-            recommendation,
-            source="rule_engine",
-        )
+    assessments: list[RuleAssessment] = []
+    if rule_report is not None:
+        assessments = list(rule_report.assessments)
+        engine_violations = [
+            _build_rule_violation(blocks, rule_violation)
+            for rule_violation in rule_report.violations
+        ]
+        violations.extend(_group_rule_violations(engine_violations))
 
     return _create_report(
         document.meta.filename,
         violations,
         generated_at or datetime.now(timezone.utc),
+        _build_coverage(assessments),
+    )
+
+
+def _build_rule_violation(
+    blocks: dict[str, BlockUnion],
+    rule_violation: RuleViolation,
+) -> Violation:
+    """создаёт запись отчёта для одного нарушения движка"""
+    category, severity, recommendation = _kind_details(
+        rule_violation.kind, rule_violation.rule_id
+    )
+    found = {}
+    if rule_violation.kind == "microtypography":
+        found = {
+            key: value
+            for key, value in rule_violation.found.items()
+            if isinstance(value, int) and value > 0
+        }
+    return Violation(
+        id=rule_violation.violation_id,
+        rule_id=rule_violation.rule_id,
+        occurrences=rule_violation.occurrences,
+        found=found,
+        category=category,
+        severity=severity,
+        location=_engine_location(blocks, rule_violation),
+        description=_engine_description(rule_violation),
+        recommendation=recommendation,
+        source="rule_engine",
+    )
+
+
+def _group_rule_violations(violations: list[Violation]) -> list[Violation]:
+    """сворачивает однотипные нарушения одного правила в одну запись.
+
+    Группировка — только представление: ``count`` хранит число исходных
+    находок, ``locations`` — их полный список. Правила с числом находок
+    меньше ``_GROUP_MIN_SIZE`` остаются отдельными записями, чтобы одиночные
+    замечания не терялись в сводке.
+    """
+    by_rule: dict[str, list[Violation]] = {}
+    order: list[str] = []
+    for violation in violations:
+        rule_id = violation.rule_id or violation.id
+        if rule_id not in by_rule:
+            by_rule[rule_id] = []
+            order.append(rule_id)
+        by_rule[rule_id].append(violation)
+
+    result: list[Violation] = []
+    for rule_id in order:
+        items = by_rule[rule_id]
+        if len(items) >= _GROUP_MIN_SIZE:
+            result.append(_merge_rule_group(rule_id, items))
+        else:
+            result.extend(items)
+    return result
+
+
+def _microtypography_summary(found: dict[str, int]) -> str:
+    """печатает суммы подтипов микротипографики в устойчивом порядке"""
+    parts = [
+        f"{_MICROTYPOGRAPHY_LABELS[key]} {found[key]}"
+        for key in _MICROTYPOGRAPHY_ORDER
+        if found.get(key, 0) > 0
+    ]
+    known = set(_MICROTYPOGRAPHY_ORDER)
+    parts.extend(
+        f"{key} {found[key]}"
+        for key in sorted(found)
+        if key not in known and isinstance(found[key], int) and found[key] > 0
+    )
+    return ", ".join(parts)
+
+
+def _microtypography_span_example(found_text: str) -> Optional[str]:
+    """извлекает первый span-пример из текста находки микротипографики.
+
+    Чекер печатает примеры в конце ``found_text`` как ``(фрагмент; фрагмент)``;
+    это реальные куски текста с ошибкой, в отличие от начала абзаца в location.
+    """
+    text = (found_text or "").rstrip()
+    if not text.endswith(")"):
+        return None
+    start = text.rfind(" (")
+    if start < 0:
+        return None
+    first = text[start + 2 : -1].split("; ", 1)[0].strip()
+    return first or None
+
+
+def _merge_rule_group(rule_id: str, items: list[Violation]) -> Violation:
+    """собирает группу однотипных нарушений с полным списком адресов"""
+    first = items[0]
+    occurrences = sum(item.occurrences for item in items)
+    found: dict[str, int] = {}
+    if first.found:
+        for item in items:
+            for key, value in item.found.items():
+                if isinstance(value, int):
+                    found[key] = found.get(key, 0) + value
+    description = (
+        f"{first.description} Всего однотипных нарушений: {len(items)}."
+    )
+    subtype_summary = _microtypography_summary(found)
+    if subtype_summary:
+        base = first.description.split(". Обнаружено:", 1)[0].rstrip().rstrip(".")
+        description = (
+            f"{base}. Обнаружено: {subtype_summary}. "
+            f"Всего однотипных нарушений: {len(items)}."
+        )
+    return first.model_copy(
+        update={
+            "id": f"group:{rule_id}",
+            "count": len(items),
+            "occurrences": occurrences,
+            "found": found,
+            "locations": [item.location for item in items],
+            "description": description,
+        }
+    )
+
+
+def _table_numbers(locations: Iterable[ViolationLocation]) -> list[int]:
+    """извлекает номера таблиц из block_id вида ``tbl_0001_r0_c0_p0``"""
+    numbers = {
+        int(match.group(1))
+        for location in locations
+        if (match := _TABLE_BLOCK_RE.match(location.block_id or ""))
+    }
+    return sorted(numbers)
+
+
+def _compact_number_ranges(numbers: list[int]) -> str:
+    """сжимает последовательность номеров в диапазоны: 1, 3–6"""
+    parts: list[str] = []
+    start = previous = numbers[0]
+    for number in numbers[1:]:
+        if number == previous + 1:
+            previous = number
+            continue
+        parts.append(str(start) if start == previous else f"{start}–{previous}")
+        start = previous = number
+    parts.append(str(start) if start == previous else f"{start}–{previous}")
+    return ", ".join(parts)
+
+
+def _table_range_label(locations: Iterable[ViolationLocation]) -> Optional[str]:
+    """подпись с номерами таблиц, к которым относятся адреса группы"""
+    numbers = _table_numbers(locations)
+    if not numbers:
+        return None
+    if len(numbers) == 1:
+        return f"таблица {numbers[0]}"
+    return f"таблицы {_compact_number_ranges(numbers)}"
+
+
+def _format_group_example(location: ViolationLocation) -> str:
+    """форматирует один адрес группы для строки примеров в Markdown"""
+    if location.block_id:
+        example = location.block_id
+        if location.page_start is not None:
+            example += f" (стр. {location.page_start})"
+    elif location.section_idx is not None:
+        example = f"секция {location.section_idx}"
+    elif location.page_start is not None:
+        example = f"стр. {location.page_start}"
+    else:
+        example = "весь документ"
+    if location.text_excerpt:
+        excerpt = location.text_excerpt
+        if len(excerpt) > _GROUP_EXAMPLE_EXCERPT:
+            excerpt = f"{excerpt[: _GROUP_EXAMPLE_EXCERPT - 3]}..."
+        example += f": «{_escape_markdown(excerpt)}»"
+    return example
+
+
+def _format_grouped_violation(violation: Violation) -> list[str]:
+    """формирует компактную Markdown-запись для группы однотипных нарушений"""
+    limit = (
+        _GROUP_TYPOGRAPHY_EXAMPLES_LIMIT
+        if violation.found
+        else _GROUP_EXAMPLES_LIMIT
+    )
+    examples = violation.locations[:limit]
+    example_text = "; ".join(_format_group_example(item) for item in examples)
+    if len(violation.locations) > limit:
+        example_text += f"; … и ещё {len(violation.locations) - limit}"
+    table_label = _table_range_label(violation.locations)
+    subtype_summary = _microtypography_summary(violation.found)
+    details = [item for item in (table_label, subtype_summary) if item]
+    summary = f"{violation.rule_id} — {violation.count} нарушений"
+    if details:
+        summary += f" ({', '.join(details)})"
+    if example_text:
+        summary += f", напр. {example_text}"
+    return [
+        "",
+        (
+            f"### [{violation.severity.value.upper()}] "
+            f"{_escape_markdown(violation.rule_id or violation.id)}"
+        ),
+        f"- {summary}",
+        f"- Рекомендация: {_escape_markdown(violation.recommendation)}",
+    ]
+
+
+def _engine_location(
+    blocks: dict[str, BlockUnion],
+    rule_violation: RuleViolation,
+) -> ViolationLocation:
+    """переносит адрес нарушения движка в модель адреса отчёта"""
+    source = rule_violation.location
+    excerpt = source.snippet or None
+    if rule_violation.kind == "microtypography":
+        excerpt = _microtypography_span_example(rule_violation.found_text) or excerpt
+    location = _location(
+        blocks,
+        source.block_id,
+        source.page_start_est,
+        excerpt,
+    )
+    page_end = source.page_end_est or location.page_end
+    if source.block_id is not None:
+        scope = "block"
+    elif location.page_start is not None:
+        scope = "page"
+    elif source.section_idx is not None:
+        scope = "section"
+    else:
+        scope = "document"
+    return location.model_copy(
+        update={
+            "page_end": page_end,
+            "section_idx": source.section_idx,
+            "scope": scope,
+        }
+    )
+
+
+def _build_coverage(assessments: Iterable[RuleAssessment]) -> ReportCoverage:
+    """считает покрытие правил по оценкам движка"""
+    items = list(assessments)
+    status_counts = Counter(item.status for item in items)
+    return ReportCoverage(
+        rules_assessed=len(items),
+        passed=status_counts["pass"],
+        failed=status_counts["fail"],
+        not_assessed=status_counts["not_assessed"],
+        not_assessed_rules=[
+            NotAssessedRule(
+                rule_id=item.rule_id,
+                kind=item.kind,
+                observed_text=item.observed_text,
+                confidence=item.confidence,
+            )
+            for item in items
+            if item.status == "not_assessed"
+        ],
     )
 
 
@@ -601,6 +1030,7 @@ def _create_report(
     document_name: str,
     violations: list[Violation],
     generated_at: datetime,
+    coverage: ReportCoverage,
 ) -> ViolationReport:
     """группирует нарушения и рассчитывает сводные показатели"""
     grouped: dict[ReportCategory, list[Violation]] = {}
@@ -614,17 +1044,21 @@ def _create_report(
         )
         for category, items in grouped.items()
     ]
-    severity_counts = Counter(item.severity for item in violations)
+    severity_counts: Counter[ReportSeverity] = Counter()
+    for item in violations:
+        severity_counts[item.severity] += item.count
+    total_violations = sum(item.count for item in violations)
     return ViolationReport(
         document_name=document_name,
         generated_at=generated_at,
         summary=ViolationSummary(
-            total_violations=len(violations),
+            total_violations=total_violations,
             critical=severity_counts[ReportSeverity.CRITICAL],
             high=severity_counts[ReportSeverity.HIGH],
             medium=severity_counts[ReportSeverity.MEDIUM],
             low=severity_counts[ReportSeverity.LOW],
         ),
+        coverage=coverage,
         groups=groups,
     )
 
@@ -683,7 +1117,11 @@ def _category_title(category: ReportCategory) -> str:
 
 def _format_location(location: ViolationLocation) -> str:
     """форматирует место нарушения для вывода в Markdown"""
-    if location.scope == "document":
+    if (
+        location.scope == "document"
+        and location.page_start is None
+        and not location.text_excerpt
+    ):
         return "весь документ"
     parts = []
     if location.page_start is not None:
@@ -693,6 +1131,8 @@ def _format_location(location: ViolationLocation) -> str:
             parts.append(f"стр. {location.page_start}")
     if location.block_id:
         parts.append(f"блок `{_escape_markdown(location.block_id)}`")
+    if location.section_idx is not None:
+        parts.append(f"секция {location.section_idx}")
     if location.text_excerpt:
         parts.append(f"«{_escape_markdown(location.text_excerpt)}»")
     return ", ".join(parts) or "место не определено парсером"
