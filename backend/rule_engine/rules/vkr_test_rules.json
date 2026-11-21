@@ -1,7 +1,7 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "2.3.0",
-  "description": "Тестовый набор ВКР: шрифт, отступ и выравнивание основного текста, межстрочный интервал, поля, формат и номер страницы, висячие строки, заголовки (уровни, нумерация, шрифт, регистр, неотрывность, новая страница), объём работы, разделы и оглавление, ссылки и список литературы, подписи рисунков и таблиц, выравнивание и шрифт в таблицах",
+  "ruleset_version": "2.4.0",
+  "description": "Штатный набор нормоконтроля ВКР: основной текст (шрифт, отступ, интервал, выравнивание, микротипографика), поля, нумерация и формат страниц, заголовки и структура, объём работы, формулы, список литературы (ссылки, цитирование, количество, порядок и свежесть источников), подписи рисунков, таблиц и приложений, шрифт ячеек таблиц.",
   "rules": [
     {
       "rule_id": "font_body_text",
@@ -57,6 +57,39 @@
       "expected": {
         "ratio": 1.5,
         "tolerance": 0.25
+      }
+    },
+    {
+      "rule_id": "microtypography_prose",
+      "kind": "microtypography",
+      "severity": "warning",
+      "message": "В тексте используются кавычки-ёлочки, тире и одиночные пробелы",
+      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "target": {
+        "scope": "body_paragraphs"
+      },
+      "expected": {
+        "checks": [
+          "wrong_quotes",
+          "wrong_dashes",
+          "multiple_spaces",
+          "space_before_punctuation"
+        ]
+      }
+    },
+    {
+      "rule_id": "microtypography_nbsp",
+      "kind": "microtypography",
+      "severity": "info",
+      "message": "Неразрывные пробелы расставлены в ссылках на рисунки и таблицы, инициалах и единицах измерения",
+      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "target": {
+        "scope": "body_paragraphs"
+      },
+      "expected": {
+        "checks": [
+          "missing_nbsp"
+        ]
       }
     },
     {
@@ -127,7 +160,11 @@
       "requirement_ref": "Методические указания, требования к заголовкам",
       "target": {
         "scope": "headings",
-        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+        "exclude_roles": [
+          "title_page",
+          "task_sheet",
+          "appendix"
+        ]
       },
       "expected": {
         "first_level": 1,
@@ -143,14 +180,21 @@
       "requirement_ref": "Методические указания, требования к нумерации разделов",
       "target": {
         "scope": "headings",
-        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+        "exclude_roles": [
+          "title_page",
+          "task_sheet",
+          "appendix"
+        ]
       },
       "expected": {
         "check_sequence": true,
         "check_parent_number": true,
         "check_depth_matches_level": true,
         "number_ending": "any",
-        "require_number_for_roles": ["main_chapter", "sub_section"]
+        "require_number_for_roles": [
+          "main_chapter",
+          "sub_section"
+        ]
       }
     },
     {
@@ -161,7 +205,11 @@
       "requirement_ref": "Методические указания, требования к оформлению заголовков",
       "target": {
         "scope": "headings",
-        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+        "exclude_roles": [
+          "title_page",
+          "task_sheet",
+          "appendix"
+        ]
       },
       "expected": {
         "trailing_dot": "forbid"
@@ -175,7 +223,10 @@
       "requirement_ref": "Методические указания, требования к оформлению заголовков",
       "target": {
         "scope": "headings",
-        "exclude_roles": ["title_page", "task_sheet"]
+        "exclude_roles": [
+          "title_page",
+          "task_sheet"
+        ]
       },
       "expected": {
         "font": {
@@ -193,7 +244,11 @@
       "requirement_ref": "Методические указания, требования к оформлению заголовков",
       "target": {
         "scope": "headings",
-        "exclude_roles": ["title_page", "task_sheet", "appendix"]
+        "exclude_roles": [
+          "title_page",
+          "task_sheet",
+          "appendix"
+        ]
       },
       "expected": {
         "alignment": "center"
@@ -209,7 +264,13 @@
         "scope": "headings"
       },
       "expected": {
-        "roles": ["main_chapter", "introduction", "conclusion", "bibliography", "appendix"]
+        "roles": [
+          "main_chapter",
+          "introduction",
+          "conclusion",
+          "bibliography",
+          "appendix"
+        ]
       }
     },
     {
@@ -223,7 +284,10 @@
       },
       "expected": {
         "enabled": true,
-        "roles": ["main_chapter", "sub_section"]
+        "roles": [
+          "main_chapter",
+          "sub_section"
+        ]
       }
     },
     {
@@ -234,14 +298,19 @@
       "requirement_ref": "Методические указания, требования к структуре работы",
       "target": {
         "scope": "document_structure",
-        "exclude_roles": ["title_page", "task_sheet"]
+        "exclude_roles": [
+          "title_page",
+          "task_sheet"
+        ]
       },
       "expected": {
         "sections": [
           {
             "label": "введение",
             "role": "introduction",
-            "titles": ["ВВЕДЕНИЕ"],
+            "titles": [
+              "ВВЕДЕНИЕ"
+            ],
             "required": true
           },
           {
@@ -252,7 +321,9 @@
           {
             "label": "заключение",
             "role": "conclusion",
-            "titles": ["ЗАКЛЮЧЕНИЕ"],
+            "titles": [
+              "ЗАКЛЮЧЕНИЕ"
+            ],
             "required": true
           },
           {
@@ -263,7 +334,10 @@
           {
             "label": "приложения",
             "role": "appendix",
-            "titles": ["ПРИЛОЖЕНИЕ", "ПРИЛОЖЕНИЯ"],
+            "titles": [
+              "ПРИЛОЖЕНИЕ",
+              "ПРИЛОЖЕНИЯ"
+            ],
             "required": false
           }
         ]
@@ -291,7 +365,9 @@
           {
             "label": "введение",
             "role": "introduction",
-            "titles": ["ВВЕДЕНИЕ"]
+            "titles": [
+              "ВВЕДЕНИЕ"
+            ]
           },
           {
             "label": "раздел",
@@ -304,7 +380,9 @@
           {
             "label": "заключение",
             "role": "conclusion",
-            "titles": ["ЗАКЛЮЧЕНИЕ"]
+            "titles": [
+              "ЗАКЛЮЧЕНИЕ"
+            ]
           },
           {
             "label": "список литературы",
@@ -327,6 +405,19 @@
         "max_pages": 90,
         "min_words": 8000,
         "max_words": 18000
+      }
+    },
+    {
+      "rule_id": "equation_numbering",
+      "kind": "equation_numbering",
+      "severity": "warning",
+      "message": "Вынесенные формулы пронумерованы",
+      "requirement_ref": "Методические указания, требования к оформлению формул",
+      "target": {
+        "scope": "document"
+      },
+      "expected": {
+        "require_numbering": true
       }
     },
     {
@@ -356,6 +447,49 @@
       }
     },
     {
+      "rule_id": "bibliography_count",
+      "kind": "bibliography_count",
+      "severity": "warning",
+      "message": "Список литературы содержит не менее 20 источников",
+      "requirement_ref": "Методические указания, требования к списку литературы",
+      "target": {
+        "scope": "bibliography"
+      },
+      "expected": {
+        "min_sources": 20
+      }
+    },
+    {
+      "rule_id": "bibliography_order",
+      "kind": "bibliography_order",
+      "severity": "error",
+      "message": "Источники в списке литературы пронумерованы подряд",
+      "requirement_ref": "Методические указания, требования к списку литературы",
+      "target": {
+        "scope": "bibliography"
+      },
+      "expected": {
+        "start_at": 1,
+        "allow_gaps": false,
+        "allow_duplicates": false
+      }
+    },
+    {
+      "rule_id": "bibliography_recency",
+      "kind": "bibliography_recency",
+      "severity": "warning",
+      "message": "Среди источников не менее 30% изданы за последние 5 лет",
+      "requirement_ref": "Методические указания, требования к списку литературы",
+      "target": {
+        "scope": "bibliography"
+      },
+      "expected": {
+        "min_recent_share": 0.3,
+        "recent_years": 5,
+        "min_year_coverage": 0.5
+      }
+    },
+    {
       "rule_id": "bibliography_format_electronic",
       "kind": "bibliography_format",
       "severity": "error",
@@ -365,7 +499,9 @@
         "scope": "bibliography"
       },
       "expected": {
-        "categories": ["electronic_resource"],
+        "categories": [
+          "electronic_resource"
+        ],
         "require_url": true,
         "require_access_date": true
       }
@@ -380,7 +516,9 @@
         "scope": "bibliography"
       },
       "expected": {
-        "categories": ["journal_article"],
+        "categories": [
+          "journal_article"
+        ],
         "require_double_slash": true
       }
     },

@@ -192,9 +192,39 @@ STRUCTURE_RULE_NOISE_BASELINE_BY_RULE: Dict[str, int] = {
     "document_volume": 6,
 }
 
+#: Контентные проверки, добавленные в штатный набор 2.4.0 (t6):
+#: микротипографика, нумерация формул, количество, порядок и свежесть
+#: источников. Микротипографика агрегирована по абзацам и отфильтровывает
+#: код, имена продуктов и английские апострофы; PDF не оценивается.
+CONTENT_RULE_IDS: frozenset = frozenset(
+    {
+        "microtypography_prose",
+        "microtypography_nbsp",
+        "equation_numbering",
+        "bibliography_count",
+        "bibliography_order",
+        "bibliography_recency",
+    }
+)
+
+#: Первый замер контентных правил на корпусе (t6, набор 2.4.0): микротипографика
+#: прозы 88 абзацев (Бикчуркина 4, Бутаков 70, Прокси 14), неразрывные пробелы
+#: 104 абзаца (15 + 79 + 10), количество источников 2 (Бикчуркина 16, Смолина 19),
+#: нумерация формул, порядок и свежесть — 0 (в корпусе нет нумеруемых формул,
+#: все списки пронумерованы подряд, свежесть в норме). Числа детерминированы.
+CONTENT_RULE_NOISE_BASELINE = 144
+CONTENT_RULE_NOISE_BASELINE_BY_RULE: Dict[str, int] = {
+    "microtypography_prose": 55,
+    "microtypography_nbsp": 87,
+    "equation_numbering": 0,
+    "bibliography_count": 2,
+    "bibliography_order": 0,
+    "bibliography_recency": 0,
+}
+
 #: Бюджеты шума: не больше 20 % прежних текстовых нарушений и меньше 900 всего
 #: (492 нарушения набора 2.1.0 + 239 базовых правил 2.2.0 + 68 структурных
-#: правил 2.3.0).
+#: правил 2.3.0 + 144 контентных правил 2.4.0).
 FONT_INDENT_BUDGET_SHARE = 0.20
 TOTAL_NOISE_BUDGET = 900
 
@@ -733,6 +763,7 @@ def test_basic_rules_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> Non
         f"{sorted(BASIC_RULE_IDS - applied)}"
     )
 
+
 def _structure_rule_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
     """Считает нарушения структурных проверок по правилам."""
     counts: Dict[str, int] = {
@@ -773,4 +804,45 @@ def test_structure_rules_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) ->
     assert STRUCTURE_RULE_IDS <= applied, (
         "структурные проверки пропали из штатного набора: "
         f"{sorted(STRUCTURE_RULE_IDS - applied)}"
+    )
+
+def _content_rule_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
+    """Считает нарушения контентных проверок по правилам."""
+    counts: Dict[str, int] = {
+        rule_id: 0 for rule_id in CONTENT_RULE_NOISE_BASELINE_BY_RULE
+    }
+    for doc in corpus.values():
+        for violation in doc.report.violations:
+            if violation.rule_id in CONTENT_RULE_IDS:
+                counts[violation.rule_id] += 1
+    return counts
+
+
+@requires_corpus
+def test_content_rules_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> None:
+    """Контентные проверки не шумят сверх первого замера на корпусе.
+
+    Набор 2.4.0 (t6) добавил микротипографику, нумерацию формул и проверки
+    списка литературы. Первый замер: 88 абзацев с типографикой прозы, 104 без
+    неразрывных пробелов, 2 списка короче 20 источников; формул, нарушений
+    порядка и свежести на корпусе нет. Все находки — реальные дефекты набора:
+    прямые кавычки, дефис вместо тире, лишние пробелы, пробел перед двоеточием
+    и отсутствие неразрывных пробелов в ссылках и инициалах.
+    """
+    counts = _content_rule_counts(corpus)
+    total = sum(counts.values())
+
+    for rule_id, baseline in CONTENT_RULE_NOISE_BASELINE_BY_RULE.items():
+        assert counts[rule_id] <= baseline, (
+            f"{rule_id}: нарушений {counts[rule_id]} при первом замере {baseline}"
+        )
+    assert total <= CONTENT_RULE_NOISE_BASELINE, (
+        f"нарушений контентных правил {total} при первом замере "
+        f"{CONTENT_RULE_NOISE_BASELINE}"
+    )
+
+    applied = {rule.rule_id for rule in load_default_ruleset().rules}
+    assert CONTENT_RULE_IDS <= applied, (
+        "контентные проверки пропали из штатного набора: "
+        f"{sorted(CONTENT_RULE_IDS - applied)}"
     )

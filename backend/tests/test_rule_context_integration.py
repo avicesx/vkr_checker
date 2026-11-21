@@ -94,7 +94,7 @@ SECTION_BODY: Dict[str, Tuple[str, ...]] = {
         "В ходе работы разработана информационная система учёта заявок.",
     ),
     "СПИСОК ЛИТЕРАТУРЫ": (
-        "Иванов И. И. Проектирование информационных систем. Москва: Юрайт, 2023. 320 с.",
+        "Иванов Иван. Проектирование информационных систем. Москва: Юрайт, 2023. 320 с.",
     ),
     "ПРИЛОЖЕНИЕ А": (
         "Ниже приведён фрагмент контроллера системы учёта заявок.",
@@ -469,7 +469,7 @@ def test_heading_and_toc_rules_are_not_regressed(
     """Правила заголовков, оглавления и разделов отрабатывают без нарушений."""
     report = RuleEngine(load_default_ruleset()).check(vkr_document)
 
-    assert report.summary.rules_applied == 31
+    assert report.summary.rules_applied == 37
     for rule_id in (
         "page_margins",
         "heading_levels",

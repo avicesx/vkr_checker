@@ -269,6 +269,31 @@ _KIND_DETAILS: dict[
         ReportSeverity.MEDIUM,
         "Сверьте объём работы с методическими указаниями.",
     ),
+    "microtypography": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Приведите кавычки, тире и пробелы к типографской норме: «ёлочки», длинное тире, одиночные пробелы.",
+    ),
+    "equation_numbering": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Пронумеруйте вынесенные формулы и проверьте ссылки на них в тексте.",
+    ),
+    "bibliography_count": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.MEDIUM,
+        "Дополните список литературы до требуемого числа источников.",
+    ),
+    "bibliography_order": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.HIGH,
+        "Перенумеруйте источники подряд, без пропусков и повторяющихся номеров.",
+    ),
+    "bibliography_recency": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.LOW,
+        "Добавьте свежие источники: не менее трети списка должны составлять издания последних лет.",
+    ),
     "bibliography_link": (
         ReportCategory.BIBLIOGRAPHY,
         ReportSeverity.HIGH,

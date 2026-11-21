@@ -1,6 +1,7 @@
 """Семейство списка литературы: ссылки, цитирование, формат записи."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Dict, List, Set, Tuple
 
 from ..findings import (
@@ -10,13 +11,17 @@ from ..findings import (
 )
 from ..rules import (
     BibliographyCitedRule,
+    BibliographyCountRule,
     BibliographyFormatRule,
     BibliographyLinkRule,
+    BibliographyOrderRule,
+    BibliographyRecencyRule,
 )
 from .builders import (
     _build_assessment,
     _build_violation,
     _collapse_text,
+    _counted_assessment,
 )
 from .common import (
     _mention_targets_text,
@@ -428,3 +433,258 @@ def _check_bibliography_format_rule(
             },
         ),
     )
+
+
+def _bibliography_summary_location(entries: List[BibliographyEntry]) -> ViolationLocation:
+    """Строит локацию нарушения, относящегося ко всему списку литературы."""
+    first = entries[0] if entries else None
+    return ViolationLocation(
+        block_id=first.block_id if first is not None else None,
+        snippet=f"список литературы: {len(entries)} записей",
+    )
+
+
+def _check_bibliography_count_rule(
+    rule: BibliographyCountRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Проверяет количество источников в списке литературы.
+
+    Считаются все разобранные записи списка: методические указания задают
+    нижнюю границу, а верхняя обычно не ограничена. Пустой список — это не
+    «ноль источников и нарушение», а отсутствие измерения: правило не
+    оценивается, потому что список мог не распознаться.
+    """
+    index = document.cross_ref_index
+    entries = list(index.bibliography) if index is not None else []
+    expected = rule.expected
+    expected_text = (
+        f"источников не меньше {expected.min_sources}"
+        if expected.max_sources is None
+        else f"источников от {expected.min_sources} до {expected.max_sources}"
+    )
+    if not entries:
+        return ([], 0, _counted_assessment(
+            rule,
+            [],
+            0,
+            expected_text=expected_text,
+            confidence="medium",
+            empty_observed="список литературы не найден",
+        ))
+
+    count = len(entries)
+    violations: List[Violation] = []
+    if expected.min_sources is not None and count < expected.min_sources:
+        violations.append(
+            _build_violation(
+                rule,
+                address="bibliography",
+                location=_bibliography_summary_location(entries),
+                expected={"min_sources": expected.min_sources},
+                found={"sources": count},
+                expected_text=expected_text,
+                found_text=f"источников в списке: {count}",
+                occurrences=expected.min_sources - count,
+                confidence="high",
+            )
+        )
+    if expected.max_sources is not None and count > expected.max_sources:
+        violations.append(
+            _build_violation(
+                rule,
+                address="bibliography",
+                location=_bibliography_summary_location(entries),
+                expected={"max_sources": expected.max_sources},
+                found={"sources": count},
+                expected_text=expected_text,
+                found_text=f"источников в списке: {count}",
+                occurrences=count - expected.max_sources,
+                confidence="high",
+            )
+        )
+
+    assessment = _counted_assessment(
+        rule,
+        violations,
+        count,
+        expected_text=expected_text,
+        confidence="high",
+        empty_observed="список литературы не найден",
+        details={
+            "sources": count,
+            "min_sources": expected.min_sources,
+            "max_sources": expected.max_sources,
+        },
+    )
+    return violations, count, assessment
+
+
+def _check_bibliography_order_rule(
+    rule: BibliographyOrderRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Проверяет сквозную нумерацию списка литературы.
+
+    Номера записей обязаны идти подряд от ``start_at``: на них ссылается текст.
+    Пропуск, повтор или сдвиг нумерации дают нарушение с локацией конкретной
+    записи. Пустой список не оценивается — нумеровать нечего.
+    """
+    index = document.cross_ref_index
+    entries = list(index.bibliography) if index is not None else []
+    expected = rule.expected
+    expected_text = f"записи пронумерованы подряд от {expected.start_at}"
+    if not entries:
+        return ([], 0, _counted_assessment(
+            rule,
+            [],
+            0,
+            expected_text=expected_text,
+            confidence="medium",
+            empty_observed="список литературы не найден",
+        ))
+
+    blocks = _paragraph_index(document)
+    violations: List[Violation] = []
+    seen: Set[int] = set()
+    expected_number = expected.start_at
+    for entry in entries:
+        actual = entry.order_index
+        duplicate = actual in seen
+        mismatch = actual != expected_number
+        if (duplicate and not expected.allow_duplicates) or (
+            mismatch and not expected.allow_gaps
+        ):
+            reason = "повтор номера" if duplicate else "нарушен порядок нумерации"
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=entry.bib_id,
+                    location=_bibliography_location(entry, blocks),
+                    expected={"order_index": expected_number},
+                    found={
+                        "order_index": actual,
+                        "duplicate": duplicate,
+                        "reason": reason,
+                    },
+                    expected_text=expected_text,
+                    found_text=f"номер записи: {actual} ({reason})",
+                    confidence="high",
+                )
+            )
+        seen.add(actual)
+        expected_number += 1
+
+    assessment = _counted_assessment(
+        rule,
+        violations,
+        len(entries),
+        expected_text=expected_text,
+        confidence="high",
+        empty_observed="список литературы не найден",
+        details={"sources": len(entries), "start_at": expected.start_at},
+    )
+    return violations, len(entries), assessment
+
+
+def _check_bibliography_recency_rule(
+    rule: BibliographyRecencyRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Проверяет долю свежих источников в списке литературы.
+
+    Год записи разобран не у всех источников, поэтому сначала проверяется
+    покрытие годами: если оно ниже порога, свежесть не оценивается. Иначе
+    считается доля записей не старше ``recent_years`` лет от года отсчёта и
+    сравнивается с ``min_recent_share``; нарушение одно на список, потому что
+    претензия относится к подбору литературы в целом.
+    """
+    index = document.cross_ref_index
+    entries = list(index.bibliography) if index is not None else []
+    expected = rule.expected
+    reference_year = expected.reference_year or date.today().year
+    threshold_year = reference_year - expected.recent_years
+    expected_text = (
+        f"не менее {expected.min_recent_share:.0%} источников не старше "
+        f"{expected.recent_years} лет (с {threshold_year} года)"
+    )
+    if not entries:
+        return ([], 0, _counted_assessment(
+            rule,
+            [],
+            0,
+            expected_text=expected_text,
+            confidence="medium",
+            empty_observed="список литературы не найден",
+        ))
+
+    years = [entry.year_extracted for entry in entries if entry.year_extracted is not None]
+    coverage = len(years) / len(entries)
+    if coverage < expected.min_year_coverage:
+        return ([], 0, _counted_assessment(
+            rule,
+            [],
+            0,
+            expected_text=expected_text,
+            confidence="low",
+            empty_observed="год издания определён у слишком малой доли источников",
+            details={
+                "sources": len(entries),
+                "years_known": len(years),
+                "year_coverage": round(coverage, 3),
+            },
+            note=(
+                "свежесть источников не оценена: парсер определил год только у "
+                f"{len(years)} из {len(entries)} записей"
+            ),
+        ))
+
+    recent = [year for year in years if year >= threshold_year]
+    share = len(recent) / len(years)
+    violations: List[Violation] = []
+    if share < expected.min_recent_share:
+        violations.append(
+            _build_violation(
+                rule,
+                address="bibliography",
+                location=_bibliography_summary_location(entries),
+                expected={
+                    "min_recent_share": expected.min_recent_share,
+                    "recent_years": expected.recent_years,
+                    "reference_year": reference_year,
+                },
+                found={
+                    "recent_share": round(share, 3),
+                    "recent_sources": len(recent),
+                    "years_known": len(years),
+                    "threshold_year": threshold_year,
+                },
+                expected_text=expected_text,
+                found_text=(
+                    f"свежих источников: {len(recent)} из {len(years)} "
+                    f"({share:.0%})"
+                ),
+                occurrences=len(years) - len(recent),
+                confidence="medium",
+            )
+        )
+
+    assessment = _counted_assessment(
+        rule,
+        violations,
+        len(years),
+        expected_text=expected_text,
+        confidence="medium",
+        empty_observed="год издания не определён ни у одной записи",
+        details={
+            "sources": len(entries),
+            "years_known": len(years),
+            "recent_sources": len(recent),
+            "recent_share": round(share, 3),
+            "threshold_year": threshold_year,
+        },
+    )
+    return violations, len(years), assessment

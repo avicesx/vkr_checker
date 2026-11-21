@@ -14,12 +14,16 @@ from rule_engine import (
     DEFAULT_RULESET_PATH,
     AlignmentRule,
     BibliographyCitedRule,
+    BibliographyCountRule,
     BibliographyFormatRule,
     BibliographyLinkRule,
+    BibliographyOrderRule,
+    BibliographyRecencyRule,
     CaptionFormatRule,
     CaptionNumberingRule,
     CaptionReferenceRule,
     DocumentVolumeRule,
+    EquationNumberingRule,
     FontRule,
     HeadingFormatRule,
     HeadingLevelsRule,
@@ -28,6 +32,7 @@ from rule_engine import (
     IndentRule,
     KeepNextRule,
     MarginRule,
+    MicroTypographyRule,
     RequiredSectionsRule,
     RuleSet,
     TocRule,
@@ -148,12 +153,14 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "2.3.0"
+    assert ruleset.ruleset_version == "2.4.0"
     assert [rule.rule_id for rule in ruleset.rules] == [
         "font_body_text",
         "indent_first_line",
         "alignment_body_text",
         "line_spacing_body",
+        "microtypography_prose",
+        "microtypography_nbsp",
         "page_margins",
         "page_number_position",
         "page_format",
@@ -168,8 +175,12 @@ def test_default_ruleset_describes_all_checks() -> None:
         "required_sections",
         "toc",
         "document_volume",
+        "equation_numbering",
         "bibliography_links_resolved",
         "bibliography_all_cited",
+        "bibliography_count",
+        "bibliography_order",
+        "bibliography_recency",
         "bibliography_format_electronic",
         "bibliography_format_article",
         "caption_numbering_figures",
@@ -187,6 +198,8 @@ def test_default_ruleset_describes_all_checks() -> None:
         IndentRule,
         AlignmentRule,
         LineSpacingRule,
+        MicroTypographyRule,
+        MicroTypographyRule,
         MarginRule,
         PageNumberPositionRule,
         PageFormatRule,
@@ -201,8 +214,12 @@ def test_default_ruleset_describes_all_checks() -> None:
         RequiredSectionsRule,
         TocRule,
         DocumentVolumeRule,
+        EquationNumberingRule,
         BibliographyLinkRule,
         BibliographyCitedRule,
+        BibliographyCountRule,
+        BibliographyOrderRule,
+        BibliographyRecencyRule,
         BibliographyFormatRule,
         BibliographyFormatRule,
         CaptionNumberingRule,
@@ -239,6 +256,20 @@ def test_default_ruleset_describes_all_checks() -> None:
     volume = ruleset.get_rule("document_volume").expected
     assert (volume.min_pages, volume.max_pages) == (60, 90)
     assert (volume.min_words, volume.max_words) == (8000, 18000)
+    prose = ruleset.get_rule("microtypography_prose").expected
+    assert prose.checks == [
+        "wrong_quotes",
+        "wrong_dashes",
+        "multiple_spaces",
+        "space_before_punctuation",
+    ]
+    assert ruleset.get_rule("microtypography_nbsp").expected.checks == ["missing_nbsp"]
+    assert ruleset.get_rule("equation_numbering").expected.require_numbering is True
+    assert ruleset.get_rule("bibliography_count").expected.min_sources == 20
+    order = ruleset.get_rule("bibliography_order").expected
+    assert (order.start_at, order.allow_gaps, order.allow_duplicates) == (1, False, False)
+    recency = ruleset.get_rule("bibliography_recency").expected
+    assert (recency.min_recent_share, recency.recent_years) == (0.3, 5)
 
 
 def test_default_ruleset_excludes_front_matter_from_heading_rules() -> None:
@@ -764,7 +795,12 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "keep_next",
         "heading_page_break",
         "document_volume",
+        "microtypography",
+        "equation_numbering",
+        "bibliography_count",
+        "bibliography_order",
+        "bibliography_recency",
     } <= default_kinds
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "2.3.0"
+    assert default_ruleset.ruleset_version == "2.4.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

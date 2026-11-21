@@ -63,6 +63,11 @@ RuleKind = Literal[
     "keep_next",
     "heading_page_break",
     "document_volume",
+    "microtypography",
+    "equation_numbering",
+    "bibliography_count",
+    "bibliography_order",
+    "bibliography_recency",
 ]
 RuleSeverity = Literal["error", "warning", "info"]
 
@@ -821,6 +826,194 @@ class DocumentVolumeExpectation(BaseModel):
         return self
 
 
+MicroTypographyCheck = Literal[
+    "wrong_quotes",
+    "wrong_dashes",
+    "multiple_spaces",
+    "space_before_punctuation",
+    "missing_nbsp",
+]
+"""Вид микротипографической ошибки, которую проверяет правило."""
+
+
+class MicroTypographyExpectation(BaseModel):
+    """Требование к микротипографике абзаца: кавычки, тире, пробелы.
+
+    Проверяются уже размеченные парсером нарушения ``MicroTypographyReport``,
+    поэтому правило ничего не пересчитывает по тексту, а только отбирает виды
+    ошибок. ``checks`` перечисляет проверяемые виды: например, основную
+    проверку текста интересуют кавычки, тире и лишние пробелы, а неразрывные
+    пробелы выносятся в отдельное правило, чтобы не смешивать важность.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    checks: List[MicroTypographyCheck] = Field(
+        default_factory=lambda: [
+            "wrong_quotes",
+            "wrong_dashes",
+            "multiple_spaces",
+            "space_before_punctuation",
+        ],
+        description="Виды микротипографических ошибок, которые проверяет правило",
+    )
+
+    @field_validator("checks")
+    @classmethod
+    def _validate_checks(cls, value: List[MicroTypographyCheck]) -> List[MicroTypographyCheck]:
+        """Убирает повторы и отвергает пустой перечень видов ошибок."""
+        unique: List[MicroTypographyCheck] = []
+        for check in value:
+            if check not in unique:
+                unique.append(check)
+        if not unique:
+            raise ValueError(
+                "MicroTypographyExpectation пусто: перечислите виды ошибок в checks"
+            )
+        return unique
+
+
+class EquationNumberingExpectation(BaseModel):
+    """Требование к нумерации формул.
+
+    Выключенная проверка не имеет смысла: правило без требования ничего не
+    сообщает о документе, поэтому ``require_numbering=False`` отвергается.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_numbering: bool = Field(
+        default=True,
+        description="Требовать номер у вынесенной в отдельную строку формулы",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "EquationNumberingExpectation":
+        """Запрещает набор, в котором требование нумерации отключено."""
+        if not self.require_numbering:
+            raise ValueError(
+                "EquationNumberingExpectation пусто: require_numbering=False отключает "
+                "проверку нумерации формул"
+            )
+        return self
+
+
+class BibliographyCountExpectation(BaseModel):
+    """Требование к количеству источников в списке литературы.
+
+    Нормативы различаются по уровню работы, поэтому нижняя и верхняя границы
+    задаются правилом; ``max_sources=None`` означает, что верхняя граница не
+    проверяется. Пустое ожидание отвергается: правило без границ бесполезно.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_sources: Optional[int] = Field(
+        default=20,
+        ge=1,
+        description="Минимальное количество источников в списке литературы",
+    )
+    max_sources: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Максимальное количество источников (None — не проверять)",
+    )
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> "BibliographyCountExpectation":
+        """Требует хотя бы одну границу и согласованность минимума с максимумом."""
+        if self.min_sources is None and self.max_sources is None:
+            raise ValueError(
+                "BibliographyCountExpectation пусто: задайте min_sources или max_sources"
+            )
+        if (
+            self.min_sources is not None
+            and self.max_sources is not None
+            and self.min_sources > self.max_sources
+        ):
+            raise ValueError("BibliographyCountExpectation: min_sources больше max_sources")
+        return self
+
+
+class BibliographyOrderExpectation(BaseModel):
+    """Требование к сквозной нумерации списка литературы.
+
+    Номера записей обязаны идти подряд от ``start_at`` без пропусков и
+    повторов: на эти номера ссылается текст работы. Отключенные проверки
+    пропусков и повторов одновременно оставляют правило без требований, поэтому
+    такой набор отвергается.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start_at: int = Field(default=1, ge=0, description="Номер первой записи списка")
+    allow_gaps: bool = Field(
+        default=False,
+        description="Разрешить пропуски в нумерации (False — номера идут подряд)",
+    )
+    allow_duplicates: bool = Field(
+        default=False,
+        description="Разрешить повторяющиеся номера записей (False — номера уникальны)",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "BibliographyOrderExpectation":
+        """Запрещает набор, в котором пропуски и повторы разрешены одновременно."""
+        if self.allow_gaps and self.allow_duplicates:
+            raise ValueError(
+                "BibliographyOrderExpectation пусто: allow_gaps и allow_duplicates "
+                "одновременно отключают проверку нумерации"
+            )
+        return self
+
+
+class BibliographyRecencyExpectation(BaseModel):
+    """Требование к свежести источников списка литературы.
+
+    Доля источников не старше ``recent_years`` лет считается от года,
+    указанного в ``reference_year``, а при ``None`` — от текущего года. Год
+    издания разобран не у всех записей, поэтому при покрытии годами ниже
+    ``min_year_coverage`` проверка честно не оценивается, а не додумывает
+    свежесть.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_recent_share: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Минимальная доля источников не старше recent_years лет",
+    )
+    recent_years: int = Field(
+        default=5,
+        ge=1,
+        description="Сколько лет считать свежими: год источника не старше reference_year - recent_years",
+    )
+    reference_year: Optional[int] = Field(
+        default=None,
+        ge=1900,
+        le=2100,
+        description="Год отсчёта свежести (None — текущий год)",
+    )
+    min_year_coverage: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Минимальная доля записей с известным годом для оценки свежести",
+    )
+
+    @model_validator(mode="after")
+    def _require_checked_property(self) -> "BibliographyRecencyExpectation":
+        """Запрещает набор, в котором доля свежих источников не проверяется."""
+        if self.min_recent_share == 0.0:
+            raise ValueError(
+                "BibliographyRecencyExpectation пусто: min_recent_share=0 отключает "
+                "проверку свежести источников"
+            )
+        return self
+
+
 BibliographyCategory = Literal[
     "book_monograph",
     "journal_article",
@@ -1329,6 +1522,57 @@ class DocumentVolumeRule(_RuleBase):
     expected: DocumentVolumeExpectation
 
 
+class MicroTypographyRule(_RuleBase):
+    """Правило микротипографики абзацев основного текста."""
+
+    kind: Literal["microtypography"] = "microtypography"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(
+            scope="body_paragraphs",
+            exclude_contexts=[
+                "title_page",
+                "code_listing",
+                "structural_title",
+                "appendix_label",
+                "text_formula",
+            ],
+        )
+    )
+    expected: MicroTypographyExpectation
+
+
+class EquationNumberingRule(_RuleBase):
+    """Правило нумерации вынесенных формул."""
+
+    kind: Literal["equation_numbering"] = "equation_numbering"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    expected: EquationNumberingExpectation
+
+
+class BibliographyCountRule(_RuleBase):
+    """Правило количества источников в списке литературы."""
+
+    kind: Literal["bibliography_count"] = "bibliography_count"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyCountExpectation
+
+
+class BibliographyOrderRule(_RuleBase):
+    """Правило сквозной нумерации списка литературы."""
+
+    kind: Literal["bibliography_order"] = "bibliography_order"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyOrderExpectation
+
+
+class BibliographyRecencyRule(_RuleBase):
+    """Правило свежести источников списка литературы."""
+
+    kind: Literal["bibliography_recency"] = "bibliography_recency"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="bibliography"))
+    expected: BibliographyRecencyExpectation
+
+
 Rule = Annotated[
     Union[
         FontRule,
@@ -1353,6 +1597,11 @@ Rule = Annotated[
         KeepNextRule,
         HeadingPageBreakRule,
         DocumentVolumeRule,
+        MicroTypographyRule,
+        EquationNumberingRule,
+        BibliographyCountRule,
+        BibliographyOrderRule,
+        BibliographyRecencyRule,
     ],
     Field(discriminator="kind"),
 ]
@@ -1380,6 +1629,11 @@ KIND_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "keep_next": HEADING_SCOPES,
     "heading_page_break": HEADING_SCOPES,
     "document_volume": frozenset({"document"}),
+    "microtypography": frozenset({"body_text", "body_paragraphs", "all_paragraphs"}),
+    "equation_numbering": frozenset({"document"}),
+    "bibliography_count": BIBLIOGRAPHY_SCOPES,
+    "bibliography_order": BIBLIOGRAPHY_SCOPES,
+    "bibliography_recency": BIBLIOGRAPHY_SCOPES,
 }
 """Какие scope допустимы для каждого вида правила (проверяется при загрузке набора)."""
 

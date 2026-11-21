@@ -70,8 +70,11 @@ from typing import Callable, Dict, List, Tuple
 
 from .checks.bibliography import (
     _check_bibliography_cited_rule,
+    _check_bibliography_count_rule,
     _check_bibliography_format_rule,
     _check_bibliography_link_rule,
+    _check_bibliography_order_rule,
+    _check_bibliography_recency_rule,
 )
 from .checks.captions import (
     _check_caption_format_rule,
@@ -82,6 +85,7 @@ from .checks.common import (
     _caption_block_ids,
     _document_contexts,
 )
+from .checks.equations import _check_equation_numbering_rule
 from .checks.headings import (
     _check_heading_format_rule,
     _check_heading_levels_rule,
@@ -98,6 +102,7 @@ from .checks.pagination import (
     _check_keep_next_rule,
     _check_widow_control_rule,
 )
+from .checks.microtypography import _check_microtypography_rule
 from .checks.sections import _check_required_sections_rule
 from .checks.text import (
     _check_alignment_rule,
@@ -116,12 +121,16 @@ from .findings import (
 from .rules import (
     AlignmentRule,
     BibliographyCitedRule,
+    BibliographyCountRule,
     BibliographyFormatRule,
     BibliographyLinkRule,
+    BibliographyOrderRule,
+    BibliographyRecencyRule,
     CaptionFormatRule,
     CaptionNumberingRule,
     CaptionReferenceRule,
     DocumentVolumeRule,
+    EquationNumberingRule,
     FontRule,
     HeadingFormatRule,
     HeadingLevelsRule,
@@ -131,6 +140,7 @@ from .rules import (
     KeepNextRule,
     LineSpacingRule,
     MarginRule,
+    MicroTypographyRule,
     PageFormatRule,
     PageNumberPositionRule,
     RequiredSectionsRule,
@@ -238,4 +248,9 @@ class RuleEngine:
         KeepNextRule: _check_keep_next_rule,
         HeadingPageBreakRule: _check_heading_page_break_rule,
         DocumentVolumeRule: _check_document_volume_rule,
+        MicroTypographyRule: _check_microtypography_rule,
+        EquationNumberingRule: _check_equation_numbering_rule,
+        BibliographyCountRule: _check_bibliography_count_rule,
+        BibliographyOrderRule: _check_bibliography_order_rule,
+        BibliographyRecencyRule: _check_bibliography_recency_rule,
     }
