@@ -104,6 +104,8 @@ def _rule_violation(
     message: str = "Требование оформления не выполнено",
     expected_text: str = "требование методички",
     found_text: str = "фактическое оформление",
+    found: dict[str, int] | None = None,
+    occurrences: int = 1,
     severity: str = "error",
 ) -> RuleViolation:
     """создаёт нарушение движка с адресом для проверки отчёта"""
@@ -121,9 +123,10 @@ def _rule_violation(
             snippet=snippet,
         ),
         expected={},
-        found={},
+        found=found or {},
         expected_text=expected_text,
         found_text=found_text,
+        occurrences=occurrences,
     )
 
 
@@ -566,6 +569,111 @@ def test_repeated_rule_violations_are_grouped_without_losing_addresses() -> None
     assert "alignment_table_cells — 12 нарушений (таблицы 1–2)" in markdown_report
     assert "tbl_0001_r0_c0_p0 (стр. 6): «Ячейка 1-0»" in markdown_report
     assert "и ещё 2" in markdown_report
+
+
+def test_grouped_microtypography_keeps_subtype_totals_and_span_examples() -> None:
+    """группа микротипографики хранит суммы подтипов и примеры из span-фрагментов"""
+    document = _sample_parser_result()
+    document.anomalies = DocumentAnomalies()
+    engine_violations = [
+        _rule_violation(
+            "microtypography_prose",
+            "microtypography",
+            address="p-1",
+            block_id="p-1",
+            page_start_est=2,
+            snippet="Начало абзаца один",
+            found_text="неверные кавычки: 2 (фрагмент кавычек)",
+            found={"wrong_quotes": 2},
+            occurrences=2,
+        ),
+        _rule_violation(
+            "microtypography_prose",
+            "microtypography",
+            address="p-2",
+            block_id="p-2",
+            page_start_est=2,
+            snippet="Начало абзаца два",
+            found_text="дефис вместо тире: 3 (фрагмент тире)",
+            found={"wrong_dashes": 3},
+            occurrences=3,
+        ),
+        _rule_violation(
+            "microtypography_prose",
+            "microtypography",
+            address="p-3",
+            block_id="p-3",
+            page_start_est=3,
+            snippet="Начало абзаца три",
+            found_text="лишние пробелы: 1 (фрагмент пробелов)",
+            found={"multiple_spaces": 1},
+            occurrences=1,
+        ),
+        _rule_violation(
+            "microtypography_prose",
+            "microtypography",
+            address="p-4",
+            block_id="p-4",
+            page_start_est=4,
+            snippet="Начало абзаца четыре",
+            found_text="дефис вместо тире: 1 (ещё тире)",
+            found={"wrong_dashes": 1},
+            occurrences=1,
+        ),
+    ]
+    report = build_violation_report(
+        document,
+        _rule_report(engine_violations),
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    entries = _rule_engine_violations(report)
+    assert len(entries) == 1
+    grouped = entries[0]
+    assert grouped.id == "group:microtypography_prose"
+    assert grouped.count == 4
+    assert grouped.occurrences == 7
+    assert grouped.found == {
+        "wrong_quotes": 2,
+        "wrong_dashes": 4,
+        "multiple_spaces": 1,
+    }
+    assert len(grouped.locations) == 4
+    assert grouped.location.text_excerpt == "фрагмент кавычек"
+    assert {item.text_excerpt for item in grouped.locations} == {
+        "фрагмент кавычек",
+        "фрагмент тире",
+        "фрагмент пробелов",
+        "ещё тире",
+    }
+    assert "кавычки 2, тире 4, лишние пробелы 1" in grouped.description
+    assert "Всего однотипных нарушений: 4." in grouped.description
+
+    payload = report.model_dump(mode="json")
+    grouped_payload = next(
+        item
+        for group in payload["groups"]
+        for item in group["violations"]
+        if item["id"] == "group:microtypography_prose"
+    )
+    assert grouped_payload["found"] == {
+        "wrong_quotes": 2,
+        "wrong_dashes": 4,
+        "multiple_spaces": 1,
+    }
+    assert grouped_payload["occurrences"] == 7
+
+    markdown_report = report.to_markdown()
+    assert (
+        "microtypography_prose — 4 нарушений "
+        "(кавычки 2, тире 4, лишние пробелы 1)"
+    ) in markdown_report
+    assert "p-1 (стр. 2): «фрагмент кавычек»" in markdown_report
+    assert "p-2 (стр. 2): «фрагмент тире»" in markdown_report
+    assert "p-3 (стр. 3): «фрагмент пробелов»" in markdown_report
+    assert "… и ещё 1" in markdown_report
+    assert "Начало абзаца" not in markdown_report
+    assert report.summary.total_violations == 4
 
 
 def test_small_groups_stay_as_separate_entries() -> None:

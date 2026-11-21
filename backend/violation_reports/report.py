@@ -67,11 +67,22 @@ class Violation(BaseModel):
     ``count`` — сколько находок движка представляет запись, ``locations`` —
     полный список адресов группы (без обрезки; в Markdown показываются примеры).
     Для одиночного нарушения ``count`` равен единице, а адрес лежит в ``location``.
+    ``occurrences`` — число дефектных фрагментов внутри адресов, ``found`` —
+    сводка по подтипам (для микротипографики: кавычки, тире, пробелы).
     """
 
     id: str
     rule_id: Optional[str] = None
     count: int = Field(default=1, ge=1)
+    occurrences: int = Field(
+        default=1,
+        ge=1,
+        description="Сколько дефектных фрагментов внутри адреса (для группы — сумма)",
+    )
+    found: dict[str, int] = Field(
+        default_factory=dict,
+        description="Сводка находок по подтипам (для микротипографики — суммы)",
+    )
     category: ReportCategory
     severity: ReportSeverity
     location: ViolationLocation
@@ -396,6 +407,15 @@ _RULE_PREFIX_FALLBACKS: tuple[
 
 _GROUP_MIN_SIZE = 4
 _GROUP_EXAMPLES_LIMIT = 10
+_GROUP_TYPOGRAPHY_EXAMPLES_LIMIT = 3
+_MICROTYPOGRAPHY_LABELS = {
+    "wrong_quotes": "кавычки",
+    "wrong_dashes": "тире",
+    "multiple_spaces": "лишние пробелы",
+    "space_before_punctuation": "пробел перед знаком препинания",
+    "missing_nbsp": "неразрывные пробелы",
+}
+_MICROTYPOGRAPHY_ORDER = tuple(_MICROTYPOGRAPHY_LABELS)
 _GROUP_EXAMPLE_EXCERPT = 80
 _TABLE_BLOCK_RE = re.compile(r"^tbl_(\d+)_")
 
@@ -658,9 +678,18 @@ def _build_rule_violation(
     category, severity, recommendation = _kind_details(
         rule_violation.kind, rule_violation.rule_id
     )
+    found = {}
+    if rule_violation.kind == "microtypography":
+        found = {
+            key: value
+            for key, value in rule_violation.found.items()
+            if isinstance(value, int) and value > 0
+        }
     return Violation(
         id=rule_violation.violation_id,
         rule_id=rule_violation.rule_id,
+        occurrences=rule_violation.occurrences,
+        found=found,
         category=category,
         severity=severity,
         location=_engine_location(blocks, rule_violation),
@@ -697,17 +726,66 @@ def _group_rule_violations(violations: list[Violation]) -> list[Violation]:
     return result
 
 
+def _microtypography_summary(found: dict[str, int]) -> str:
+    """печатает суммы подтипов микротипографики в устойчивом порядке"""
+    parts = [
+        f"{_MICROTYPOGRAPHY_LABELS[key]} {found[key]}"
+        for key in _MICROTYPOGRAPHY_ORDER
+        if found.get(key, 0) > 0
+    ]
+    known = set(_MICROTYPOGRAPHY_ORDER)
+    parts.extend(
+        f"{key} {found[key]}"
+        for key in sorted(found)
+        if key not in known and isinstance(found[key], int) and found[key] > 0
+    )
+    return ", ".join(parts)
+
+
+def _microtypography_span_example(found_text: str) -> Optional[str]:
+    """извлекает первый span-пример из текста находки микротипографики.
+
+    Чекер печатает примеры в конце ``found_text`` как ``(фрагмент; фрагмент)``;
+    это реальные куски текста с ошибкой, в отличие от начала абзаца в location.
+    """
+    text = (found_text or "").rstrip()
+    if not text.endswith(")"):
+        return None
+    start = text.rfind(" (")
+    if start < 0:
+        return None
+    first = text[start + 2 : -1].split("; ", 1)[0].strip()
+    return first or None
+
+
 def _merge_rule_group(rule_id: str, items: list[Violation]) -> Violation:
     """собирает группу однотипных нарушений с полным списком адресов"""
     first = items[0]
+    occurrences = sum(item.occurrences for item in items)
+    found: dict[str, int] = {}
+    if first.found:
+        for item in items:
+            for key, value in item.found.items():
+                if isinstance(value, int):
+                    found[key] = found.get(key, 0) + value
+    description = (
+        f"{first.description} Всего однотипных нарушений: {len(items)}."
+    )
+    subtype_summary = _microtypography_summary(found)
+    if subtype_summary:
+        base = first.description.split(". Обнаружено:", 1)[0].rstrip().rstrip(".")
+        description = (
+            f"{base}. Обнаружено: {subtype_summary}. "
+            f"Всего однотипных нарушений: {len(items)}."
+        )
     return first.model_copy(
         update={
             "id": f"group:{rule_id}",
             "count": len(items),
+            "occurrences": occurrences,
+            "found": found,
             "locations": [item.location for item in items],
-            "description": (
-                f"{first.description} Всего однотипных нарушений: {len(items)}."
-            ),
+            "description": description,
         }
     )
 
@@ -768,16 +846,21 @@ def _format_group_example(location: ViolationLocation) -> str:
 
 def _format_grouped_violation(violation: Violation) -> list[str]:
     """формирует компактную Markdown-запись для группы однотипных нарушений"""
-    examples = violation.locations[:_GROUP_EXAMPLES_LIMIT]
+    limit = (
+        _GROUP_TYPOGRAPHY_EXAMPLES_LIMIT
+        if violation.found
+        else _GROUP_EXAMPLES_LIMIT
+    )
+    examples = violation.locations[:limit]
     example_text = "; ".join(_format_group_example(item) for item in examples)
-    if len(violation.locations) > _GROUP_EXAMPLES_LIMIT:
-        example_text += (
-            f"; … и ещё {len(violation.locations) - _GROUP_EXAMPLES_LIMIT}"
-        )
+    if len(violation.locations) > limit:
+        example_text += f"; … и ещё {len(violation.locations) - limit}"
     table_label = _table_range_label(violation.locations)
+    subtype_summary = _microtypography_summary(violation.found)
+    details = [item for item in (table_label, subtype_summary) if item]
     summary = f"{violation.rule_id} — {violation.count} нарушений"
-    if table_label:
-        summary += f" ({table_label})"
+    if details:
+        summary += f" ({', '.join(details)})"
     if example_text:
         summary += f", напр. {example_text}"
     return [
@@ -797,11 +880,14 @@ def _engine_location(
 ) -> ViolationLocation:
     """переносит адрес нарушения движка в модель адреса отчёта"""
     source = rule_violation.location
+    excerpt = source.snippet or None
+    if rule_violation.kind == "microtypography":
+        excerpt = _microtypography_span_example(rule_violation.found_text) or excerpt
     location = _location(
         blocks,
         source.block_id,
         source.page_start_est,
-        source.snippet or None,
+        excerpt,
     )
     page_end = source.page_end_est or location.page_end
     if source.block_id is not None:
