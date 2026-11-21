@@ -39,13 +39,43 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Literal, Optional, Sequence
 
-from parser.core.schema import BlockUnion, ParagraphBlock, TocContainerBlock
+from parser.core.schema import BlockUnion, ParagraphBlock, TableBlock, TocContainerBlock
 
 from ._fonts import family_keys
 
 
-BlockContext = Literal["body", "title_page", "code_listing"]
-"""Контекст блока: обычный текст, титульный лист или листинг кода."""
+BlockContext = Literal[
+    "body",
+    "title_page",
+    "code_listing",
+    "structural_title",
+    "appendix_label",
+    "caption_like",
+    "table_title",
+    "text_formula",
+]
+"""Контекст блока.
+
+``body``
+    Обычный текст: правила области body_text применяются без изменений.
+``title_page``
+    Титульный лист, сервисные листы и подписные строки.
+``code_listing``
+    Фрагмент листинга кода.
+``structural_title``
+    Название элемента структуры работы («Содержание», «Введение», «Приложение»,
+    «Резюме»), не распознанное как заголовок парсером.
+``appendix_label``
+    Метка продолжения приложения («Продолжение ПРИЛОЖЕНИЯ А»).
+``caption_like``
+    Подпись рисунка/таблицы/приложения по текстовому маркеру, даже если парсер
+    не связал ее с объектом.
+``table_title``
+    Заголовок таблицы — абзац непосредственно перед таблицей.
+``text_formula``
+    Формула, набранная текстом, а не OMML, и артефакты формул (одиночная
+    запятая между формулой и экспликацией).
+"""
 
 # =====================================================================
 # 1. ЛИСТИНГИ КОДА
@@ -260,7 +290,8 @@ RE_SIGNATURE_REQUISITE = re.compile(
 )
 
 #: Название элемента структуры работы: такие строки закрывают сервисную зону,
-#: даже если разбор не распознал в них заголовок.
+#: даже если разбор не распознал в них заголовок. Контекст ``structural_title``
+#: исключает их из основного текста: у них свои требования к оформлению.
 RE_STRUCTURAL_TITLE = re.compile(
     r"^(?:"
     r"введение"
@@ -268,6 +299,7 @@ RE_STRUCTURAL_TITLE = re.compile(
     r"|содержание"
     r"|оглавление"
     r"|выводы"
+    r"|резюме"
     r"|список\s+(?:использованных\s+)?(?:источников|литературы)"
     r"|приложени[ея]"
     r")(?:\s|$|[:,.;])",
@@ -277,6 +309,34 @@ RE_STRUCTURAL_TITLE = re.compile(
 #: Строка-зачин оглавления: «СОДЕРЖАНИЕ», «Оглавление:». Это не реквизит титула
 #: и не строка сервисного листа.
 RE_TOC_TITLE = re.compile(r"^(?:содержание|оглавление)\s*:?$", re.IGNORECASE)
+
+#: Метка продолжения приложения: «Продолжение ПРИЛОЖЕНИЯ А», «Окончание
+#: приложения Б». Парсер не считает ее подписью приложения, но это служебная
+#: строка, а не абзац основного текста.
+RE_APPENDIX_LABEL = re.compile(
+    r"^\s*(?:продолжение|окончание)\s+приложени[яе]\s+[А-ЯЁA-Z0-9]+\b",
+    re.IGNORECASE,
+)
+
+#: Строка-подпись служебного листа, которая не является реквизитом титула:
+#: «Выпускная квалификационная работа закончена «5» мая 2026 г.». В основном
+#: тексте встречается только в этом виде, поэтому шаблон узкий.
+RE_SERVICE_SIGNATURE_LINE = re.compile(
+    r"^\s*выпускная\s+квалификационная\s+работа\s+закончена\b",
+    re.IGNORECASE,
+)
+
+#: Метка таблицы: «Таблица 1», «Таблица 3.2». По ней находится заголовок
+#: таблицы, который не распознан как подпись.
+RE_TABLE_LABEL = re.compile(r"^\s*таблица\s*\d+(?:[.,]\d+)?\s*$", re.IGNORECASE)
+
+#: Строка только из знаков формулы: одиночная «,» — артефакт разбора формулы,
+#: а не абзац текста.
+RE_FORMULA_PUNCTUATION = re.compile(r"^[,;.\-–—=+*/\\|]+$")
+
+#: Допустимые символы текстовой формулы. Латинские и русские буквы нужны для
+#: обозначений (Д, К, И, x, y), цифры и операторы — для выражения.
+RE_FORMULA_CHARS = re.compile(r"^[A-Za-zА-Яа-яЁё0-9\s=+\-*/×·.,;:()\[\]{}'\"«»]+$")
 
 
 #: Подпись рисунка/таблицы/приложения. Такие абзацы классифицируются как body
@@ -288,7 +348,7 @@ RE_CAPTION_MARKER = re.compile(
     r"рисунок|рис\.|скриншот|скрин\.|снимок\s+экрана|"
     r"таблица|табл\.|продолжение\s+таблицы|окончание\s+таблицы|формула|"
     r"приложение\s+[А-ЯЁA-Z0-9]+"
-    r")(?=\s|$)",
+    r")(?=\s|$|[0-9])",
     re.IGNORECASE,
 )
 
@@ -463,6 +523,44 @@ def _is_structural_title(text: str) -> bool:
     return bool(RE_STRUCTURAL_TITLE.match(collapsed))
 
 
+def _is_appendix_label(text: str) -> bool:
+    """True, если строка — метка продолжения или окончания приложения."""
+    collapsed = " ".join((text or "").split())
+    if not collapsed:
+        return False
+    return bool(RE_APPENDIX_LABEL.match(collapsed))
+
+
+def _is_service_signature_line(text: str) -> bool:
+    """True, если строка — подпись служебного листа о завершении работы."""
+    collapsed = " ".join((text or "").split())
+    if not collapsed:
+        return False
+    return bool(RE_SERVICE_SIGNATURE_LINE.match(collapsed))
+
+
+def _is_text_formula(text: str) -> bool:
+    """True, если строка — формула, набранная текстом, или артефакт формулы.
+
+    Формулы в ВКР центрируют по ГОСТ, поэтому проверять их выравниванием
+    основного текста нельзя. Признак узкий: знак равенства и короткая строка
+    без длинных слов (обозначения и операторы), либо строка только из знаков
+    формулы. Обычное предложение со знаком равенства содержит слова длиннее
+    трех букв и под шаблон не попадает.
+    """
+    collapsed = " ".join((text or "").split())
+    if not collapsed or len(collapsed) > 120:
+        return False
+    if RE_FORMULA_PUNCTUATION.match(collapsed):
+        return True
+    if "=" not in collapsed:
+        return False
+    if not RE_FORMULA_CHARS.match(collapsed):
+        return False
+    words = re.findall(r"[A-Za-zА-Яа-яЁё]{4,}", collapsed)
+    return not words
+
+
 def _is_resumed_body_prose(paragraph: ParagraphBlock) -> bool:
     """True, если блок — длинное предложение основного текста.
 
@@ -599,6 +697,62 @@ def _is_code_region_filler(paragraph: ParagraphBlock) -> bool:
     return _monospace_char_share(paragraph) >= CODE_REGION_FILLER_MONOSPACE_SHARE
 
 
+def _next_table_is_empty(block: BlockUnion) -> bool:
+    """True, если блок — пустой абзац, который не разрывает связь с таблицей."""
+    return (
+        isinstance(block, ParagraphBlock)
+        and (block.is_empty_or_whitespace or not block.text_visible.strip())
+    )
+
+
+def _mark_table_titles(
+    blocks: Sequence[BlockUnion],
+    contexts: Dict[str, BlockContext],
+) -> None:
+    """Помечает заголовки таблиц, которые парсер не распознал как подписи.
+
+    Заголовок таблицы стоит непосредственно перед ``TableBlock`` (иногда через
+    пустой абзац) и либо предваряется меткой «Таблица N», либо сам короткий и
+    центрирован. Такой абзац — часть таблицы, а не текст работы: у него свои
+    требования к оформлению, и выравнивание основного текста к нему не относится.
+    """
+    total = len(blocks)
+    for position, block in enumerate(blocks):
+        if not isinstance(block, ParagraphBlock):
+            continue
+        if contexts.get(block.block_id) != "body":
+            continue
+        if block.is_empty_or_whitespace or not block.text_visible.strip():
+            continue
+        if block.heading_info is not None or _is_caption_text(block.text_visible):
+            continue
+
+        cursor = position + 1
+        while cursor < total and _next_table_is_empty(blocks[cursor]):
+            cursor += 1
+        if cursor >= total:
+            continue
+        next_block = blocks[cursor]
+        if not isinstance(next_block, TableBlock):
+            continue
+
+        previous_text = ""
+        cursor = position - 1
+        while cursor >= 0:
+            previous = blocks[cursor]
+            if isinstance(previous, ParagraphBlock) and previous.text_visible.strip():
+                previous_text = " ".join(previous.text_visible.split())
+                break
+            cursor -= 1
+
+        centered_heading = (
+            block.effective_props.alignment == "center"
+            and _is_short_line_without_terminal(block.text_visible)
+        )
+        if RE_TABLE_LABEL.match(previous_text) or centered_heading:
+            contexts[block.block_id] = "table_title"
+
+
 def _merge_code_regions(
     blocks: Sequence[BlockUnion],
     contexts: Dict[str, BlockContext],
@@ -669,9 +823,15 @@ def classify_paragraph(
     if paragraph.heading_info is not None:
         return "body"
     if _is_caption_text(paragraph.text_visible):
-        return "body"
+        return "caption_like"
     if _is_code_listing(paragraph):
         return "code_listing"
+    if _is_appendix_label(paragraph.text_visible):
+        return "appendix_label"
+    if _is_structural_title(paragraph.text_visible):
+        return "structural_title"
+    if _is_text_formula(paragraph.text_visible):
+        return "text_formula"
     if _is_title_page_paragraph(paragraph, in_title_prefix):
         return "title_page"
     return "body"
@@ -748,7 +908,9 @@ def classify_document_contexts(
             continue
 
         if block.block_id in captions or _is_caption_text(block.text_visible):
-            contexts[block.block_id] = "body"
+            # Подпись проверяют правила подписей; из body_text она исключается
+            # контекстом, даже если парсер не связал ее с объектом.
+            contexts[block.block_id] = "caption_like"
             continue
 
         if _is_code_listing(block):
@@ -769,11 +931,21 @@ def classify_document_contexts(
             contexts[block.block_id] = "title_page"
             continue
 
+        if _is_appendix_label(block.text_visible):
+            # «Продолжение ПРИЛОЖЕНИЯ А» — служебная метка внутри приложения;
+            # зону она не открывает и не закрывает.
+            contexts[block.block_id] = "appendix_label"
+            continue
+
         if _is_structural_title(block.text_visible):
             zone = None
             title_evidence = False
             prose_streak = 0
-            contexts[block.block_id] = "body"
+            contexts[block.block_id] = "structural_title"
+            continue
+
+        if _is_text_formula(block.text_visible):
+            contexts[block.block_id] = "text_formula"
             continue
 
         prose = _is_resumed_body_prose(block)
@@ -811,12 +983,14 @@ def classify_document_contexts(
 
         # Вне сервисной зоны: строка из одного подписного реквизита остается
         # служебной, остальное — основной текст.
-        contexts[block.block_id] = (
-            "title_page"
-            if _is_title_page_paragraph(block, in_title_prefix=False)
-            else "body"
-        )
+        if _is_title_page_paragraph(block, in_title_prefix=False):
+            contexts[block.block_id] = "title_page"
+        elif _is_service_signature_line(block.text_visible):
+            contexts[block.block_id] = "title_page"
+        else:
+            contexts[block.block_id] = "body"
 
+    _mark_table_titles(ordered, contexts)
     _merge_code_regions(ordered, contexts)
     return contexts
 

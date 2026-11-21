@@ -163,8 +163,16 @@ def _block_id_by_text(document: ParsedDocxDocument, startswith: str) -> str:
 
 
 def test_rule_target_default_excludes_service_contexts() -> None:
-    """Новое поле по умолчанию отсекает титульный лист и листинг."""
-    assert RuleTarget().exclude_contexts == ["title_page", "code_listing"]
+    """Новое поле по умолчанию отсекает служебные контексты."""
+    assert RuleTarget().exclude_contexts == [
+        "title_page",
+        "code_listing",
+        "structural_title",
+        "appendix_label",
+        "caption_like",
+        "table_title",
+        "text_formula",
+    ]
 
 
 def test_legacy_ruleset_json_without_context_field_loads_and_works(
@@ -174,7 +182,15 @@ def test_legacy_ruleset_json_without_context_field_loads_and_works(
     ruleset = load_ruleset(DEFAULT_RULESET_PATH)
     font_rule = ruleset.get_rule("font_body_text")
 
-    assert font_rule.target.exclude_contexts == ["title_page", "code_listing"]
+    assert font_rule.target.exclude_contexts == [
+        "title_page",
+        "code_listing",
+        "structural_title",
+        "appendix_label",
+        "caption_like",
+        "table_title",
+        "text_formula",
+    ]
 
     document = _parse(docx_builder, PLAIN_PARAGRAPH + BAD_FONT_BODY_PARAGRAPH)
     report = RuleEngine(ruleset).check(document)

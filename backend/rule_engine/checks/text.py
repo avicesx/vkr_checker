@@ -1,7 +1,7 @@
 """Семейство основного текста: шрифт, абзацный отступ, выравнивание."""
 from __future__ import annotations
 
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ..findings import (
     RuleAssessment,
@@ -187,6 +187,68 @@ def _check_indent_rule(
     return violations, len(targets), assessment
 
 
+def _pdf_line_count(paragraph: ParagraphBlock) -> Optional[int]:
+    """Возвращает число строк абзаца по данным PDF-разбора."""
+    if paragraph.pdf_total_lines_count is not None:
+        return paragraph.pdf_total_lines_count
+    start = paragraph.pdf_lines_count_on_start_page
+    end = paragraph.pdf_lines_count_on_end_page
+    if start is None and end is None:
+        return None
+    return (start or 0) + (end or 0)
+
+
+def _single_line_by_geometry(paragraph: ParagraphBlock) -> bool:
+    """Оценивает однострочность по высоте блока, если счетчиков строк нет.
+
+    Запасной путь для JSON, разобранных до появления
+    ``pdf_lines_count_*``: высота абзаца сравнивается с одной строкой кегля
+    доминирующего рана. Если геометрии нет вовсе, блок не считается
+    однострочным: лучше проверить, чем молча пропустить нарушение.
+    """
+    top = paragraph.pdf_y_top_mm
+    bottom = paragraph.pdf_y_bottom_mm
+    if top is None or bottom is None:
+        return False
+    sizes = [
+        run.effective_props.size_pt
+        for run in paragraph.runs
+        if run.effective_props.size_pt
+    ]
+    if not sizes:
+        return False
+    single_line_mm = max(sizes) * 0.3528 * 1.2
+    if single_line_mm <= 0:
+        return False
+    return (bottom - top) <= single_line_mm * 1.5
+
+
+#: Сколько строк нужно, чтобы выключка по ширине стала измеримой.
+#: У абзаца из двух строк вторая строка — последняя, и её правый край всегда
+#: рваный; отличить выключку от левого края по ней нельзя. Нужны минимум две
+#: полные строки, то есть три строки в абзаце.
+PDF_MIN_MEASURABLE_LINES = 3
+
+
+def _pdf_alignment_unmeasurable(paragraph: ParagraphBlock) -> bool:
+    """True, если выравнивание абзаца из PDF физически не определить.
+
+    В PDF выключка по ширине видна только по полным строкам, упирающимся в оба
+    края. У короткого абзаца (одна-две строки) последняя строка заведомо
+    короче, и оценка выравнивания неотличима от левого края; у перечислений,
+    склеенных парсером в один блок, оценка ещё и случайна. Парсер помечает
+    такое выравнивание ``pdf_estimate``; считать его вердиктом нельзя —
+    отсутствие измерения не превращается в нарушение. Абзацы от трёх строк
+    измеряются по краям и проверяются как обычно.
+    """
+    if paragraph.effective_props.alignment_source != "pdf_estimate":
+        return False
+    lines = _pdf_line_count(paragraph)
+    if lines is not None:
+        return lines < PDF_MIN_MEASURABLE_LINES
+    return _single_line_by_geometry(paragraph)
+
+
 def _check_alignment_rule(
     rule: AlignmentRule,
     document: ParsedDocxDocument,
@@ -222,11 +284,21 @@ def _check_alignment_rule(
 
     violations: List[Violation] = []
     checked = 0
+    unmeasurable_pdf = 0
     for paragraph in measured:
         actual_alignment = paragraph.effective_props.alignment
         if actual_alignment is None:
             # Защита от старого JSON: поле «не измерено», а не «по левому краю».
             unmeasured += 1
+            continue
+        if (
+            rule.target.scope in {"body_text", "body_paragraphs"}
+            and _pdf_alignment_unmeasurable(paragraph)
+        ):
+            # PDF: у однострочного абзаца выключка по ширине неотличима от
+            # левого края, поэтому это отсутствие измерения, а не нарушение.
+            unmeasured += 1
+            unmeasurable_pdf += 1
             continue
         checked += 1
         if _alignment_matches(expected_alignment, actual_alignment):
@@ -254,6 +326,7 @@ def _check_alignment_rule(
         "objects_considered": len(measured),
         "checked": checked,
         "skipped_unmeasured": unmeasured,
+        "unmeasurable_pdf_short_lines": unmeasurable_pdf,
         "mismatches_total": len(violations),
     }
     if checked == 0:
@@ -266,7 +339,8 @@ def _check_alignment_rule(
                 expected_text=expected_text,
                 observed_text=(
                     "выравнивание не измерено ни для одного объекта области "
-                    f"'{rule.target.scope}': пропущено {unmeasured}"
+                    f"'{rule.target.scope}': пропущено {unmeasured} "
+                    f"(из них коротких PDF-абзацев: {unmeasurable_pdf})"
                 ),
                 confidence="low",
                 details=details,
@@ -281,6 +355,11 @@ def _check_alignment_rule(
             f"{ALIGNMENT_LABELS[expected_alignment]}"
         )
     )
+    if unmeasurable_pdf:
+        observed_text += (
+            f"; выравнивание не определено для {unmeasurable_pdf} "
+            "коротких абзацев PDF (менее трёх строк)"
+        )
     return (
         violations,
         checked,

@@ -225,10 +225,22 @@ class RuleTarget(BaseModel):
         description="Проверять пустые абзацы и абзацы только с графикой/формулой",
     )
     exclude_contexts: List[str] = Field(
-        default_factory=lambda: ["title_page", "code_listing"],
+        default_factory=lambda: [
+            "title_page",
+            "code_listing",
+            "structural_title",
+            "appendix_label",
+            "caption_like",
+            "table_title",
+            "text_formula",
+        ],
         description=(
             "Не проверять блоки этих контекстов в областях body_text и body_paragraphs: "
-            "'title_page' — титульный лист, 'code_listing' — листинг кода. "
+            "'title_page' — титульный лист, 'code_listing' — листинг кода, "
+            "'structural_title' — название элемента структуры («Содержание», «Приложение»), "
+            "'appendix_label' — метка продолжения приложения, 'caption_like' — подпись "
+            "рисунка/таблицы по текстовому маркеру, 'table_title' — заголовок таблицы, "
+            "'text_formula' — формула, набранная текстом. "
             "Пусто — прежнее поведение без контекстной фильтрации"
         ),
     )

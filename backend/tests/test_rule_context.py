@@ -216,7 +216,7 @@ def test_toc_title_with_colon_is_not_title_page() -> None:
     """«Содержание:» по центру — зачин оглавления, а не строка титульного листа."""
     block = _paragraph("toc_title", "Содержание:", alignment="center", size=14.0)
 
-    assert classify_paragraph(block) == "body"
+    assert classify_paragraph(block) == "structural_title"
 
 
 # =====================================================================
@@ -294,7 +294,7 @@ def test_punctuation_artifact_is_not_code_listing() -> None:
     """Одиночная запятая — артефакт разбора, а не строка листинга."""
     block = _paragraph("punctuation_artifact", ",", alignment="center", page=33)
 
-    assert classify_paragraph(block) == "body"
+    assert classify_paragraph(block) == "text_formula"
 
 
 def test_adjacent_listings_merge_into_region() -> None:
@@ -346,7 +346,7 @@ def test_heading_is_never_title_page_or_code_listing() -> None:
 
 
 def test_figure_caption_is_never_title_page() -> None:
-    """Подпись рисунка 12 pt по центру на первой странице — body, а не титул."""
+    """Подпись рисунка 12 pt по центру на первой странице — не титул."""
     block = _paragraph(
         "figure_caption",
         "Рисунок 1 — Схема взаимодействия клиента и сервера",
@@ -354,7 +354,7 @@ def test_figure_caption_is_never_title_page() -> None:
         size=12.0,
     )
 
-    assert classify_paragraph(block) == "body"
+    assert classify_paragraph(block) == "caption_like"
 
 
 def test_abbreviated_figure_caption_is_not_title_page() -> None:
@@ -366,18 +366,18 @@ def test_abbreviated_figure_caption_is_not_title_page() -> None:
         size=12.0,
     )
 
-    assert classify_paragraph(block) == "body"
+    assert classify_paragraph(block) == "caption_like"
 
 
 def test_table_caption_is_never_title_page() -> None:
-    """Подпись таблицы 10 pt в префиксной зоне — body."""
+    """Подпись таблицы 10 pt в префиксной зоне — не титул."""
     blocks: List[BlockUnion] = [
         _paragraph("table_caption", "Таблица 2.1 — Результаты измерений", size=10.0),
     ]
 
     contexts = classify_document_contexts(blocks)
 
-    assert contexts["table_caption"] == "body"
+    assert contexts["table_caption"] == "caption_like"
 
 
 def test_monospace_quote_in_middle_is_not_title_page() -> None:
@@ -635,7 +635,7 @@ def test_toc_title_closes_service_zone() -> None:
     contexts = classify_document_contexts(blocks)
 
     assert contexts["title_ministry"] == "title_page"
-    assert contexts["toc_title"] == "body"
+    assert contexts["toc_title"] == "structural_title"
     assert contexts["after_toc"] == "body"
 
 
