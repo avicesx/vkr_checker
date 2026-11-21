@@ -28,7 +28,7 @@ from parser.core.schema import (
 )
 from rule_engine import RuleEngine, RuleSet, load_profile_ruleset
 from rule_engine.findings import RuleAssessment, RuleCheckReport
-from rule_engine.rules import Rule, RuleKind
+from rule_engine.rules import Rule, RuleCode
 
 TEXT = "Основной текст выпускной квалификационной работы."
 
@@ -208,15 +208,15 @@ def _make_document(
     )
 
 
-def _engine_for_kind(profile_id: str, kind: RuleKind) -> tuple[RuleEngine, Rule]:
+def _engine_for_code(profile_id: str, code: RuleCode) -> tuple[RuleEngine, Rule]:
     """Берет из профиля вуза одно правило нужного вида и создает движок."""
     ruleset = load_profile_ruleset(profile_id)
-    rules = [rule for rule in ruleset.rules if rule.kind == kind]
-    assert len(rules) == 1, f"в профиле {profile_id} ожидалось одно правило вида {kind}"
+    rules = [rule for rule in ruleset.rules if rule.code == code]
+    assert len(rules) == 1, f"в профиле {profile_id} ожидалось одно правило вида {code}"
     rule = rules[0]
     engine = RuleEngine(
         RuleSet(
-            ruleset_id=f"test-{profile_id}-{kind}",
+            ruleset_id=f"test-{profile_id}-{code}",
             ruleset_version="1.0.0",
             rules=[rule],
         )
@@ -237,7 +237,7 @@ def _assessment(report: RuleCheckReport, rule_id: str) -> RuleAssessment:
 @pytest.mark.parametrize("profile_id", ["urgpu", "urfu"])
 def test_page_number_bottom_center_passes_for_footer_profiles(profile_id: str) -> None:
     """Нижний колонтитул по центру соответствует профилям УрГПУ и УрФУ."""
-    engine, rule = _engine_for_kind(profile_id, "page_number_position")
+    engine, rule = _engine_for_code(profile_id, "page_number_position")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(6),
@@ -261,7 +261,7 @@ def test_page_number_bottom_center_passes_for_footer_profiles(profile_id: str) -
 
 def test_page_number_bottom_center_fails_for_mpgu() -> None:
     """МПГУ требует номер в верхнем колонтитуле: нижний номер — нарушение."""
-    engine, rule = _engine_for_kind("mpgu", "page_number_position")
+    engine, rule = _engine_for_code("mpgu", "page_number_position")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(6),
@@ -277,7 +277,7 @@ def test_page_number_bottom_center_fails_for_mpgu() -> None:
     assert len(report.violations) == 1
     violation = report.violations[0]
     assert violation.violation_id == f"{rule.rule_id}:document"
-    assert violation.kind == "page_number_position"
+    assert violation.code == "page_number_position"
     assert violation.expected == {"zone": "header", "alignment": "center"}
     assert violation.found["zone"] == "footer"
     assert violation.found["alignment"] == "center"
@@ -291,7 +291,7 @@ def test_page_number_bottom_center_fails_for_mpgu() -> None:
 
 def test_page_number_header_center_passes_for_mpgu() -> None:
     """Верхний колонтитул по центру соответствует профилю МПГУ."""
-    engine, rule = _engine_for_kind("mpgu", "page_number_position")
+    engine, rule = _engine_for_code("mpgu", "page_number_position")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(6, location="header"),
@@ -307,7 +307,7 @@ def test_page_number_header_center_passes_for_mpgu() -> None:
 
 def test_page_number_not_assessed_when_too_few_numbers() -> None:
     """Порог max(3, N // 3): двух номеров на шесть страниц недостаточно."""
-    engine, rule = _engine_for_kind("urgpu", "page_number_position")
+    engine, rule = _engine_for_code("urgpu", "page_number_position")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=(
@@ -334,7 +334,7 @@ def test_page_number_not_assessed_when_too_few_numbers() -> None:
 
 def test_page_number_assessed_at_exact_threshold() -> None:
     """Ровно max(3, N // 3) распознанных номеров уже достаточно для оценки."""
-    engine, rule = _engine_for_kind("urfu", "page_number_position")
+    engine, rule = _engine_for_code("urfu", "page_number_position")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=(
@@ -352,7 +352,7 @@ def test_page_number_assessed_at_exact_threshold() -> None:
 
 def test_page_number_not_assessed_without_pdf_or_docx_data() -> None:
     """Без PDF-аудита и без номера в колонтитулах DOCX проверка не выполняется."""
-    engine, rule = _engine_for_kind("urfu", "page_number_position")
+    engine, rule = _engine_for_code("urfu", "page_number_position")
     document = _make_document(sections=[_section()], blocks=[])
 
     report = engine.check(document)
@@ -367,7 +367,7 @@ def test_page_number_not_assessed_without_pdf_or_docx_data() -> None:
 
 def test_page_number_docx_footer_field_passes_for_urfu() -> None:
     """DOCX-ветка: поле номера в нижнем колонтитуле по центру — соответствие."""
-    engine, rule = _engine_for_kind("urfu", "page_number_position")
+    engine, rule = _engine_for_code("urfu", "page_number_position")
     footer = {
         "default": {
             "hf_type": "default",
@@ -393,7 +393,7 @@ def test_page_number_docx_footer_field_passes_for_urfu() -> None:
 
 def test_page_format_passes_for_a4_portrait() -> None:
     """Секция 210 × 297 мм книжной ориентации соответствует профилю УрФУ."""
-    engine, rule = _engine_for_kind("urfu", "page_format")
+    engine, rule = _engine_for_code("urfu", "page_format")
     document = _make_document(sections=[_section()])
 
     report = engine.check(document)
@@ -421,7 +421,7 @@ def test_page_format_uses_one_millimeter_tolerance(
     expected_status: str,
 ) -> None:
     """Допуск ±1 мм: отклонение 0,9 мм проходит, 1,5 мм — уже нарушение."""
-    engine, rule = _engine_for_kind("urfu", "page_format")
+    engine, rule = _engine_for_code("urfu", "page_format")
     document = _make_document(
         sections=[
             _section(
@@ -441,7 +441,7 @@ def test_page_format_uses_one_millimeter_tolerance(
 
 def test_page_format_fails_for_non_a4_section() -> None:
     """Секция 215 × 297 мм не проходит проверку A4 с допуском ±1 мм."""
-    engine, rule = _engine_for_kind("urfu", "page_format")
+    engine, rule = _engine_for_code("urfu", "page_format")
     document = _make_document(
         sections=[_section(width_mm=215.0, height_mm=297.0, is_a4_standard=False)]
     )
@@ -453,7 +453,7 @@ def test_page_format_fails_for_non_a4_section() -> None:
     assert len(report.violations) == 1
     violation = report.violations[0]
     assert violation.violation_id == f"{rule.rule_id}:section:0"
-    assert violation.kind == "page_format"
+    assert violation.code == "page_format"
     assert violation.severity == "error"
     assert violation.expected == {"width_mm": 210.0}
     assert violation.found["width_mm"] == 215.0
@@ -464,7 +464,7 @@ def test_page_format_fails_for_non_a4_section() -> None:
 
 def test_page_format_fails_for_landscape_section() -> None:
     """Альбомная секция не соответствует книжной ориентации правила."""
-    engine, rule = _engine_for_kind("urfu", "page_format")
+    engine, rule = _engine_for_code("urfu", "page_format")
     document = _make_document(
         sections=[
             _section(
@@ -489,7 +489,7 @@ def test_page_format_fails_for_landscape_section() -> None:
 
 def test_page_format_not_assessed_without_sections() -> None:
     """Без секций формат листа не проверяется."""
-    engine, rule = _engine_for_kind("urfu", "page_format")
+    engine, rule = _engine_for_code("urfu", "page_format")
     document = _make_document(sections=[])
 
     report = engine.check(document)
@@ -507,7 +507,7 @@ def test_page_format_not_assessed_without_sections() -> None:
 @pytest.mark.parametrize("profile_id", ["urgpu", "urfu"])
 def test_line_spacing_docx_half_spacing_passes(profile_id: str) -> None:
     """Полуторный интервал абзацев DOCX соответствует профилю."""
-    engine, rule = _engine_for_kind(profile_id, "line_spacing")
+    engine, rule = _engine_for_code(profile_id, "line_spacing")
     document = _make_document(blocks=_paragraphs(12, line_spacing_value=1.5))
 
     report = engine.check(document)
@@ -523,7 +523,7 @@ def test_line_spacing_docx_half_spacing_passes(profile_id: str) -> None:
 
 def test_line_spacing_docx_single_spacing_fails() -> None:
     """Одинарный интервал абзацев DOCX нарушает требование 1,5."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(blocks=_paragraphs(10, line_spacing_value=1.0))
 
     report = engine.check(document)
@@ -533,7 +533,7 @@ def test_line_spacing_docx_single_spacing_fails() -> None:
     assert len(report.violations) == 1
     violation = report.violations[0]
     assert violation.violation_id == f"{rule.rule_id}:document"
-    assert violation.kind == "line_spacing"
+    assert violation.code == "line_spacing"
     assert violation.expected == {"ratio": 1.5, "tolerance": 0.25}
     assert violation.found["ratio"] == 1.0
     assert violation.found["sample_count"] == 10
@@ -543,7 +543,7 @@ def test_line_spacing_docx_single_spacing_fails() -> None:
 
 def test_line_spacing_median_is_stable_with_outliers() -> None:
     """Медиана не смещается от одиночного абзаца с другим интервалом."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     blocks = _paragraphs(8, line_spacing_value=1.5) + _paragraphs(
         1, line_spacing_value=2.0
     )
@@ -560,7 +560,7 @@ def test_line_spacing_median_is_stable_with_outliers() -> None:
 
 def test_line_spacing_excludes_headings_from_docx_sample() -> None:
     """Заголовок с другим интервалом не входит в выборку body_text."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         blocks=_paragraphs(8, line_spacing_value=1.5) + [_heading(line_spacing_value=1.0)]
     )
@@ -575,7 +575,7 @@ def test_line_spacing_excludes_headings_from_docx_sample() -> None:
 
 def test_line_spacing_not_assessed_without_docx_or_pdf_data() -> None:
     """Без абзацев и без PDF-оценки интервал не проверяется."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(blocks=[])
 
     report = engine.check(document)
@@ -591,7 +591,7 @@ def test_line_spacing_not_assessed_without_docx_or_pdf_data() -> None:
 
 def test_line_spacing_exact_value_is_not_converted_to_ratio() -> None:
     """Интервал в пунктах (exact) не переводится в множитель: not_assessed."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         blocks=_paragraphs(3, line_spacing_value=18.0, line_spacing_rule="exact")
     )
@@ -607,7 +607,7 @@ def test_line_spacing_exact_value_is_not_converted_to_ratio() -> None:
 
 def test_line_spacing_pdf_only_uses_leading_ratio() -> None:
     """В pdf_only интервал берется из агрегата meta.pdf_median_leading_ratio."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(6, leading_ratio=1.52),
@@ -630,7 +630,7 @@ def test_line_spacing_pdf_only_uses_leading_ratio() -> None:
 
 def test_line_spacing_pdf_only_single_spacing_fails() -> None:
     """Одинарный интервал PDF (1,0) нарушает требование 1,5."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(6, leading_ratio=1.0),
@@ -652,7 +652,7 @@ def test_line_spacing_pdf_only_single_spacing_fails() -> None:
 
 def test_line_spacing_pdf_falls_back_to_page_ratios() -> None:
     """Если агрегата в meta нет, берется медиана постраничных оценок."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(4, leading_ratio=1.5),
@@ -674,7 +674,7 @@ def test_line_spacing_pdf_falls_back_to_page_ratios() -> None:
 
 def test_font_family_accepts_postscript_spelling() -> None:
     """PDF-гарнитура без пробелов (``TimesNewRoman``) равна ``Times New Roman``."""
-    engine, _ = _engine_for_kind("urfu", "font")
+    engine, _ = _engine_for_code("urfu", "font")
     document = _make_document(
         sections=[_section()],
         blocks=[_font_paragraph("TimesNewRoman")],
@@ -689,7 +689,7 @@ def test_font_family_accepts_postscript_spelling() -> None:
 
 def test_font_family_still_rejects_other_families() -> None:
     """Терпимость к записи имени не приравнивает Arial к Times New Roman."""
-    engine, rule = _engine_for_kind("urfu", "font")
+    engine, rule = _engine_for_code("urfu", "font")
     document = _make_document(
         sections=[_section()],
         blocks=[_font_paragraph("Arial")],
@@ -708,7 +708,7 @@ def test_font_family_still_rejects_other_families() -> None:
 
 def test_line_spacing_pdf_only_ignores_paragraph_estimate_scale() -> None:
     """Шкала абзацев PDF (шаг / (кегль × 1,2)) не подменяет leading ratio."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(6, leading_ratio=1.5),
@@ -735,7 +735,7 @@ def test_line_spacing_pdf_only_ignores_paragraph_estimate_scale() -> None:
 
 def test_line_spacing_not_assessed_when_only_pdf_paragraph_scale_exists() -> None:
     """Без агрегата t2 шкала абзацев PDF не выдается за множитель Word."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         sections=[_section()],
         blocks=_paragraphs(
@@ -758,7 +758,7 @@ def test_line_spacing_not_assessed_when_only_pdf_paragraph_scale_exists() -> Non
 
 def test_line_spacing_prefers_docx_paragraphs_over_pdf_estimate() -> None:
     """В DOCX-документе множитель абзацев важнее оценки PDF."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         sections=[_section()],
         blocks=_paragraphs(6, line_spacing_value=1.5),
@@ -795,7 +795,7 @@ def test_line_spacing_pdf_converts_to_word_multiplier(
     expected_status: str,
 ) -> None:
     """Типографское шаг/кегль приводится к множителю Word делением на 1,15."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=_audit_pages(6, leading_ratio=typographic_ratio),
@@ -841,7 +841,7 @@ def test_line_spacing_modes_agree_on_word_multiplier(
     expected_status: str,
 ) -> None:
     """DOCX и PDF выносят одинаковый вердикт для одного множителя Word."""
-    engine, rule = _engine_for_kind("urfu", "line_spacing")
+    engine, rule = _engine_for_code("urfu", "line_spacing")
     docx_document = _make_document(
         blocks=_paragraphs(10, line_spacing_value=docx_ratio),
     )
@@ -877,7 +877,7 @@ def test_report_assessments_are_deterministic() -> None:
     rules = [
         rule
         for rule in ruleset.rules
-        if rule.kind in {"page_number_position", "page_format", "line_spacing"}
+        if rule.code in {"page_number_position", "page_format", "line_spacing"}
     ]
     assert len(rules) == 3
     engine = RuleEngine(
@@ -897,7 +897,7 @@ def test_report_assessments_are_deterministic() -> None:
     second = engine.check(document)
 
     assert first.model_dump_json() == second.model_dump_json()
-    assert [item.kind for item in first.assessments] == [
+    assert [item.code for item in first.assessments] == [
         "line_spacing",
         "page_format",
         "page_number_position",

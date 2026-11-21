@@ -74,10 +74,10 @@ def _build_violation(
     return Violation(
         violation_id=f"{rule.rule_id}:{address}",
         rule_id=rule.rule_id,
-        kind=rule.kind,
-        severity=rule.severity,
+        code=rule.code,
+        severity=rule.strictness,
         message=rule.message,
-        requirement_ref=rule.requirement_ref,
+        quote=rule.quote,
         location=location,
         expected=expected,
         found=found,
@@ -101,7 +101,7 @@ def _build_assessment(
     """Единая сборка оценки правила: каждое правило дает ровно одну оценку."""
     return RuleAssessment(
         rule_id=rule.rule_id,
-        kind=rule.kind,
+        code=rule.code,
         status=status,
         expected_text=expected_text,
         observed_text=observed_text,

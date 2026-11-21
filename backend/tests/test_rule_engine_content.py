@@ -151,12 +151,12 @@ def _make_document(
     )
 
 
-def _engine(rule_id: str, expected: Optional[Dict[str, object]] = None) -> tuple[RuleEngine, Rule]:
+def _engine(rule_id: str, params: Optional[Dict[str, object]] = None) -> tuple[RuleEngine, Rule]:
     """Создает движок с одним правилом набора, при необходимости с новыми ожиданиями."""
     rule = load_default_ruleset().get_rule(rule_id)
     payload = rule.model_dump(mode="json")
-    if expected is not None:
-        payload["expected"] = expected
+    if params is not None:
+        payload["params"] = params
     ruleset = RuleSet.model_validate(
         {
             "ruleset_id": f"test-{rule_id}",

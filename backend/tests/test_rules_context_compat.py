@@ -81,10 +81,10 @@ def _font_ruleset(target: Dict[str, object]) -> Dict[str, object]:
         "rules": [
             {
                 "rule_id": "font_body_text",
-                "kind": "font",
+                "code": "font",
                 "message": "Основной текст набирается Times New Roman, 14 pt",
                 "target": target,
-                "expected": {"family": "Times New Roman", "size_pt": 14.0},
+                "params": {"family": "Times New Roman", "size_pt": 14.0},
             }
         ],
     }

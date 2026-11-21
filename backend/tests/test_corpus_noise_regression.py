@@ -370,10 +370,10 @@ def test_pdf_only_font_family_check_is_enabled(corpus: Dict[str, CorpusDoc]) -> 
             "rules": [
                 {
                     "rule_id": "font_body_text",
-                    "kind": "font",
+                    "code": "font",
                     "message": "Основной текст набран Times New Roman",
                     "target": {"scope": "body_text"},
-                    "expected": {"family": "Arial"},
+                    "params": {"family": "Arial"},
                 }
             ],
         }
@@ -679,7 +679,7 @@ def test_corpus_total_noise_at_most_target(corpus: Dict[str, CorpusDoc]) -> None
     )
 
 
-def _new_kind_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
+def _new_code_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
     """Считает нарушения новых видов по семействам проверок.
 
     Выравнивание и шрифт считаются по конкретному правилу (ячейки таблиц), а
@@ -701,7 +701,7 @@ def _new_kind_counts(corpus: Dict[str, CorpusDoc]) -> Dict[str, int]:
 
 
 @requires_corpus
-def test_new_check_kinds_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> None:
+def test_new_check_codes_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) -> None:
     """Шум новых видов проверок не больше первого замера на корпусе.
 
     Первый замер (t3, набор правил 2.1.0): alignment_table_cells 144,
@@ -711,7 +711,7 @@ def test_new_check_kinds_noise_at_most_baseline(corpus: Dict[str, CorpusDoc]) ->
     тексте. Числа детерминированы, поэтому бюджет — потолок: снижение допустимо,
     рост означает регрессию обогащения или правил.
     """
-    counts = _new_kind_counts(corpus)
+    counts = _new_code_counts(corpus)
     total = sum(counts.values())
 
     for family, baseline in NEW_KIND_NOISE_BASELINE_BY_FAMILY.items():

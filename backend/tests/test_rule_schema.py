@@ -53,10 +53,10 @@ from rule_engine.rules import (
 def _font_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "font_body_text",
-        "kind": "font",
+        "code": "font",
         "message": "Шрифт основного текста",
         "target": {"scope": "body_text"},
-        "expected": {"family": "Times New Roman", "size_pt": 14.0},
+        "params": {"family": "Times New Roman", "size_pt": 14.0},
     }
     rule.update(overrides)
     return rule
@@ -65,10 +65,10 @@ def _font_rule(**overrides: object) -> dict:
 def _margin_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "page_margins",
-        "kind": "margin",
+        "code": "margin",
         "message": "Поля страницы",
         "target": {"scope": "sections"},
-        "expected": {"left_mm": 30.0, "right_mm": 15.0},
+        "params": {"left_mm": 30.0, "right_mm": 15.0},
     }
     rule.update(overrides)
     return rule
@@ -77,10 +77,10 @@ def _margin_rule(**overrides: object) -> dict:
 def _heading_levels_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "heading_levels",
-        "kind": "heading_levels",
+        "code": "heading_levels",
         "message": "Иерархия заголовков",
         "target": {"scope": "headings"},
-        "expected": {"first_level": 1, "allow_skipped_levels": False},
+        "params": {"first_level": 1, "allow_skipped_levels": False},
     }
     rule.update(overrides)
     return rule
@@ -89,10 +89,10 @@ def _heading_levels_rule(**overrides: object) -> dict:
 def _toc_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "toc",
-        "kind": "toc",
+        "code": "toc",
         "message": "Оглавление",
         "target": {"scope": "toc"},
-        "expected": {
+        "params": {
             "require_toc": True,
             "check_completeness": True,
             "required_entries": [{"label": "введение", "role": "introduction"}],
@@ -113,10 +113,10 @@ def _ruleset(*rules: dict) -> dict:
 def _line_spacing_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "line_spacing_body",
-        "kind": "line_spacing",
+        "code": "line_spacing",
         "message": "Полуторный межстрочный интервал",
         "target": {"scope": "body_text"},
-        "expected": {"ratio": 1.5, "tolerance": 0.25},
+        "params": {"ratio": 1.5, "tolerance": 0.25},
     }
     rule.update(overrides)
     return rule
@@ -125,10 +125,10 @@ def _line_spacing_rule(**overrides: object) -> dict:
 def _page_number_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "page_number_position",
-        "kind": "page_number_position",
+        "code": "page_number_position",
         "message": "Номер страницы в нижнем колонтитуле по центру",
         "target": {"scope": "headers_footers"},
-        "expected": {"zone": "footer", "alignment": "center"},
+        "params": {"zone": "footer", "alignment": "center"},
     }
     rule.update(overrides)
     return rule
@@ -137,10 +137,10 @@ def _page_number_rule(**overrides: object) -> dict:
 def _page_format_rule(**overrides: object) -> dict:
     rule = {
         "rule_id": "page_format",
-        "kind": "page_format",
+        "code": "page_format",
         "message": "Лист A4",
         "target": {"scope": "sections"},
-        "expected": {"width_mm": 210.0, "height_mm": 297.0, "tolerance_mm": 1.0},
+        "params": {"width_mm": 210.0, "height_mm": 297.0, "tolerance_mm": 1.0},
     }
     rule.update(overrides)
     return rule
@@ -153,7 +153,7 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "2.4.0"
+    assert ruleset.ruleset_version == "3.0.0"
     assert [rule.rule_id for rule in ruleset.rules] == [
         "font_body_text",
         "indent_first_line",
@@ -235,40 +235,40 @@ def test_default_ruleset_describes_all_checks() -> None:
     assert len(expected_types) == len(ruleset.rules)
     for rule, expected_type in zip(ruleset.rules, expected_types):
         assert isinstance(rule, expected_type), rule.rule_id
-    assert ruleset.get_rule("alignment_body_text").expected.alignment == "justify"
-    assert ruleset.get_rule("line_spacing_body").expected.ratio == 1.5
-    assert ruleset.get_rule("page_number_position").expected.zone == "footer"
-    assert ruleset.get_rule("page_number_position").expected.alignment == "center"
-    assert ruleset.get_rule("page_format").expected.width_mm == 210.0
-    assert ruleset.get_rule("page_format").expected.height_mm == 297.0
-    heading_font = ruleset.get_rule("heading_font").expected.font
+    assert ruleset.get_rule("alignment_body_text").params.alignment == "justify"
+    assert ruleset.get_rule("line_spacing_body").params.ratio == 1.5
+    assert ruleset.get_rule("page_number_position").params.zone == "footer"
+    assert ruleset.get_rule("page_number_position").params.alignment == "center"
+    assert ruleset.get_rule("page_format").params.width_mm == 210.0
+    assert ruleset.get_rule("page_format").params.height_mm == 297.0
+    heading_font = ruleset.get_rule("heading_font").params.font
     assert heading_font.family == "Times New Roman"
     assert heading_font.size_pt == 14.0
     assert heading_font.bold is True
-    assert ruleset.get_rule("widow_control_body").expected.enabled is True
-    assert ruleset.get_rule("heading_page_break").expected.roles == [
+    assert ruleset.get_rule("widow_control_body").params.enabled is True
+    assert ruleset.get_rule("heading_page_break").params.roles == [
         "main_chapter",
         "introduction",
         "conclusion",
         "bibliography",
         "appendix",
     ]
-    volume = ruleset.get_rule("document_volume").expected
+    volume = ruleset.get_rule("document_volume").params
     assert (volume.min_pages, volume.max_pages) == (60, 90)
     assert (volume.min_words, volume.max_words) == (8000, 18000)
-    prose = ruleset.get_rule("microtypography_prose").expected
+    prose = ruleset.get_rule("microtypography_prose").params
     assert prose.checks == [
         "wrong_quotes",
         "wrong_dashes",
         "multiple_spaces",
         "space_before_punctuation",
     ]
-    assert ruleset.get_rule("microtypography_nbsp").expected.checks == ["missing_nbsp"]
-    assert ruleset.get_rule("equation_numbering").expected.require_numbering is True
-    assert ruleset.get_rule("bibliography_count").expected.min_sources == 20
-    order = ruleset.get_rule("bibliography_order").expected
+    assert ruleset.get_rule("microtypography_nbsp").params.checks == ["missing_nbsp"]
+    assert ruleset.get_rule("equation_numbering").params.require_numbering is True
+    assert ruleset.get_rule("bibliography_count").params.min_sources == 20
+    order = ruleset.get_rule("bibliography_order").params
     assert (order.start_at, order.allow_gaps, order.allow_duplicates) == (1, False, False)
-    recency = ruleset.get_rule("bibliography_recency").expected
+    recency = ruleset.get_rule("bibliography_recency").params
     assert (recency.min_recent_share, recency.recent_years) == (0.3, 5)
 
 
@@ -279,7 +279,7 @@ def test_default_ruleset_excludes_front_matter_from_heading_rules() -> None:
 
     assert heading_rule.target.scope == "headings"
     assert heading_rule.target.exclude_roles == ["title_page", "task_sheet", "appendix"]
-    assert ruleset.get_rule("heading_alignment").severity == "warning"
+    assert ruleset.get_rule("heading_alignment").strictness == "warning"
 
 
 def test_default_ruleset_matches_parser_defaults() -> None:
@@ -289,13 +289,13 @@ def test_default_ruleset_matches_parser_defaults() -> None:
     indent_rule = ruleset.get_rule("indent_first_line")
     margin_rule = ruleset.get_rule("page_margins")
 
-    assert font_rule.expected.family == "Times New Roman"
-    assert font_rule.expected.size_pt == 14.0
-    assert indent_rule.expected.first_line_mm == 12.5
-    assert margin_rule.expected.left_mm == 30.0
-    assert margin_rule.expected.right_mm == 15.0
-    assert margin_rule.expected.top_mm == 20.0
-    assert margin_rule.expected.bottom_mm == 20.0
+    assert font_rule.params.family == "Times New Roman"
+    assert font_rule.params.size_pt == 14.0
+    assert indent_rule.params.first_line_mm == 12.5
+    assert margin_rule.params.left_mm == 30.0
+    assert margin_rule.params.right_mm == 15.0
+    assert margin_rule.params.top_mm == 20.0
+    assert margin_rule.params.bottom_mm == 20.0
 
 
 def test_default_ruleset_file_is_present() -> None:
@@ -318,10 +318,10 @@ def test_unknown_rule_kind_is_rejected() -> None:
     payload = _ruleset(
         {
             "rule_id": "line_spacing",
-            "kind": "spacing",
+            "code": "spacing",
             "message": "Интервал",
             "target": {"scope": "body_text"},
-            "expected": {"value": 1.5},
+            "params": {"value": 1.5},
         }
     )
 
@@ -339,7 +339,7 @@ def test_unknown_scope_is_rejected() -> None:
 
 def test_unknown_expected_key_is_rejected() -> None:
     """Лишний ключ в expected не должен молча игнорироваться."""
-    payload = _ruleset(_font_rule(expected={"family": "Times New Roman", "size": 14}))
+    payload = _ruleset(_font_rule(params={"family": "Times New Roman", "size": 14}))
 
     with pytest.raises(ValueError):
         RuleSet.model_validate(payload)
@@ -347,7 +347,7 @@ def test_unknown_expected_key_is_rejected() -> None:
 
 def test_empty_expectation_is_rejected() -> None:
     """Правило без проверяемых полей бесполезно и отвергается."""
-    payload = _ruleset(_font_rule(expected={"size_tolerance_pt": 0.5}))
+    payload = _ruleset(_font_rule(params={"size_tolerance_pt": 0.5}))
 
     with pytest.raises(ValueError, match="пусто"):
         RuleSet.model_validate(payload)
@@ -355,7 +355,7 @@ def test_empty_expectation_is_rejected() -> None:
 
 def test_negative_tolerance_is_rejected() -> None:
     """Отрицательный допуск не имеет смысла."""
-    payload = _ruleset(_font_rule(expected={"size_pt": 14.0, "size_tolerance_pt": -1.0}))
+    payload = _ruleset(_font_rule(params={"size_pt": 14.0, "size_tolerance_pt": -1.0}))
 
     with pytest.raises(ValueError):
         RuleSet.model_validate(payload)
@@ -391,10 +391,10 @@ def test_required_sections_rule_requires_structure_scope() -> None:
     payload = _ruleset(
         {
             "rule_id": "required_sections",
-            "kind": "required_sections",
+            "code": "required_sections",
             "message": "Разделы",
             "target": {"scope": "headings"},
-            "expected": {"sections": [{"label": "введение", "role": "introduction"}]},
+            "params": {"sections": [{"label": "введение", "role": "introduction"}]},
         }
     )
 
@@ -415,10 +415,10 @@ def test_empty_heading_expectation_is_rejected() -> None:
     payload = _ruleset(
         {
             "rule_id": "heading_format",
-            "kind": "heading_format",
+            "code": "heading_format",
             "message": "Оформление заголовка",
             "target": {"scope": "headings"},
-            "expected": {"trailing_dot": "any", "case": "any"},
+            "params": {"trailing_dot": "any", "case": "any"},
         }
     )
 
@@ -429,7 +429,7 @@ def test_empty_heading_expectation_is_rejected() -> None:
 def test_heading_levels_reject_max_level_below_first_level() -> None:
     """Ограничение глубины не может быть меньше стартового уровня."""
     payload = _ruleset(
-        _heading_levels_rule(expected={"first_level": 3, "max_level": 2})
+        _heading_levels_rule(params={"first_level": 3, "max_level": 2})
     )
 
     with pytest.raises(ValueError, match="max_level"):
@@ -440,7 +440,7 @@ def test_toc_completeness_requires_entries() -> None:
     """Полноту оглавления не с чем сверять без списка разделов."""
     payload = _ruleset(
         _toc_rule(
-            expected={
+            params={
                 "require_toc": True,
                 "check_completeness": True,
                 "required_entries": [],
@@ -456,7 +456,7 @@ def test_toc_completeness_enables_itself_with_required_entries() -> None:
     """Список разделов сам включает проверку полноты оглавления."""
     payload = _ruleset(
         _toc_rule(
-            expected={
+            params={
                 "require_toc": True,
                 "required_entries": [{"label": "введение", "role": "introduction"}],
             }
@@ -465,16 +465,16 @@ def test_toc_completeness_enables_itself_with_required_entries() -> None:
 
     ruleset = RuleSet.model_validate(payload)
 
-    assert ruleset.rules[0].expected.check_completeness is True
+    assert ruleset.rules[0].params.check_completeness is True
 
 
 def test_minimal_toc_rule_checks_only_presence() -> None:
     """Минимальное правило оглавления проверяет только его наличие."""
-    payload = _ruleset(_toc_rule(expected={"require_toc": True}))
+    payload = _ruleset(_toc_rule(params={"require_toc": True}))
 
     ruleset = RuleSet.model_validate(payload)
 
-    assert ruleset.rules[0].expected.check_completeness is False
+    assert ruleset.rules[0].params.check_completeness is False
 
 
 def test_section_spec_requires_role_or_titles() -> None:
@@ -482,10 +482,10 @@ def test_section_spec_requires_role_or_titles() -> None:
     payload = _ruleset(
         {
             "rule_id": "required_sections",
-            "kind": "required_sections",
+            "code": "required_sections",
             "message": "Разделы",
             "target": {"scope": "document_structure"},
-            "expected": {"sections": [{"label": "введение"}]},
+            "params": {"sections": [{"label": "введение"}]},
         }
     )
 
@@ -498,10 +498,10 @@ def test_required_sections_reject_duplicate_labels() -> None:
     payload = _ruleset(
         {
             "rule_id": "required_sections",
-            "kind": "required_sections",
+            "code": "required_sections",
             "message": "Разделы",
             "target": {"scope": "document_structure"},
-            "expected": {
+            "params": {
                 "sections": [
                     {"label": "введение", "role": "introduction"},
                     {"label": "введение", "role": "conclusion"},
@@ -561,8 +561,8 @@ def test_line_spacing_rule_describes_multiplier() -> None:
 
     assert isinstance(rule, LineSpacingRule)
     assert rule.target.scope == "body_text"
-    assert rule.expected.ratio == 1.5
-    assert rule.expected.tolerance == 0.25
+    assert rule.params.ratio == 1.5
+    assert rule.params.tolerance == 0.25
 
 
 def test_line_spacing_rule_accepts_heading_scope() -> None:
@@ -591,7 +591,7 @@ def test_line_spacing_rule_rejects_sections_scope() -> None:
 )
 def test_line_spacing_rule_rejects_impossible_values(expected: dict) -> None:
     """Нулевой, отрицательный и чрезмерный множитель не имеют смысла."""
-    payload = _ruleset(_line_spacing_rule(expected=expected))
+    payload = _ruleset(_line_spacing_rule(params=expected))
 
     with pytest.raises(ValueError):
         RuleSet.model_validate(payload)
@@ -604,24 +604,24 @@ def test_page_number_position_rule_defaults_to_footer() -> None:
 
     assert isinstance(rule, PageNumberPositionRule)
     assert rule.target.scope == "headers_footers"
-    assert rule.expected.zone == "footer"
-    assert rule.expected.alignment == "center"
+    assert rule.params.zone == "footer"
+    assert rule.params.alignment == "center"
 
 
 def test_page_number_position_rule_accepts_header_and_alignment() -> None:
     """Профиль МПГУ ставит номер сверху; выравнивание можно задать явно."""
     payload = _ruleset(
-        _page_number_rule(expected={"zone": "header", "alignment": "right"})
+        _page_number_rule(params={"zone": "header", "alignment": "right"})
     )
     rule = RuleSet.model_validate(payload).rules[0]
 
-    assert rule.expected.zone == "header"
-    assert rule.expected.alignment == "right"
+    assert rule.params.zone == "header"
+    assert rule.params.alignment == "right"
 
 
 def test_page_number_position_rule_requires_zone() -> None:
     """Без указания колонтитула правило ничего не проверяет."""
-    payload = _ruleset(_page_number_rule(expected={"alignment": "center"}))
+    payload = _ruleset(_page_number_rule(params={"alignment": "center"}))
 
     with pytest.raises(ValueError, match="zone"):
         RuleSet.model_validate(payload)
@@ -629,7 +629,7 @@ def test_page_number_position_rule_requires_zone() -> None:
 
 def test_page_number_position_rejects_pdf_location_names() -> None:
     """Названия положений из PDF-профилей не являются схемой DOCX-правила."""
-    payload = _ruleset(_page_number_rule(expected={"zone": "top_center"}))
+    payload = _ruleset(_page_number_rule(params={"zone": "top_center"}))
 
     with pytest.raises(ValueError):
         RuleSet.model_validate(payload)
@@ -645,22 +645,22 @@ def test_page_number_position_requires_headers_footers_scope() -> None:
 
 def test_page_format_rule_defaults_to_a4_portrait() -> None:
     """Формат по умолчанию — A4 книжной ориентации с допуском ±1 мм."""
-    ruleset = RuleSet.model_validate(_ruleset(_page_format_rule(expected={})))
+    ruleset = RuleSet.model_validate(_ruleset(_page_format_rule(params={})))
     rule = ruleset.rules[0]
 
     assert isinstance(rule, PageFormatRule)
     assert rule.target.scope == "sections"
-    assert rule.expected.width_mm == 210.0
-    assert rule.expected.height_mm == 297.0
-    assert rule.expected.tolerance_mm == 1.0
-    assert rule.expected.orientation == "portrait"
+    assert rule.params.width_mm == 210.0
+    assert rule.params.height_mm == 297.0
+    assert rule.params.tolerance_mm == 1.0
+    assert rule.params.orientation == "portrait"
 
 
 def test_page_format_rule_accepts_landscape() -> None:
     """Альбомный лист описывается теми же полями с переставленными сторонами."""
     payload = _ruleset(
         _page_format_rule(
-            expected={
+            params={
                 "width_mm": 297.0,
                 "height_mm": 210.0,
                 "orientation": "landscape",
@@ -669,8 +669,8 @@ def test_page_format_rule_accepts_landscape() -> None:
     )
     rule = RuleSet.model_validate(payload).rules[0]
 
-    assert rule.expected.orientation == "landscape"
-    assert rule.expected.width_mm == 297.0
+    assert rule.params.orientation == "landscape"
+    assert rule.params.width_mm == 297.0
 
 
 @pytest.mark.parametrize(
@@ -684,7 +684,7 @@ def test_page_format_rule_accepts_landscape() -> None:
 )
 def test_page_format_rule_rejects_impossible_sheet(expected: dict) -> None:
     """Размеры должны согласовываться с ориентацией, допуск — быть неотрицательным."""
-    payload = _ruleset(_page_format_rule(expected=expected))
+    payload = _ruleset(_page_format_rule(params=expected))
 
     with pytest.raises(ValueError):
         RuleSet.model_validate(payload)
@@ -718,27 +718,27 @@ def test_profile_rulesets_load(
     margin_rule = ruleset.get_rule("page_margins")
     assert isinstance(margin_rule, MarginRule)
     observed = (
-        margin_rule.expected.left_mm,
-        margin_rule.expected.right_mm,
-        margin_rule.expected.top_mm,
-        margin_rule.expected.bottom_mm,
+        margin_rule.params.left_mm,
+        margin_rule.params.right_mm,
+        margin_rule.params.top_mm,
+        margin_rule.params.bottom_mm,
     )
     assert observed == margins_mm
-    assert margin_rule.expected.tolerance_mm == 3.0
+    assert margin_rule.params.tolerance_mm == 3.0
 
     number_rule = ruleset.get_rule("page_number_position")
     assert isinstance(number_rule, PageNumberPositionRule)
-    assert number_rule.expected.zone == zone
-    assert number_rule.expected.alignment == "center"
+    assert number_rule.params.zone == zone
+    assert number_rule.params.alignment == "center"
 
 
 def test_profile_common_thresholds_match_methodical_guides() -> None:
     """Общие пороги профилей: шрифт, отступ и интервал из методичек."""
     for profile_id in available_profiles():
         ruleset = load_profile_ruleset(profile_id)
-        font_expectation = ruleset.get_rule("font_body_text").expected
-        indent_expectation = ruleset.get_rule("indent_first_line").expected
-        spacing_expectation = ruleset.get_rule("line_spacing_body").expected
+        font_expectation = ruleset.get_rule("font_body_text").params
+        indent_expectation = ruleset.get_rule("indent_first_line").params
+        spacing_expectation = ruleset.get_rule("line_spacing_body").params
 
         assert font_expectation.family == "Times New Roman"
         assert font_expectation.size_pt == 14.0
@@ -753,7 +753,7 @@ def test_only_urfu_profile_requires_a4() -> None:
     """Формат листа обязателен только в профиле УрФУ."""
     format_rule = load_profile_ruleset("urfu").get_rule("page_format")
     assert isinstance(format_rule, PageFormatRule)
-    assert format_rule.expected.height_mm == 297.0
+    assert format_rule.params.height_mm == 297.0
 
     for profile_id in ("mpgu", "urgpu"):
         with pytest.raises(KeyError):
@@ -784,7 +784,7 @@ def test_unknown_profile_is_rejected() -> None:
 def test_profile_rulesets_do_not_change_default_ruleset() -> None:
     """Набор по умолчанию самодостаточен и не подменяется профилем вуза."""
     default_ruleset = load_default_ruleset()
-    default_kinds = {rule.kind for rule in default_ruleset.rules}
+    default_codes = {rule.code for rule in default_ruleset.rules}
     profile_ruleset = load_profile_ruleset("urfu")
 
     assert {
@@ -800,7 +800,7 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "bibliography_count",
         "bibliography_order",
         "bibliography_recency",
-    } <= default_kinds
+    } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "2.4.0"
+    assert default_ruleset.ruleset_version == "3.0.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

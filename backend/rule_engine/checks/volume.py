@@ -74,7 +74,7 @@ def _check_document_volume_rule(
     статистики DOCX или из извлеченного текста PDF; если парсер его не
     посчитал, проверка слов пропускается с пометкой в оценке.
     """
-    expected = rule.expected
+    expected = rule.params
     pages = document.page_count.total_pages
     words = document.meta.word_stat_words
     page_confidence = document.page_count.confidence

@@ -286,7 +286,7 @@ def _check_toc_rule(
     contexts: Dict[str, str],
 ) -> Tuple[List[Violation], int, RuleAssessment]:
     """Проверяет оглавление и сверяет его записи с заголовками документа."""
-    expected = rule.expected
+    expected = rule.params
     tocs = _toc_blocks(document)
     violations: List[Violation] = []
     confidence: Confidence = "medium" if _is_pdf_only(document) else "high"

@@ -186,9 +186,9 @@ def _validate_rule_params(
         "rules": [
             {
                 "rule_id": f"admin-{rule_type.code}",
-                "kind": rule_type.code,
+                "code": rule_type.code,
                 "message": "Валидация параметров администратором",
-                "expected": params or {},
+                "params": params or {},
                 "target": {
                     "scope": scope
                     or DEFAULT_RULE_SCOPES.get(rule_type.code, "body_text")

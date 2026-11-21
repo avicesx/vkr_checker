@@ -69,7 +69,7 @@ def _check_font_rule(
                 continue
             diff = _compare_font(
                 run.effective_props,
-                rule.expected,
+                rule.params,
                 check_family=True,
                 check_complex_script=not pdf_only,
             )
@@ -206,9 +206,9 @@ def _check_indent_rule(
         props = paragraph.effective_props
         expected_values, found_values, expected_parts, found_parts = _compare_measures(
             expected_values={
-                "first_line_mm": rule.expected.first_line_mm,
-                "left_mm": rule.expected.left_mm,
-                "right_mm": rule.expected.right_mm,
+                "first_line_mm": rule.params.first_line_mm,
+                "left_mm": rule.params.left_mm,
+                "right_mm": rule.params.right_mm,
             },
             actual_values={
                 "first_line_mm": props.indent_first_line_mm,
@@ -216,7 +216,7 @@ def _check_indent_rule(
                 "right_mm": props.indent_right_mm,
             },
             labels=INDENT_LABELS,
-            tolerance=rule.expected.tolerance_mm,
+            tolerance=rule.params.tolerance_mm,
             unit="мм",
         )
         if not expected_values:
@@ -244,7 +244,7 @@ def _check_indent_rule(
         empty_observed="в области действия правила нет абзацев",
         details={
             "scope": rule.target.scope,
-            "tolerance_mm": rule.expected.tolerance_mm,
+            "tolerance_mm": rule.params.tolerance_mm,
             "definition_list_paragraphs": len(definition_list_ids),
         },
     )
@@ -327,7 +327,7 @@ def _check_alignment_rule(
     причиной, а не считается нарушением: как у правила шрифта, отсутствие
     измерения не превращается в вердикт.
     """
-    expected_alignment = rule.expected.alignment
+    expected_alignment = rule.params.alignment
     expected_text = f"выравнивание {ALIGNMENT_LABELS[expected_alignment]}"
     measured: List[ParagraphBlock] = []
     unmeasured = 0

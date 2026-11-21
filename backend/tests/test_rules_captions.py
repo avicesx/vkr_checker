@@ -156,37 +156,37 @@ def _engine(*rules: Dict[str, Any], ruleset_id: str = "test-captions") -> RuleEn
     return RuleEngine(RuleSet.model_validate(payload))
 
 
-def _numbering_rule(expected: Dict[str, Any] | None = None, **overrides: Any) -> Dict[str, Any]:
+def _numbering_rule(params: Dict[str, Any] | None = None, **overrides: Any) -> Dict[str, Any]:
     """Описание правила нумерации подписей."""
     rule: Dict[str, Any] = {
         "rule_id": "caption_numbering",
-        "kind": "caption_numbering",
+        "code": "caption_numbering",
         "message": "Подписи нумеруются сквозной арабской нумерацией",
-        "expected": expected or {},
+        "params": params or {},
     }
     rule.update(overrides)
     return rule
 
 
-def _format_rule(expected: Dict[str, Any], **overrides: Any) -> Dict[str, Any]:
+def _format_rule(params: Dict[str, Any], **overrides: Any) -> Dict[str, Any]:
     """Описание правила оформления подписи."""
     rule: Dict[str, Any] = {
         "rule_id": "caption_format",
-        "kind": "caption_format",
+        "code": "caption_format",
         "message": "Подпись оформлена по требованию",
-        "expected": expected,
+        "params": params,
     }
     rule.update(overrides)
     return rule
 
 
-def _reference_rule(expected: Dict[str, Any] | None = None, **overrides: Any) -> Dict[str, Any]:
+def _reference_rule(params: Dict[str, Any] | None = None, **overrides: Any) -> Dict[str, Any]:
     """Описание правила ссылки на рисунок или таблицу."""
     rule: Dict[str, Any] = {
         "rule_id": "caption_reference",
-        "kind": "caption_reference",
+        "code": "caption_reference",
         "message": "На объект есть ссылка в тексте",
-        "expected": expected or {},
+        "params": params or {},
     }
     rule.update(overrides)
     return rule
@@ -201,10 +201,10 @@ def _alignment_rule(
     """Описание правила выравнивания для выбранной области."""
     rule: Dict[str, Any] = {
         "rule_id": f"alignment_{scope}",
-        "kind": "alignment",
+        "code": "alignment",
         "message": f"Выравнивание {alignment}",
         "target": {"scope": scope},
-        "expected": {"alignment": alignment},
+        "params": {"alignment": alignment},
     }
     rule.update(overrides)
     return rule
@@ -228,7 +228,7 @@ def test_figure_duplicate_numbers_are_reported() -> None:
 
     assert report.summary.violations_total == 1
     violation = report.violations[0]
-    assert violation.kind == "caption_numbering"
+    assert violation.code == "caption_numbering"
     assert ":duplicate:2" in violation.violation_id
     assert violation.location.block_id == "cap_3"
     assert violation.location.page_start_est == 3
@@ -792,7 +792,7 @@ def test_alignment_captions_reports_mismatch() -> None:
 
     assert report.summary.violations_total == 1
     violation = report.violations[0]
-    assert violation.kind == "alignment"
+    assert violation.code == "alignment"
     assert violation.location.block_id == "cap_1"
     assert violation.expected["alignment"] == "center"
     assert violation.found["alignment"] == "left"

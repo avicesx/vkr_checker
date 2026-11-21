@@ -323,17 +323,17 @@ def _text_rules_engine(exclude_contexts: Optional[List[str]] = None) -> RuleEngi
         "rules": [
             {
                 "rule_id": "font_body_text",
-                "kind": "font",
+                "code": "font",
                 "message": "Основной текст набирается Times New Roman, 14 pt",
                 "target": target,
-                "expected": {"family": "Times New Roman", "size_pt": 14.0},
+                "params": {"family": "Times New Roman", "size_pt": 14.0},
             },
             {
                 "rule_id": "indent_first_line",
-                "kind": "indent",
+                "code": "indent",
                 "message": "Абзац основного текста начинается с отступа 12,5 мм",
                 "target": target,
-                "expected": {"first_line_mm": 12.5, "tolerance_mm": 0.5},
+                "params": {"first_line_mm": 12.5, "tolerance_mm": 0.5},
             },
         ],
     }
@@ -378,7 +378,7 @@ def test_default_ruleset_reports_no_violations_from_service_zones(
         _listing_block_ids(vkr_document)
     )
 
-    assert report.summary.by_kind == {"font": 1, "indent": 1}
+    assert report.summary.by_code == {"font": 1, "indent": 1}
     assert report.summary.by_rule == {"font_body_text": 1, "indent_first_line": 1}
     assert report.summary.violations_total == 2
     assert not service_ids & {
@@ -513,7 +513,7 @@ def test_heading_rule_still_flags_misaligned_heading(
     )
     assert heading_violation.location.block_id == _block_id(document, "ЗАКЛЮЧЕНИЕ")
     assert heading_violation.found["alignment"] == "left"
-    assert report.summary.by_kind == {"font": 1, "indent": 1, "heading_format": 1}
+    assert report.summary.by_code == {"font": 1, "indent": 1, "heading_format": 1}
 
 
 def test_toc_rule_still_flags_missing_entry(
@@ -534,7 +534,7 @@ def test_toc_rule_still_flags_missing_entry(
     assert "toc:missing:" in toc_violation.violation_id
     assert toc_violation.found["toc_entry"] is False
     assert toc_violation.location.snippet == "ЗАКЛЮЧЕНИЕ"
-    assert report.summary.by_kind == {"font": 1, "indent": 1, "toc": 1}
+    assert report.summary.by_code == {"font": 1, "indent": 1, "toc": 1}
 
 
 def test_fixture_report_is_deterministic(vkr_document: ParsedDocxDocument) -> None:

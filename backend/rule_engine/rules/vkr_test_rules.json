@@ -1,18 +1,18 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "2.4.0",
+  "ruleset_version": "3.0.0",
   "description": "Штатный набор нормоконтроля ВКР: основной текст (шрифт, отступ, интервал, выравнивание, микротипографика), поля, нумерация и формат страниц, заголовки и структура, объём работы, формулы, список литературы (ссылки, цитирование, количество, порядок и свежесть источников), подписи рисунков, таблиц и приложений, шрифт ячеек таблиц.",
   "rules": [
     {
       "rule_id": "font_body_text",
-      "kind": "font",
-      "severity": "error",
+      "code": "font",
+      "strictness": "error",
       "message": "Основной текст набирается гарнитурой Times New Roman, 14 pt",
-      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "quote": "Методические указания, требования к оформлению текста",
       "target": {
         "scope": "body_text"
       },
-      "expected": {
+      "params": {
         "family": "Times New Roman",
         "size_pt": 14.0,
         "size_tolerance_pt": 0.5
@@ -20,55 +20,55 @@
     },
     {
       "rule_id": "indent_first_line",
-      "kind": "indent",
-      "severity": "error",
+      "code": "indent",
+      "strictness": "error",
       "message": "Абзац основного текста начинается с отступа 12,5 мм",
-      "requirement_ref": "Методические указания, требования к абзацам",
+      "quote": "Методические указания, требования к абзацам",
       "target": {
         "scope": "body_text"
       },
-      "expected": {
+      "params": {
         "first_line_mm": 12.5,
         "tolerance_mm": 0.5
       }
     },
     {
       "rule_id": "alignment_body_text",
-      "kind": "alignment",
-      "severity": "error",
+      "code": "alignment",
+      "strictness": "error",
       "message": "Основной текст выравнивается по ширине",
-      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "quote": "Методические указания, требования к оформлению текста",
       "target": {
         "scope": "body_text"
       },
-      "expected": {
+      "params": {
         "alignment": "justify"
       }
     },
     {
       "rule_id": "line_spacing_body",
-      "kind": "line_spacing",
-      "severity": "error",
+      "code": "line_spacing",
+      "strictness": "error",
       "message": "Основной текст печатается с полуторным межстрочным интервалом",
-      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "quote": "Методические указания, требования к оформлению текста",
       "target": {
         "scope": "body_text"
       },
-      "expected": {
+      "params": {
         "ratio": 1.5,
         "tolerance": 0.25
       }
     },
     {
       "rule_id": "microtypography_prose",
-      "kind": "microtypography",
-      "severity": "warning",
+      "code": "microtypography",
+      "strictness": "warning",
       "message": "В тексте используются кавычки-ёлочки, тире и одиночные пробелы",
-      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "quote": "Методические указания, требования к оформлению текста",
       "target": {
         "scope": "body_paragraphs"
       },
-      "expected": {
+      "params": {
         "checks": [
           "wrong_quotes",
           "wrong_dashes",
@@ -79,14 +79,14 @@
     },
     {
       "rule_id": "microtypography_nbsp",
-      "kind": "microtypography",
-      "severity": "info",
+      "code": "microtypography",
+      "strictness": "info",
       "message": "Неразрывные пробелы расставлены в ссылках на рисунки и таблицы, инициалах и единицах измерения",
-      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "quote": "Методические указания, требования к оформлению текста",
       "target": {
         "scope": "body_paragraphs"
       },
-      "expected": {
+      "params": {
         "checks": [
           "missing_nbsp"
         ]
@@ -94,14 +94,14 @@
     },
     {
       "rule_id": "page_margins",
-      "kind": "margin",
-      "severity": "error",
+      "code": "margin",
+      "strictness": "error",
       "message": "Поля страницы: левое 30, правое 15, верхнее и нижнее 20 мм",
-      "requirement_ref": "Методические указания, требования к полям страницы",
+      "quote": "Методические указания, требования к полям страницы",
       "target": {
         "scope": "sections"
       },
-      "expected": {
+      "params": {
         "left_mm": 30.0,
         "right_mm": 15.0,
         "top_mm": 20.0,
@@ -111,28 +111,28 @@
     },
     {
       "rule_id": "page_number_position",
-      "kind": "page_number_position",
-      "severity": "error",
+      "code": "page_number_position",
+      "strictness": "error",
       "message": "Номер страницы проставляется в нижнем колонтитуле по центру",
-      "requirement_ref": "Методические указания, требования к нумерации страниц",
+      "quote": "Методические указания, требования к нумерации страниц",
       "target": {
         "scope": "headers_footers"
       },
-      "expected": {
+      "params": {
         "zone": "footer",
         "alignment": "center"
       }
     },
     {
       "rule_id": "page_format",
-      "kind": "page_format",
-      "severity": "error",
+      "code": "page_format",
+      "strictness": "error",
       "message": "Страница имеет формат A4 (210 × 297 мм), книжная ориентация",
-      "requirement_ref": "Методические указания, требования к формату страницы",
+      "quote": "Методические указания, требования к формату страницы",
       "target": {
         "scope": "sections"
       },
-      "expected": {
+      "params": {
         "width_mm": 210.0,
         "height_mm": 297.0,
         "tolerance_mm": 1.0,
@@ -141,23 +141,23 @@
     },
     {
       "rule_id": "widow_control_body",
-      "kind": "widow_control",
-      "severity": "warning",
+      "code": "widow_control",
+      "strictness": "warning",
       "message": "В основном тексте включён контроль висячих строк",
-      "requirement_ref": "Методические указания, требования к оформлению текста",
+      "quote": "Методические указания, требования к оформлению текста",
       "target": {
         "scope": "body_text"
       },
-      "expected": {
+      "params": {
         "enabled": true
       }
     },
     {
       "rule_id": "heading_levels",
-      "kind": "heading_levels",
-      "severity": "error",
+      "code": "heading_levels",
+      "strictness": "error",
       "message": "Заголовки образуют непрерывную иерархию: старт с уровня 1, без перескоков уровней",
-      "requirement_ref": "Методические указания, требования к заголовкам",
+      "quote": "Методические указания, требования к заголовкам",
       "target": {
         "scope": "headings",
         "exclude_roles": [
@@ -166,7 +166,7 @@
           "appendix"
         ]
       },
-      "expected": {
+      "params": {
         "first_level": 1,
         "allow_skipped_levels": false,
         "max_level": 3
@@ -174,10 +174,10 @@
     },
     {
       "rule_id": "heading_numbering",
-      "kind": "heading_numbering",
-      "severity": "error",
+      "code": "heading_numbering",
+      "strictness": "error",
       "message": "Разделы нумеруются последовательно, подраздел начинается с номера родительского раздела",
-      "requirement_ref": "Методические указания, требования к нумерации разделов",
+      "quote": "Методические указания, требования к нумерации разделов",
       "target": {
         "scope": "headings",
         "exclude_roles": [
@@ -186,7 +186,7 @@
           "appendix"
         ]
       },
-      "expected": {
+      "params": {
         "check_sequence": true,
         "check_parent_number": true,
         "check_depth_matches_level": true,
@@ -199,10 +199,10 @@
     },
     {
       "rule_id": "heading_format_text",
-      "kind": "heading_format",
-      "severity": "error",
+      "code": "heading_format",
+      "strictness": "error",
       "message": "Заголовок набирается с прописной буквы и без точки в конце",
-      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "quote": "Методические указания, требования к оформлению заголовков",
       "target": {
         "scope": "headings",
         "exclude_roles": [
@@ -211,16 +211,16 @@
           "appendix"
         ]
       },
-      "expected": {
+      "params": {
         "trailing_dot": "forbid"
       }
     },
     {
       "rule_id": "heading_font",
-      "kind": "heading_format",
-      "severity": "warning",
+      "code": "heading_format",
+      "strictness": "warning",
       "message": "Заголовки набираются гарнитурой Times New Roman, 14 pt, полужирным",
-      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "quote": "Методические указания, требования к оформлению заголовков",
       "target": {
         "scope": "headings",
         "exclude_roles": [
@@ -228,7 +228,7 @@
           "task_sheet"
         ]
       },
-      "expected": {
+      "params": {
         "font": {
           "family": "Times New Roman",
           "size_pt": 14.0,
@@ -238,10 +238,10 @@
     },
     {
       "rule_id": "heading_alignment",
-      "kind": "heading_format",
-      "severity": "warning",
+      "code": "heading_format",
+      "strictness": "warning",
       "message": "Заголовки выравниваются по центру",
-      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "quote": "Методические указания, требования к оформлению заголовков",
       "target": {
         "scope": "headings",
         "exclude_roles": [
@@ -250,20 +250,20 @@
           "appendix"
         ]
       },
-      "expected": {
+      "params": {
         "alignment": "center"
       }
     },
     {
       "rule_id": "heading_page_break",
-      "kind": "heading_page_break",
-      "severity": "warning",
+      "code": "heading_page_break",
+      "strictness": "warning",
       "message": "Структурный раздел начинается с новой страницы",
-      "requirement_ref": "Методические указания, требования к структуре работы",
+      "quote": "Методические указания, требования к структуре работы",
       "target": {
         "scope": "headings"
       },
-      "expected": {
+      "params": {
         "roles": [
           "main_chapter",
           "introduction",
@@ -275,14 +275,14 @@
     },
     {
       "rule_id": "heading_keep_next",
-      "kind": "keep_next",
-      "severity": "warning",
+      "code": "keep_next",
+      "strictness": "warning",
       "message": "Заголовок не отрывается от следующего за ним текста",
-      "requirement_ref": "Методические указания, требования к оформлению заголовков",
+      "quote": "Методические указания, требования к оформлению заголовков",
       "target": {
         "scope": "headings"
       },
-      "expected": {
+      "params": {
         "enabled": true,
         "roles": [
           "main_chapter",
@@ -292,10 +292,10 @@
     },
     {
       "rule_id": "required_sections",
-      "kind": "required_sections",
-      "severity": "error",
+      "code": "required_sections",
+      "strictness": "error",
       "message": "Документ содержит введение, разделы, заключение и список литературы в требуемом порядке",
-      "requirement_ref": "Методические указания, требования к структуре работы",
+      "quote": "Методические указания, требования к структуре работы",
       "target": {
         "scope": "document_structure",
         "exclude_roles": [
@@ -303,7 +303,7 @@
           "task_sheet"
         ]
       },
-      "expected": {
+      "params": {
         "sections": [
           {
             "label": "введение",
@@ -345,14 +345,14 @@
     },
     {
       "rule_id": "toc",
-      "kind": "toc",
-      "severity": "error",
+      "code": "toc",
+      "strictness": "error",
       "message": "Оглавление перечисляет главы и разделы и указывает номера страниц",
-      "requirement_ref": "Методические указания, требования к оглавлению",
+      "quote": "Методические указания, требования к оглавлению",
       "target": {
         "scope": "toc"
       },
-      "expected": {
+      "params": {
         "require_toc": true,
         "require_automated": false,
         "require_page_numbers": true,
@@ -393,14 +393,14 @@
     },
     {
       "rule_id": "document_volume",
-      "kind": "document_volume",
-      "severity": "warning",
+      "code": "document_volume",
+      "strictness": "warning",
       "message": "Объём ВКР соответствует норме: 60–90 страниц и 8000–18000 слов",
-      "requirement_ref": "Методические указания, требования к объёму работы",
+      "quote": "Методические указания, требования к объёму работы",
       "target": {
         "scope": "document"
       },
-      "expected": {
+      "params": {
         "min_pages": 60,
         "max_pages": 90,
         "min_words": 8000,
@@ -409,66 +409,66 @@
     },
     {
       "rule_id": "equation_numbering",
-      "kind": "equation_numbering",
-      "severity": "warning",
+      "code": "equation_numbering",
+      "strictness": "warning",
       "message": "Вынесенные формулы пронумерованы",
-      "requirement_ref": "Методические указания, требования к оформлению формул",
+      "quote": "Методические указания, требования к оформлению формул",
       "target": {
         "scope": "document"
       },
-      "expected": {
+      "params": {
         "require_numbering": true
       }
     },
     {
       "rule_id": "bibliography_links_resolved",
-      "kind": "bibliography_link",
-      "severity": "error",
+      "code": "bibliography_link",
+      "strictness": "error",
       "message": "Ссылки в тексте указывают на источники, включенные в список литературы",
-      "requirement_ref": "Методические указания, требования к ссылкам на источники",
+      "quote": "Методические указания, требования к ссылкам на источники",
       "target": {
         "scope": "bibliography"
       },
-      "expected": {
+      "params": {
         "allow_unresolved": false
       }
     },
     {
       "rule_id": "bibliography_all_cited",
-      "kind": "bibliography_cited",
-      "severity": "error",
+      "code": "bibliography_cited",
+      "strictness": "error",
       "message": "Каждый источник списка литературы имеет ссылку в тексте работы",
-      "requirement_ref": "Методические указания, требования к списку литературы",
+      "quote": "Методические указания, требования к списку литературы",
       "target": {
         "scope": "bibliography"
       },
-      "expected": {
+      "params": {
         "require_all_cited": true
       }
     },
     {
       "rule_id": "bibliography_count",
-      "kind": "bibliography_count",
-      "severity": "warning",
+      "code": "bibliography_count",
+      "strictness": "warning",
       "message": "Список литературы содержит не менее 20 источников",
-      "requirement_ref": "Методические указания, требования к списку литературы",
+      "quote": "Методические указания, требования к списку литературы",
       "target": {
         "scope": "bibliography"
       },
-      "expected": {
+      "params": {
         "min_sources": 20
       }
     },
     {
       "rule_id": "bibliography_order",
-      "kind": "bibliography_order",
-      "severity": "error",
+      "code": "bibliography_order",
+      "strictness": "error",
       "message": "Источники в списке литературы пронумерованы подряд",
-      "requirement_ref": "Методические указания, требования к списку литературы",
+      "quote": "Методические указания, требования к списку литературы",
       "target": {
         "scope": "bibliography"
       },
-      "expected": {
+      "params": {
         "start_at": 1,
         "allow_gaps": false,
         "allow_duplicates": false
@@ -476,14 +476,14 @@
     },
     {
       "rule_id": "bibliography_recency",
-      "kind": "bibliography_recency",
-      "severity": "warning",
+      "code": "bibliography_recency",
+      "strictness": "warning",
       "message": "Среди источников не менее 30% изданы за последние 5 лет",
-      "requirement_ref": "Методические указания, требования к списку литературы",
+      "quote": "Методические указания, требования к списку литературы",
       "target": {
         "scope": "bibliography"
       },
-      "expected": {
+      "params": {
         "min_recent_share": 0.3,
         "recent_years": 5,
         "min_year_coverage": 0.5
@@ -491,14 +491,14 @@
     },
     {
       "rule_id": "bibliography_format_electronic",
-      "kind": "bibliography_format",
-      "severity": "error",
+      "code": "bibliography_format",
+      "strictness": "error",
       "message": "Электронный ресурс в списке литературы содержит URL и дату обращения",
-      "requirement_ref": "Методические указания, требования к оформлению списка литературы",
+      "quote": "Методические указания, требования к оформлению списка литературы",
       "target": {
         "scope": "bibliography"
       },
-      "expected": {
+      "params": {
         "categories": [
           "electronic_resource"
         ],
@@ -508,14 +508,14 @@
     },
     {
       "rule_id": "bibliography_format_article",
-      "kind": "bibliography_format",
-      "severity": "error",
+      "code": "bibliography_format",
+      "strictness": "error",
       "message": "Статья в списке литературы оформлена с разделителем «//» перед названием источника",
-      "requirement_ref": "Методические указания, требования к оформлению списка литературы",
+      "quote": "Методические указания, требования к оформлению списка литературы",
       "target": {
         "scope": "bibliography"
       },
-      "expected": {
+      "params": {
         "categories": [
           "journal_article"
         ],
@@ -524,14 +524,14 @@
     },
     {
       "rule_id": "caption_numbering_figures",
-      "kind": "caption_numbering",
-      "severity": "error",
+      "code": "caption_numbering",
+      "strictness": "error",
       "message": "Рисунки нумеруются сквозной арабской нумерацией без дублей, пропусков и нарушения порядка",
-      "requirement_ref": "Методические указания, требования к нумерации рисунков",
+      "quote": "Методические указания, требования к нумерации рисунков",
       "target": {
         "scope": "captions"
       },
-      "expected": {
+      "params": {
         "entity_type": "figure",
         "scheme": "continuous_arabic",
         "allow_gaps": false,
@@ -541,14 +541,14 @@
     },
     {
       "rule_id": "caption_numbering_tables",
-      "kind": "caption_numbering",
-      "severity": "error",
+      "code": "caption_numbering",
+      "strictness": "error",
       "message": "Таблицы нумеруются сквозной арабской нумерацией без дублей, пропусков и нарушения порядка",
-      "requirement_ref": "Методические указания, требования к нумерации таблиц",
+      "quote": "Методические указания, требования к нумерации таблиц",
       "target": {
         "scope": "captions"
       },
-      "expected": {
+      "params": {
         "entity_type": "table",
         "scheme": "continuous_arabic",
         "allow_gaps": false,
@@ -558,14 +558,14 @@
     },
     {
       "rule_id": "caption_format_figures",
-      "kind": "caption_format",
-      "severity": "error",
+      "code": "caption_format",
+      "strictness": "error",
       "message": "Номер и название рисунка разделены тире, точка в конце подписи не ставится",
-      "requirement_ref": "Методические указания, требования к оформлению подписей рисунков",
+      "quote": "Методические указания, требования к оформлению подписей рисунков",
       "target": {
         "scope": "captions"
       },
-      "expected": {
+      "params": {
         "entity_type": "figure",
         "separator": "dash",
         "require_trailing_dot": false
@@ -573,82 +573,82 @@
     },
     {
       "rule_id": "caption_format_tables",
-      "kind": "caption_format",
-      "severity": "error",
+      "code": "caption_format",
+      "strictness": "error",
       "message": "Номер и название таблицы разделены тире",
-      "requirement_ref": "Методические указания, требования к оформлению подписей таблиц",
+      "quote": "Методические указания, требования к оформлению подписей таблиц",
       "target": {
         "scope": "captions"
       },
-      "expected": {
+      "params": {
         "entity_type": "table",
         "separator": "dash"
       }
     },
     {
       "rule_id": "caption_reference_figures",
-      "kind": "caption_reference",
-      "severity": "error",
+      "code": "caption_reference",
+      "strictness": "error",
       "message": "На каждый рисунок есть ссылка в тексте работы",
-      "requirement_ref": "Методические указания, требования к ссылкам на рисунки",
+      "quote": "Методические указания, требования к ссылкам на рисунки",
       "target": {
         "scope": "captions"
       },
-      "expected": {
+      "params": {
         "entity_type": "figure",
         "required": true
       }
     },
     {
       "rule_id": "caption_reference_tables",
-      "kind": "caption_reference",
-      "severity": "error",
+      "code": "caption_reference",
+      "strictness": "error",
       "message": "На каждую таблицу есть ссылка в тексте работы",
-      "requirement_ref": "Методические указания, требования к ссылкам на таблицы",
+      "quote": "Методические указания, требования к ссылкам на таблицы",
       "target": {
         "scope": "captions"
       },
-      "expected": {
+      "params": {
         "entity_type": "table",
         "required": true
       }
     },
     {
       "rule_id": "alignment_captions",
-      "kind": "alignment",
-      "severity": "error",
+      "code": "alignment",
+      "strictness": "error",
       "message": "Подписи рисунков, таблиц и приложений выравниваются по центру",
-      "requirement_ref": "Методические указания, требования к оформлению подписей",
+      "quote": "Методические указания, требования к оформлению подписей",
       "target": {
         "scope": "captions"
       },
-      "expected": {
+      "params": {
         "alignment": "center"
       }
     },
     {
       "rule_id": "alignment_table_cells",
-      "kind": "alignment",
-      "severity": "error",
+      "code": "alignment",
+      "strictness": "error",
       "message": "Текст в ячейках таблиц выравнивается по левому краю",
-      "requirement_ref": "Методические указания, требования к оформлению таблиц",
+      "quote": "Методические указания, требования к оформлению таблиц",
       "target": {
         "scope": "table_cells"
       },
-      "expected": {
+      "params": {
         "alignment": "left"
       }
     },
     {
       "rule_id": "font_table_cells",
-      "kind": "font",
-      "severity": "error",
+      "code": "font",
+      "strictness": "error",
       "message": "Текст в таблицах набирается гарнитурой Times New Roman, 12 pt",
-      "requirement_ref": "Методические указания, требования к оформлению таблиц",
+      "quote": "Методические указания, требования к оформлению таблиц",
       "target": {
         "scope": "table_cells"
       },
-      "expected": {
+      "params": {
         "family": "Times New Roman",
         "size_pt": 12.0,
         "size_tolerance_pt": 0.5

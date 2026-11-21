@@ -136,17 +136,17 @@ def _engine(
         "rules": [
             {
                 "rule_id": "font_body_text",
-                "kind": "font",
+                "code": "font",
                 "message": "Основной текст набирается Times New Roman, 14 pt",
                 "target": target,
-                "expected": {"family": "Times New Roman", "size_pt": 14.0},
+                "params": {"family": "Times New Roman", "size_pt": 14.0},
             },
             {
                 "rule_id": "indent_first_line",
-                "kind": "indent",
+                "code": "indent",
                 "message": "Абзац основного текста начинается с отступа 12,5 мм",
                 "target": target,
-                "expected": {"first_line_mm": 12.5, "tolerance_mm": 0.5},
+                "params": {"first_line_mm": 12.5, "tolerance_mm": 0.5},
             },
         ],
     }
@@ -241,7 +241,7 @@ def test_empty_exclude_contexts_returns_old_behaviour(
     assert report.summary.objects_checked == 6
     flagged = {violation.location.block_id for violation in report.violations}
     assert flagged == {title_id, listing_id}
-    assert report.summary.by_kind == {"font": 2, "indent": 2}
+    assert report.summary.by_code == {"font": 2, "indent": 2}
 
 
 def test_body_paragraph_with_wrong_font_is_still_reported(
@@ -278,7 +278,7 @@ def test_body_paragraphs_scope_also_applies_context_filter(
 
     assert filtered.violations == []
     assert filtered.summary.objects_checked == 2
-    assert unfiltered.summary.by_kind == {"font": 2, "indent": 2}
+    assert unfiltered.summary.by_code == {"font": 2, "indent": 2}
     assert unfiltered.summary.objects_checked == 6
 
 
@@ -305,7 +305,7 @@ def test_structure_rules_still_see_service_zones(
 
     report = RuleEngine(load_ruleset(DEFAULT_RULESET_PATH)).check(document)
 
-    assert report.summary.by_kind == {"required_sections": 4, "toc": 1}
+    assert report.summary.by_code == {"required_sections": 4, "toc": 1}
     assert "font_body_text" not in report.summary.by_rule
     assert "indent_first_line" not in report.summary.by_rule
 
@@ -337,7 +337,7 @@ def test_unknown_context_names_do_not_hide_body_paragraph(
 
     report = _engine(exclude_contexts=["stub_context"]).check(document)
 
-    assert report.summary.by_kind == {"font": 2, "indent": 1}
+    assert report.summary.by_code == {"font": 2, "indent": 1}
     assert report.summary.objects_checked == 4
 
 
@@ -349,10 +349,10 @@ def test_unknown_target_field_is_rejected() -> None:
         "rules": [
             {
                 "rule_id": "font_body_text",
-                "kind": "font",
+                "code": "font",
                 "message": "Основной текст",
                 "target": {"scope": "body_text", "exclude_context": ["body"]},
-                "expected": {"family": "Times New Roman"},
+                "params": {"family": "Times New Roman"},
             }
         ],
     }

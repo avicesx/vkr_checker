@@ -69,7 +69,7 @@ def _parse(builder: DocxPackageBuilder, body: str) -> ParsedDocxDocument:
 
 def _report(
     document: ParsedDocxDocument,
-    expected: dict | None = None,
+    params: dict | None = None,
 ) -> RuleCheckReport:
     """Прогоняет документ по правилу оглавления с заданными ожиданиями."""
     payload = {
@@ -82,8 +82,8 @@ def _report(
             {"label": "подраздел", "role": "sub_section"},
         ],
     }
-    if expected is not None:
-        payload.update(expected)
+    if params is not None:
+        payload.update(params)
     ruleset = RuleSet.model_validate(
         {
             "ruleset_id": "toc",
@@ -91,10 +91,10 @@ def _report(
             "rules": [
                 {
                     "rule_id": "toc",
-                    "kind": "toc",
+                    "code": "toc",
                     "message": "Оглавление",
                     "target": {"scope": "toc"},
-                    "expected": payload,
+                    "params": payload,
                 }
             ],
         }
@@ -105,10 +105,10 @@ def _report(
 def _check(
     builder: DocxPackageBuilder,
     body: str,
-    expected: dict | None = None,
+    params: dict | None = None,
 ) -> RuleCheckReport:
     """Разбирает документ и прогоняет по правилу оглавления."""
-    return _report(_parse(builder, body), expected)
+    return _report(_parse(builder, body), params)
 
 
 def _tocs(document: ParsedDocxDocument) -> list[TocContainerBlock]:
@@ -131,7 +131,7 @@ def test_appendix_entry_matches_appendix_heading(docx_builder: DocxPackageBuilde
 
     assert toc.entries[0].matched_heading_block_id is None, "разбор не связывает по букве"
 
-    report = _report(document, expected={"check_completeness": False})
+    report = _report(document, params={"check_completeness": False})
 
     assert report.summary.violations_total == 0
 
@@ -149,7 +149,7 @@ def test_appendix_entry_with_title_matches_by_letter(
         + TEXT
     )
 
-    report = _check(docx_builder, body, expected={"check_completeness": False})
+    report = _check(docx_builder, body, params={"check_completeness": False})
 
     assert report.summary.violations_total == 0
 
@@ -160,7 +160,7 @@ def test_appendix_entry_without_appendix_is_reported(
     """Негативный тест: запись про приложение, которого нет в документе, падает."""
     body = TOC_TITLE + _toc_entry("ПРИЛОЖЕНИЕ Я", page="90") + _heading("ВВЕДЕНИЕ") + TEXT
 
-    report = _check(docx_builder, body, expected={"check_completeness": False})
+    report = _check(docx_builder, body, params={"check_completeness": False})
 
     assert report.summary.violations_total == 1
     violation = report.violations[0]
@@ -181,7 +181,7 @@ def test_appendix_continuation_proves_appendix_exists(
         + TEXT
     )
 
-    report = _check(docx_builder, body, expected={"check_completeness": False})
+    report = _check(docx_builder, body, params={"check_completeness": False})
 
     assert report.summary.violations_total == 0
 
@@ -204,7 +204,7 @@ def test_appendix_title_without_letter_matches_by_title(
         + _plain(f"(справочное) {title}")
     )
 
-    report = _check(docx_builder, body, expected={"check_completeness": False})
+    report = _check(docx_builder, body, params={"check_completeness": False})
 
     assert report.summary.violations_total == 0
 
@@ -223,7 +223,7 @@ def test_appendix_entry_covers_its_subheadings(docx_builder: DocxPackageBuilder)
     report = _check(
         docx_builder,
         body,
-        expected={"required_entries": [{"label": "подраздел", "role": "sub_section"}]},
+        params={"required_entries": [{"label": "подраздел", "role": "sub_section"}]},
     )
 
     assert report.summary.violations_total == 0
@@ -253,7 +253,7 @@ def test_max_depth_two_ignores_third_level_heading(
     """При max_depth=2 подраздел «1.1.1» не считается пропуском в оглавлении."""
     body = _deep_body(("1 Раздел", "1.1 Подраздел"))
 
-    report = _check(docx_builder, body, expected={"max_depth": 2})
+    report = _check(docx_builder, body, params={"max_depth": 2})
 
     assert report.summary.violations_total == 0
 
@@ -281,7 +281,7 @@ def test_missing_chapter_is_reported_with_max_depth(
     report = _check(
         docx_builder,
         body,
-        expected={
+        params={
             "max_depth": 2,
             "required_entries": [{"label": "раздел", "role": "main_chapter"}],
         },
@@ -310,7 +310,7 @@ def test_deep_toc_entry_is_not_a_violation_with_max_depth(
         + "".join(_heading(title, level) + TEXT for title, level in DEEP_SECTIONS)
     )
 
-    report = _check(docx_builder, body, expected={"max_depth": 2})
+    report = _check(docx_builder, body, params={"max_depth": 2})
 
     assert report.summary.violations_total == 0
 
@@ -325,10 +325,10 @@ def test_max_depth_requires_completeness() -> None:
                 "rules": [
                     {
                         "rule_id": "toc",
-                        "kind": "toc",
+                        "code": "toc",
                         "message": "Оглавление",
                         "target": {"scope": "toc"},
-                        "expected": {"check_titles": True, "max_depth": 2},
+                        "params": {"check_titles": True, "max_depth": 2},
                     }
                 ],
             }
@@ -339,8 +339,8 @@ def test_default_ruleset_checks_toc_to_second_level() -> None:
     """Штатный набор сверяет оглавление до глав и разделов."""
     toc_rule = load_default_ruleset().get_rule("toc")
 
-    assert toc_rule.expected.max_depth == 2
-    assert toc_rule.expected.check_completeness is True
+    assert toc_rule.params.max_depth == 2
+    assert toc_rule.params.check_completeness is True
 
 
 # ---------------------------------------------------------------------
@@ -364,7 +364,7 @@ def test_dotted_entry_matches_heading_by_number_and_title(
     report = _check(
         docx_builder,
         body,
-        expected={
+        params={
             "require_page_numbers": False,
             "required_entries": [{"label": "подраздел", "role": "sub_section"}],
         },
@@ -388,7 +388,7 @@ def test_dotted_entry_with_unrelated_title_stays_unmatched(
     report = _check(
         docx_builder,
         body,
-        expected={"require_page_numbers": False, "check_completeness": False},
+        params={"require_page_numbers": False, "check_completeness": False},
     )
 
     assert report.summary.violations_total == 1

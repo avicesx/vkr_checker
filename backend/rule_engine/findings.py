@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .rules import RuleKind, RuleSeverity
+from .rules import RuleCode, Strictness
 
 
 CheckStatus = Literal["pass", "fail", "not_assessed"]
@@ -61,10 +61,10 @@ class Violation(BaseModel):
 
     violation_id: str = Field(description="Идентификатор нарушения: rule_id и адрес объекта")
     rule_id: str
-    kind: RuleKind
-    severity: RuleSeverity
+    code: RuleCode
+    severity: Strictness
     message: str
-    requirement_ref: Optional[str] = None
+    quote: Optional[str] = None
 
     location: ViolationLocation
     expected: Dict[str, Any] = Field(default_factory=dict, description="Ожидаемые значения полей")
@@ -94,7 +94,7 @@ class RuleAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rule_id: str = Field(description="Идентификатор правила")
-    kind: RuleKind
+    code: RuleCode
     status: CheckStatus = Field(description="pass, fail или not_assessed")
     expected_text: str = Field(default="", description="Ожидание словами")
     observed_text: str = Field(default="", description="Факт или причина, почему проверка не выполнена")
@@ -115,7 +115,7 @@ class RuleCheckSummary(BaseModel):
     objects_checked: int = Field(default=0, ge=0, description="Суммарное число проверенных объектов")
     violations_total: int = Field(default=0, ge=0)
     by_severity: Dict[str, int] = Field(default_factory=dict)
-    by_kind: Dict[str, int] = Field(default_factory=dict)
+    by_code: Dict[str, int] = Field(default_factory=dict)
     by_rule: Dict[str, int] = Field(default_factory=dict)
     not_assessed_total: int = Field(
         default=0,
@@ -161,11 +161,11 @@ def build_summary(
 ) -> RuleCheckSummary:
     """Собирает сводку отчета по списку нарушений."""
     by_severity: Dict[str, int] = {}
-    by_kind: Dict[str, int] = {}
+    by_code: Dict[str, int] = {}
     by_rule: Dict[str, int] = {}
     for violation in violations:
         by_severity[violation.severity] = by_severity.get(violation.severity, 0) + 1
-        by_kind[violation.kind] = by_kind.get(violation.kind, 0) + 1
+        by_code[violation.code] = by_code.get(violation.code, 0) + 1
         by_rule[violation.rule_id] = by_rule.get(violation.rule_id, 0) + 1
 
     return RuleCheckSummary(
@@ -173,7 +173,7 @@ def build_summary(
         objects_checked=objects_checked,
         violations_total=len(violations),
         by_severity=dict(sorted(by_severity.items())),
-        by_kind=dict(sorted(by_kind.items())),
+        by_code=dict(sorted(by_code.items())),
         by_rule=dict(sorted(by_rule.items())),
         not_assessed_total=not_assessed_total,
     )

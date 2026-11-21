@@ -66,7 +66,7 @@ def _parse(builder: DocxPackageBuilder, body: str) -> ParsedDocxDocument:
     return DocxParserPipeline(builder.build()).parse()
 
 
-def _margin_engine(**expected: object) -> RuleEngine:
+def _margin_engine(**params: object) -> RuleEngine:
     """Собирает движок с единственным правилом полей страницы."""
     margin_expected: Dict[str, object] = {
         "left_mm": 30.0,
@@ -75,17 +75,17 @@ def _margin_engine(**expected: object) -> RuleEngine:
         "bottom_mm": 20.0,
         "tolerance_mm": 1.0,
     }
-    margin_expected.update(expected)
+    margin_expected.update(params)
     payload = {
         "ruleset_id": "margins-test",
         "ruleset_version": "1.0.0",
         "rules": [
             {
                 "rule_id": "page_margins",
-                "kind": "margin",
+                "code": "margin",
                 "message": "Поля страницы: левое 30, правое 15, верхнее и нижнее 20 мм",
                 "target": {"scope": "sections"},
-                "expected": margin_expected,
+                "params": margin_expected,
             }
         ],
     }
@@ -112,7 +112,7 @@ def test_narrow_margins_are_reported(docx_builder: DocxPackageBuilder) -> None:
     assert len(report.violations) == 1
     violation = report.violations[0]
     assert violation.rule_id == "page_margins"
-    assert violation.kind == "margin"
+    assert violation.code == "margin"
     assert violation.expected == {"left_mm": 30.0, "right_mm": 15.0}
     assert violation.found["left_mm"] == pytest.approx(20.0, abs=0.02)
     assert violation.found["right_mm"] == pytest.approx(20.0, abs=0.02)
@@ -179,6 +179,6 @@ def test_summary_counts_violations_by_rule_and_kind(
 
     assert report.summary.violations_total == 1
     assert report.summary.by_severity == {"error": 1}
-    assert report.summary.by_kind == {"margin": 1}
+    assert report.summary.by_code == {"margin": 1}
     assert report.summary.by_rule == {"page_margins": 1}
 

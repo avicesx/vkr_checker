@@ -42,7 +42,7 @@ def _check_heading_levels_rule(
 ) -> Tuple[List[Violation], int, RuleAssessment]:
     """Проверяет, что уровни заголовков растут без пропусков и не глубже лимита."""
     records = _heading_records(document, rule.target)
-    expected = rule.expected
+    expected = rule.params
     violations: List[Violation] = []
     prev_level: Optional[int] = None
 
@@ -103,7 +103,7 @@ def _check_heading_numbering_rule(
 ) -> Tuple[List[Violation], int, RuleAssessment]:
     """Проверяет последовательность, родителя, глубину и запись номеров заголовков."""
     records = _heading_records(document, rule.target)
-    expected = rule.expected
+    expected = rule.params
     violations: List[Violation] = []
 
     sequence_issues: Dict[str, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
@@ -234,7 +234,7 @@ def _check_heading_format_rule(
 ) -> Tuple[List[Violation], int, RuleAssessment]:
     """Проверяет точку в конце заголовка, регистр и выравнивание."""
     records = _heading_records(document, rule.target)
-    expected = rule.expected
+    expected = rule.params
     violations: List[Violation] = []
 
     for record in records:

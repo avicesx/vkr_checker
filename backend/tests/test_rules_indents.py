@@ -70,21 +70,21 @@ def _parse(builder: DocxPackageBuilder, body: str) -> ParsedDocxDocument:
 def _indent_engine(
     scope: str = "body_text",
     include_headings: bool = False,
-    **expected: object,
+    **params: object,
 ) -> RuleEngine:
     """Собирает движок с единственным правилом отступов."""
     indent_expected: Dict[str, object] = {"first_line_mm": 12.5, "tolerance_mm": 0.5}
-    indent_expected.update(expected)
+    indent_expected.update(params)
     payload = {
         "ruleset_id": "indents-test",
         "ruleset_version": "1.0.0",
         "rules": [
             {
                 "rule_id": "indent_first_line",
-                "kind": "indent",
+                "code": "indent",
                 "message": "Абзац начинается с отступа 12,5 мм",
                 "target": {"scope": scope, "include_headings": include_headings},
-                "expected": indent_expected,
+                "params": indent_expected,
             }
         ],
     }
@@ -110,7 +110,7 @@ def test_zero_first_line_indent_is_reported(docx_builder: DocxPackageBuilder) ->
     assert len(report.violations) == 1
     violation = report.violations[0]
     assert violation.rule_id == "indent_first_line"
-    assert violation.kind == "indent"
+    assert violation.code == "indent"
     assert violation.expected == {"first_line_mm": 12.5}
     assert violation.found["first_line_mm"] == pytest.approx(0.0)
     assert violation.expected_text == "отступ первой строки 12,5 мм"

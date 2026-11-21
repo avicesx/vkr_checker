@@ -97,21 +97,21 @@ def _parse(builder: DocxPackageBuilder, body: str) -> ParsedDocxDocument:
 def _font_engine(
     scope: str = "body_text",
     include_headings: bool = False,
-    **expected: object,
+    **params: object,
 ) -> RuleEngine:
     """Собирает движок с единственным правилом шрифта."""
     font_expected: Dict[str, object] = {"family": "Times New Roman", "size_pt": 14.0}
-    font_expected.update(expected)
+    font_expected.update(params)
     payload = {
         "ruleset_id": "fonts-test",
         "ruleset_version": "1.0.0",
         "rules": [
             {
                 "rule_id": "font_body_text",
-                "kind": "font",
+                "code": "font",
                 "message": "Основной текст набирается Times New Roman, 14 pt",
                 "target": {"scope": scope, "include_headings": include_headings},
-                "expected": font_expected,
+                "params": font_expected,
             }
         ],
     }
@@ -142,7 +142,7 @@ def test_calibri_run_is_reported_with_location_and_text(
     assert len(report.violations) == 1
     violation = report.violations[0]
     assert violation.rule_id == "font_body_text"
-    assert violation.kind == "font"
+    assert violation.code == "font"
     assert violation.severity == "error"
     assert violation.expected["family"] == "Times New Roman"
     assert violation.found["family"] == "Calibri"
