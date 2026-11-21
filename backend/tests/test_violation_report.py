@@ -513,3 +513,130 @@ def test_every_engine_violation_becomes_one_addressed_entry() -> None:
     assert "стр. 5, блок `p-13`" in markdown_report
     assert "секция 0" in markdown_report
     assert "- Покрытие правил: проверено — 0" in markdown_report
+
+
+def test_repeated_rule_violations_are_grouped_without_losing_addresses() -> None:
+    """ZERO LOSS: группа хранит все адреса, а summary считает исходные находки"""
+    document = _sample_parser_result()
+    document.anomalies = DocumentAnomalies()
+    engine_violations = [
+        _rule_violation(
+            "alignment_table_cells",
+            "alignment",
+            address=f"tbl_{table:04d}_r0_c{cell}_p0",
+            block_id=f"tbl_{table:04d}_r0_c{cell}_p0",
+            page_start_est=5 + table,
+            snippet=f"Ячейка {table}-{cell}",
+        )
+        for table in (1, 2)
+        for cell in range(6)
+    ]
+    report = build_violation_report(
+        document,
+        _rule_report(engine_violations),
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    entries = _rule_engine_violations(report)
+    assert len(entries) == 1
+    grouped = entries[0]
+    assert grouped.id == "group:alignment_table_cells"
+    assert grouped.rule_id == "alignment_table_cells"
+    assert grouped.count == 12
+    assert len(grouped.locations) == 12
+    assert grouped.location.block_id == "tbl_0001_r0_c0_p0"
+    assert {item.block_id for item in grouped.locations} == {
+        violation.location.block_id for violation in engine_violations
+    }
+    assert report.summary.total_violations == 12
+
+    payload = report.model_dump(mode="json")
+    grouped_payload = next(
+        item
+        for group in payload["groups"]
+        for item in group["violations"]
+        if item["id"] == "group:alignment_table_cells"
+    )
+    assert len(grouped_payload["locations"]) == 12
+    assert grouped_payload["locations"][0]["page_start"] == 6
+    assert grouped_payload["count"] == 12
+
+    markdown_report = report.to_markdown()
+    assert markdown_report.count("### [MEDIUM] alignment_table_cells") == 1
+    assert "alignment_table_cells — 12 нарушений (таблицы 1–2)" in markdown_report
+    assert "tbl_0001_r0_c0_p0 (стр. 6): «Ячейка 1-0»" in markdown_report
+    assert "и ещё 2" in markdown_report
+
+
+def test_small_groups_stay_as_separate_entries() -> None:
+    """правила с числом находок меньше четырёх печатаются по одной записи"""
+    document = _sample_parser_result()
+    document.anomalies = DocumentAnomalies()
+    engine_violations = [
+        _rule_violation(
+            "indent_first_line",
+            "indent",
+            address=f"p-{index}",
+            block_id=f"p-{index}",
+            page_start_est=index + 1,
+            snippet=f"Абзац {index}",
+        )
+        for index in range(3)
+    ]
+    report = build_violation_report(
+        document,
+        _rule_report(engine_violations),
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    entries = _rule_engine_violations(report)
+    assert len(entries) == 3
+    assert all(entry.count == 1 for entry in entries)
+    assert all(entry.locations == [] for entry in entries)
+    assert {entry.id for entry in entries} == {
+        violation.violation_id for violation in engine_violations
+    }
+    assert report.summary.total_violations == 3
+    assert report.to_markdown().count("### [LOW] indent_first_line:") == 3
+
+
+def test_grouping_keeps_summary_equal_to_engine_and_parser_totals() -> None:
+    """группировка не меняет summary: engine-находки и аномалии парсера сходятся"""
+    document = _sample_parser_result()
+    engine_violations = [
+        _rule_violation(
+            "font_body_text",
+            "font",
+            address=f"p-{index}",
+            block_id=f"p-{index}",
+            page_start_est=index + 1,
+            snippet=f"Абзац {index}",
+        )
+        for index in range(6)
+    ] + [
+        _rule_violation(
+            "bibliography_cited",
+            "bibliography_cited",
+            address="entry:3",
+            block_id=None,
+            page_start_est=11,
+            snippet="Иванов И. И. ...",
+        )
+    ]
+    report = build_violation_report(
+        document,
+        _rule_report(engine_violations),
+        generated_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    engine_entries = _rule_engine_violations(report)
+    assert len(engine_entries) == 2
+    assert sum(entry.count for entry in engine_entries) == len(engine_violations)
+    assert report.summary.total_violations == 3 + len(engine_violations)
+
+    font_group = next(
+        entry for entry in engine_entries if entry.rule_id == "font_body_text"
+    )
+    assert font_group.count == 6
+    assert len(font_group.locations) == 6
+    assert "font_body_text — 6 нарушений" in report.to_markdown()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from enum import Enum
@@ -61,12 +62,20 @@ class ViolationLocation(BaseModel):
 
 
 class Violation(BaseModel):
-    """одно обнаруженное нарушение с рекомендацией по исправлению"""
+    """обнаруженное нарушение или группа однотипных нарушений
+
+    ``count`` — сколько находок движка представляет запись, ``locations`` —
+    полный список адресов группы (без обрезки; в Markdown показываются примеры).
+    Для одиночного нарушения ``count`` равен единице, а адрес лежит в ``location``.
+    """
 
     id: str
+    rule_id: Optional[str] = None
+    count: int = Field(default=1, ge=1)
     category: ReportCategory
     severity: ReportSeverity
     location: ViolationLocation
+    locations: list[ViolationLocation] = Field(default_factory=list)
     description: str
     recommendation: str
     source: str
@@ -159,6 +168,9 @@ class ViolationReport(BaseModel):
         for group in self.groups:
             lines.extend(["", f"## {_category_title(group.category)}"])
             for violation in group.violations:
+                if violation.count > 1 and violation.rule_id:
+                    lines.extend(_format_grouped_violation(violation))
+                    continue
                 location = _format_location(violation.location)
                 lines.extend(
                     [
@@ -382,6 +394,11 @@ _RULE_PREFIX_FALLBACKS: tuple[
     ),
 )
 
+_GROUP_MIN_SIZE = 4
+_GROUP_EXAMPLES_LIMIT = 10
+_GROUP_EXAMPLE_EXCERPT = 80
+_TABLE_BLOCK_RE = re.compile(r"^tbl_(\d+)_")
+
 _DEFAULT_DETAILS = (
     ReportCategory.FORMATTING,
     ReportSeverity.MEDIUM,
@@ -429,9 +446,11 @@ def build_violation_report(
 ) -> ViolationReport:
     """преобразует аномалии парсера и нарушения движка правил в отчёт.
 
-    Каждое нарушение ``RuleCheckReport`` становится отдельной записью с адресом
-    (блок, страница, фрагмент текста): нарушения не схлопываются по правилу.
-    Оценки правил нужны только для сводки покрытия ``pass``/``not_assessed``.
+    Каждое нарушение ``RuleCheckReport`` попадает в отчёт с адресом (блок,
+    страница, фрагмент текста). Однотипные находки одного правила (четыре и
+    более) сворачиваются в одну запись с полным списком адресов в ``locations``;
+    ``summary`` при этом считает исходные находки, а не записи. Оценки правил
+    нужны только для сводки покрытия ``pass``/``not_assessed``.
     """
     violations: list[Violation] = []
     blocks = _index_blocks(document.blocks)
@@ -617,8 +636,11 @@ def build_violation_report(
     assessments: list[RuleAssessment] = []
     if rule_report is not None:
         assessments = list(rule_report.assessments)
-        for rule_violation in rule_report.violations:
-            _add_rule_violation(add, blocks, rule_violation)
+        engine_violations = [
+            _build_rule_violation(blocks, rule_violation)
+            for rule_violation in rule_report.violations
+        ]
+        violations.extend(_group_rule_violations(engine_violations))
 
     return _create_report(
         document.meta.filename,
@@ -628,24 +650,145 @@ def build_violation_report(
     )
 
 
-def _add_rule_violation(
-    add,
+def _build_rule_violation(
     blocks: dict[str, BlockUnion],
     rule_violation: RuleViolation,
-) -> None:
-    """добавляет отдельную запись отчёта для каждого нарушения движка"""
+) -> Violation:
+    """создаёт запись отчёта для одного нарушения движка"""
     category, severity, recommendation = _kind_details(
         rule_violation.kind, rule_violation.rule_id
     )
-    add(
-        rule_violation.violation_id,
-        category,
-        severity,
-        _engine_description(rule_violation),
-        recommendation,
-        source="rule_engine",
+    return Violation(
+        id=rule_violation.violation_id,
+        rule_id=rule_violation.rule_id,
+        category=category,
+        severity=severity,
         location=_engine_location(blocks, rule_violation),
+        description=_engine_description(rule_violation),
+        recommendation=recommendation,
+        source="rule_engine",
     )
+
+
+def _group_rule_violations(violations: list[Violation]) -> list[Violation]:
+    """сворачивает однотипные нарушения одного правила в одну запись.
+
+    Группировка — только представление: ``count`` хранит число исходных
+    находок, ``locations`` — их полный список. Правила с числом находок
+    меньше ``_GROUP_MIN_SIZE`` остаются отдельными записями, чтобы одиночные
+    замечания не терялись в сводке.
+    """
+    by_rule: dict[str, list[Violation]] = {}
+    order: list[str] = []
+    for violation in violations:
+        rule_id = violation.rule_id or violation.id
+        if rule_id not in by_rule:
+            by_rule[rule_id] = []
+            order.append(rule_id)
+        by_rule[rule_id].append(violation)
+
+    result: list[Violation] = []
+    for rule_id in order:
+        items = by_rule[rule_id]
+        if len(items) >= _GROUP_MIN_SIZE:
+            result.append(_merge_rule_group(rule_id, items))
+        else:
+            result.extend(items)
+    return result
+
+
+def _merge_rule_group(rule_id: str, items: list[Violation]) -> Violation:
+    """собирает группу однотипных нарушений с полным списком адресов"""
+    first = items[0]
+    return first.model_copy(
+        update={
+            "id": f"group:{rule_id}",
+            "count": len(items),
+            "locations": [item.location for item in items],
+            "description": (
+                f"{first.description} Всего однотипных нарушений: {len(items)}."
+            ),
+        }
+    )
+
+
+def _table_numbers(locations: Iterable[ViolationLocation]) -> list[int]:
+    """извлекает номера таблиц из block_id вида ``tbl_0001_r0_c0_p0``"""
+    numbers = {
+        int(match.group(1))
+        for location in locations
+        if (match := _TABLE_BLOCK_RE.match(location.block_id or ""))
+    }
+    return sorted(numbers)
+
+
+def _compact_number_ranges(numbers: list[int]) -> str:
+    """сжимает последовательность номеров в диапазоны: 1, 3–6"""
+    parts: list[str] = []
+    start = previous = numbers[0]
+    for number in numbers[1:]:
+        if number == previous + 1:
+            previous = number
+            continue
+        parts.append(str(start) if start == previous else f"{start}–{previous}")
+        start = previous = number
+    parts.append(str(start) if start == previous else f"{start}–{previous}")
+    return ", ".join(parts)
+
+
+def _table_range_label(locations: Iterable[ViolationLocation]) -> Optional[str]:
+    """подпись с номерами таблиц, к которым относятся адреса группы"""
+    numbers = _table_numbers(locations)
+    if not numbers:
+        return None
+    if len(numbers) == 1:
+        return f"таблица {numbers[0]}"
+    return f"таблицы {_compact_number_ranges(numbers)}"
+
+
+def _format_group_example(location: ViolationLocation) -> str:
+    """форматирует один адрес группы для строки примеров в Markdown"""
+    if location.block_id:
+        example = location.block_id
+        if location.page_start is not None:
+            example += f" (стр. {location.page_start})"
+    elif location.section_idx is not None:
+        example = f"секция {location.section_idx}"
+    elif location.page_start is not None:
+        example = f"стр. {location.page_start}"
+    else:
+        example = "весь документ"
+    if location.text_excerpt:
+        excerpt = location.text_excerpt
+        if len(excerpt) > _GROUP_EXAMPLE_EXCERPT:
+            excerpt = f"{excerpt[: _GROUP_EXAMPLE_EXCERPT - 3]}..."
+        example += f": «{_escape_markdown(excerpt)}»"
+    return example
+
+
+def _format_grouped_violation(violation: Violation) -> list[str]:
+    """формирует компактную Markdown-запись для группы однотипных нарушений"""
+    examples = violation.locations[:_GROUP_EXAMPLES_LIMIT]
+    example_text = "; ".join(_format_group_example(item) for item in examples)
+    if len(violation.locations) > _GROUP_EXAMPLES_LIMIT:
+        example_text += (
+            f"; … и ещё {len(violation.locations) - _GROUP_EXAMPLES_LIMIT}"
+        )
+    table_label = _table_range_label(violation.locations)
+    summary = f"{violation.rule_id} — {violation.count} нарушений"
+    if table_label:
+        summary += f" ({table_label})"
+    if example_text:
+        summary += f", напр. {example_text}"
+    return [
+        "",
+        (
+            f"### [{violation.severity.value.upper()}] "
+            f"{_escape_markdown(violation.rule_id or violation.id)}"
+        ),
+        f"- {summary}",
+        f"- Рекомендация: {_escape_markdown(violation.recommendation)}",
+    ]
 
 
 def _engine_location(
@@ -815,12 +958,15 @@ def _create_report(
         )
         for category, items in grouped.items()
     ]
-    severity_counts = Counter(item.severity for item in violations)
+    severity_counts: Counter[ReportSeverity] = Counter()
+    for item in violations:
+        severity_counts[item.severity] += item.count
+    total_violations = sum(item.count for item in violations)
     return ViolationReport(
         document_name=document_name,
         generated_at=generated_at,
         summary=ViolationSummary(
-            total_violations=len(violations),
+            total_violations=total_violations,
             critical=severity_counts[ReportSeverity.CRITICAL],
             high=severity_counts[ReportSeverity.HIGH],
             medium=severity_counts[ReportSeverity.MEDIUM],
