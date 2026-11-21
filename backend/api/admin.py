@@ -45,6 +45,15 @@ DEFAULT_RULE_SCOPES = {
     "caption_format": "captions",
     "caption_reference": "captions",
     "alignment": "captions",
+    "widow_control": "body_text",
+    "keep_next": "headings",
+    "heading_page_break": "headings",
+    "document_volume": "document",
+    "microtypography": "body_paragraphs",
+    "equation_numbering": "document",
+    "bibliography_count": "bibliography",
+    "bibliography_order": "bibliography",
+    "bibliography_recency": "bibliography",
 }
 
 
