@@ -27,14 +27,21 @@ from app.models.base import Base  # noqa: E402
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Не отключаем уже настроенные логгеры приложения: миграции могут
+    # применяться из кода (app.migrations.apply_migrations), а не только CLI.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
-    """Возвращает URL базы из окружения или из alembic.ini."""
-    url = os.environ.get("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+    """Возвращает URL базы: явно заданный в Config или из DATABASE_URL.
+
+    CLI использует DATABASE_URL (в alembic.ini sqlalchemy.url пуст), а
+    app.migrations.apply_migrations передаёт URL через Config — он важнее
+    переменной окружения, чтобы не задеть не ту базу.
+    """
+    url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError(
             "Не задан URL базы: экспортируйте DATABASE_URL "

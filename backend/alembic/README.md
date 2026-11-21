@@ -34,6 +34,13 @@ python -m alembic downgrade -1     # откатить последнюю рев�
 Если `DATABASE_URL` не задан, Alembic возьмёт `sqlalchemy.url` из
 `alembic.ini`; при пустом значении будет понятная ошибка.
 
+Приложение применяет миграции само: `api.storage.CheckStore.initialize()` и
+`app.create_tables.init_db()` вызывают `app.migrations.apply_migrations()`,
+которая передаёт URL через `Config`, и этот URL важнее переменной окружения.
+База, созданная прежним `create_all` (таблицы есть, `alembic_version` нет), при
+первом запуске один раз помечается baseline-ревизией (`stamp head`): её схема
+совпадает с первой миграцией, поэтому повторно создавать таблицы не нужно.
+
 ## Как добавить новую ревизию
 
 1. Измените модели в `app/models/`.

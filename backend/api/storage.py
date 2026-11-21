@@ -11,8 +11,8 @@ from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
+from app.migrations import apply_migrations
 from app.models import UploadedCheck
-from app.models.base import Base
 
 from .models import CheckResponse, CheckStatus
 
@@ -36,7 +36,7 @@ class CheckStore:
         self.files_dir.mkdir(mode=0o700, exist_ok=True)
         os.chmod(self.storage_dir, 0o700)
         os.chmod(self.files_dir, 0o700)
-        Base.metadata.create_all(bind=self.engine)
+        apply_migrations(self.engine)
 
     def check_database_connection(self) -> None:
         """Проверяет доступность базы данных коротким запросом."""
