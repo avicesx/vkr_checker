@@ -1,0 +1,430 @@
+"""Семейство списка литературы: ссылки, цитирование, формат записи."""
+from __future__ import annotations
+
+from typing import Any, Dict, List, Set, Tuple
+
+from ..findings import (
+    RuleAssessment,
+    Violation,
+    ViolationLocation,
+)
+from ..rules import (
+    BibliographyCitedRule,
+    BibliographyFormatRule,
+    BibliographyLinkRule,
+)
+from .builders import (
+    _build_assessment,
+    _build_violation,
+    _collapse_text,
+)
+from .common import (
+    _mention_targets_text,
+    _paragraph_index,
+    _safe_page_est,
+)
+from .constants import BIBLIOGRAPHY_FORMAT_LABELS
+from parser.core.schema import (
+    BibliographyEntry,
+    ParagraphBlock,
+    ParsedDocxDocument,
+    TextCrossReferenceMention,
+)
+
+
+def _unresolved_bibliography_targets(
+    mention: TextCrossReferenceMention,
+    available_orders: Set[str],
+) -> List[str]:
+    """Номера ссылки, для которых в списке литературы нет записи.
+
+    Числовые цели ссылки сравниваются с ``order_index`` записей: перечисление
+    «[1, 7]» может разрешиться частично, и отсутствие седьмого источника —
+    такое же нарушение, как полностью неразрешенная ссылка. Цели, разбор
+    которых не дал числа (авторско-годовая ссылка «Иванов, 2020»), здесь не
+    проверяются: их разрешение видно по ``resolved_entity_ids``.
+    """
+    unresolved: List[str] = []
+    seen: Set[str] = set()
+    for target in mention.extracted_targets:
+        normalized = (target or "").strip()
+        if not normalized.isdigit():
+            continue
+        number = str(int(normalized))
+        if number in available_orders or number in seen:
+            continue
+        seen.add(number)
+        unresolved.append(number)
+    return unresolved
+
+
+def _bibliography_location(
+    entry: BibliographyEntry,
+    blocks: Dict[str, ParagraphBlock],
+) -> ViolationLocation:
+    """Строит локацию записи списка литературы: блок, страницу и фрагмент записи.
+
+    У самой записи страницы нет, поэтому она берется у абзаца записи, если
+    абзац найден в разборе; иначе страница остается неизвестной.
+    """
+    block = blocks.get(entry.block_id)
+    return ViolationLocation(
+        block_id=entry.block_id,
+        page_start_est=(
+            _safe_page_est(block.page_start_est) if block is not None else None
+        ),
+        page_end_est=(
+            _safe_page_est(block.page_end_est) if block is not None else None
+        ),
+        container_type=block.container_type if block is not None else None,
+        style_id=block.style_id if block is not None else None,
+        snippet=_collapse_text(entry.raw_text),
+    )
+
+
+def _bibliography_field_present(value: Any) -> bool:
+    """Считает поле записи списка литературы заполненным.
+
+    Отсутствие элемента — это ``None``, пустая строка, пустой список и
+    ``False`` (признак, который требуется: «есть разделитель //»). Числовые
+    значения, включая ноль, считаются заполненными: смысл конкретного поля
+    проверка не угадывает.
+    """
+    if value is None or value is False:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _check_bibliography_link_rule(
+    rule: BibliographyLinkRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Ищет ссылки на источники, которых нет в списке литературы.
+
+    Упоминание ``ref_type="bibliography"`` с непустыми
+    ``extracted_targets`` — это ссылка вида ``[3]``. Разрешенная ссылка
+    несет непустой ``resolved_entity_ids``; пустой список означает, что
+    записи с таким номером в списке нет. Перечисление может разрешиться
+    частично («[1, 7]»): отсутствующие номера сравниваются с
+    ``order_index`` записей и тоже дают нарушение. Если список литературы
+    пуст, проверять нечего: статус ``not_assessed``, а не выдуманные
+    нарушения.
+    """
+    index = document.cross_ref_index
+    entries = index.bibliography
+    expected_text = "ссылка указывает на источник, который есть в списке литературы"
+    if not entries:
+        return (
+            [],
+            0,
+            _build_assessment(
+                rule,
+                "not_assessed",
+                expected_text=expected_text,
+                observed_text="список литературы пуст: разрешать ссылки не с чем",
+                confidence="low",
+                details={"bibliography_entries": 0, "mentions_considered": 0},
+            ),
+        )
+
+    mentions = [
+        mention
+        for mention in index.mentions
+        if mention.ref_type == "bibliography" and mention.extracted_targets
+    ]
+    if not mentions:
+        return (
+            [],
+            0,
+            _build_assessment(
+                rule,
+                "not_assessed",
+                expected_text=expected_text,
+                observed_text=(
+                    "в тексте не найдено ссылок на источники списка литературы"
+                ),
+                confidence="low",
+                details={
+                    "bibliography_entries": len(entries),
+                    "mentions_considered": 0,
+                },
+                note="Ссылки на источники ищет слой обогащения parser.enrichment",
+            ),
+        )
+
+    violations: List[Violation] = []
+    available_orders = {str(entry.order_index) for entry in entries}
+    for mention in mentions:
+        unresolved_targets = _unresolved_bibliography_targets(
+            mention, available_orders
+        )
+        if mention.resolved_entity_ids and not unresolved_targets:
+            continue
+        found_text = (
+            "в списке литературы нет источников: " + ", ".join(unresolved_targets)
+            if unresolved_targets
+            else (
+                f"ссылка «{_mention_targets_text(mention)}» не разрешена "
+                "в записи списка литературы"
+            )
+        )
+        violations.append(
+            _build_violation(
+                rule,
+                address=mention.mention_id,
+                location=ViolationLocation(
+                    block_id=mention.block_id,
+                    page_start_est=_safe_page_est(mention.page_est),
+                    snippet=_collapse_text(mention.raw_snippet),
+                ),
+                expected={
+                    "resolved_into_bibliography": True,
+                    "targets": list(mention.extracted_targets),
+                },
+                found={
+                    "resolved_into_bibliography": bool(
+                        mention.resolved_entity_ids
+                    ),
+                    "unresolved_targets": unresolved_targets,
+                },
+                expected_text=expected_text,
+                found_text=found_text,
+            )
+        )
+
+    status = "fail" if violations else "pass"
+    observed_text = (
+        f"неразрешенных ссылок: {len(violations)} из {len(mentions)}"
+        if violations
+        else (
+            f"все ссылки ({len(mentions)}) разрешены "
+            "в записях списка литературы"
+        )
+    )
+    return (
+        violations,
+        len(mentions),
+        _build_assessment(
+            rule,
+            status,
+            expected_text=expected_text,
+            observed_text=observed_text,
+            confidence="high",
+            details={
+                "bibliography_entries": len(entries),
+                "mentions_considered": len(mentions),
+                "unresolved_mentions": len(violations),
+            },
+        ),
+    )
+
+
+def _check_bibliography_cited_rule(
+    rule: BibliographyCitedRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Ищет источники списка литературы, на которые нет ссылок в тексте.
+
+    Признак ``is_cited_in_text`` вычисляет слой обогащения: запись, у
+    которой он False, — источник, не упомянутый в работе. Если записей нет,
+    проверять нечего: статус ``not_assessed``.
+    """
+    entries = document.cross_ref_index.bibliography
+    expected_text = "каждый источник списка литературы цитируется в тексте работы"
+    if not entries:
+        return (
+            [],
+            0,
+            _build_assessment(
+                rule,
+                "not_assessed",
+                expected_text=expected_text,
+                observed_text="список литературы пуст: проверять цитирование нечего",
+                confidence="low",
+                details={"entries_considered": 0},
+            ),
+        )
+    if not rule.expected.require_all_cited:
+        # Модель отвергает такую конфигурацию; защита от копирования правила.
+        return (
+            [],
+            len(entries),
+            _build_assessment(
+                rule,
+                "pass",
+                expected_text=expected_text,
+                observed_text="проверка цитирования отключена требованием правила",
+                confidence="high",
+                details={"entries_considered": len(entries)},
+            ),
+        )
+
+    violations: List[Violation] = []
+    blocks = _paragraph_index(document)
+    for entry in entries:
+        if entry.is_cited_in_text:
+            continue
+        violations.append(
+            _build_violation(
+                rule,
+                address=entry.bib_id,
+                location=_bibliography_location(entry, blocks),
+                expected={"is_cited_in_text": True},
+                found={
+                    "is_cited_in_text": False,
+                    "bib_id": entry.bib_id,
+                    "category": entry.detected_category,
+                },
+                expected_text=expected_text,
+                found_text=(
+                    f"на источник «{_collapse_text(entry.raw_text, 60)}» "
+                    "нет ссылки в тексте"
+                ),
+            )
+        )
+
+    status = "fail" if violations else "pass"
+    observed_text = (
+        f"без ссылок в тексте: {len(violations)} из {len(entries)} источников"
+        if violations
+        else f"все источники списка ({len(entries)}) процитированы"
+    )
+    return (
+        violations,
+        len(entries),
+        _build_assessment(
+            rule,
+            status,
+            expected_text=expected_text,
+            observed_text=observed_text,
+            confidence="high",
+            details={
+                "entries_considered": len(entries),
+                "uncited_entries": len(violations),
+            },
+        ),
+    )
+
+
+def _check_bibliography_format_rule(
+    rule: BibliographyFormatRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Проверяет разобранные поля записей списка литературы.
+
+    Каждое включенное требование — отдельная проверка: запись без URL и без
+    года дает два нарушения, чтобы нормоконтролер видел оба пропуска.
+    Фильтр ``categories`` ограничивает выборку категориями источников:
+    URL и дата обращения обычно обязательны для электронного ресурса, но
+    не для книги.
+    """
+    expected = rule.expected
+    entries = list(document.cross_ref_index.bibliography)
+    expected_text = "запись списка литературы содержит обязательные элементы"
+    if expected.categories is not None:
+        entries = [
+            entry
+            for entry in entries
+            if entry.detected_category in expected.categories
+        ]
+    if not entries:
+        category_text = (
+            " выбранных категорий" if expected.categories is not None else ""
+        )
+        return (
+            [],
+            0,
+            _build_assessment(
+                rule,
+                "not_assessed",
+                expected_text=expected_text,
+                observed_text=(
+                    f"в списке литературы нет записей{category_text}: "
+                    "проверять формат нечего"
+                ),
+                confidence="low",
+                details={
+                    "entries_considered": 0,
+                    "categories": (
+                        list(expected.categories)
+                        if expected.categories is not None
+                        else None
+                    ),
+                },
+            ),
+        )
+
+    violations: List[Violation] = []
+    blocks = _paragraph_index(document)
+    for entry in entries:
+        checks: List[Tuple[str, Any]] = []
+        if expected.require_url:
+            checks.append(("urls", entry.urls))
+        if expected.require_access_date:
+            checks.append(("access_date_raw", entry.access_date_raw))
+        if expected.require_year:
+            checks.append(("year_extracted", entry.year_extracted))
+        if expected.require_pages:
+            checks.append(("pages_extracted", entry.pages_extracted))
+        if expected.require_isbn_or_issn:
+            checks.append(("isbn_or_issn", entry.isbn_or_issn))
+        if expected.require_double_slash:
+            checks.append(("has_double_slash_source", entry.has_double_slash_source))
+        if expected.require_text_type_designation:
+            checks.append(
+                ("has_text_type_designation", entry.has_text_type_designation)
+            )
+
+        for field, actual in checks:
+            if _bibliography_field_present(actual):
+                continue
+            label = BIBLIOGRAPHY_FORMAT_LABELS[field]
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:{field}",
+                    location=_bibliography_location(entry, blocks),
+                    expected={field: True},
+                    found={
+                        field: actual,
+                        "bib_id": entry.bib_id,
+                        "category": entry.detected_category,
+                    },
+                    expected_text=f"{label}: обязательно",
+                    found_text=f"{label}: отсутствует",
+                )
+            )
+
+    status = "fail" if violations else "pass"
+    observed_text = (
+        f"несоответствий формата: {len(violations)} у {len(entries)} записей"
+        if violations
+        else f"все {len(entries)} записей списка соответствуют требованиям"
+    )
+    return (
+        violations,
+        len(entries),
+        _build_assessment(
+            rule,
+            status,
+            expected_text=expected_text,
+            observed_text=observed_text,
+            confidence="high",
+            details={
+                "entries_considered": len(entries),
+                "mismatches_total": len(violations),
+                "categories": (
+                    list(expected.categories)
+                    if expected.categories is not None
+                    else None
+                ),
+            },
+        ),
+    )
