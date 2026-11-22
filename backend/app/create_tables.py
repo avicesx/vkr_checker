@@ -2,6 +2,7 @@ import os
 
 from .database import create_database_engine
 from .migrations import apply_migrations
+from .rule_types import seed_rule_types
 
 
 def init_db():
@@ -12,7 +13,8 @@ def init_db():
     print("Применяем миграции Alembic...")
     try:
         apply_migrations(engine)
-        print("Готово! Схема обновлена до последней ревизии.")
+        created = seed_rule_types(engine)
+        print(f"Готово! Схема обновлена, видов проверок добавлено: {created}.")
     finally:
         engine.dispose()
 
