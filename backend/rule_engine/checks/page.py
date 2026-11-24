@@ -661,6 +661,16 @@ def _pdf_page_number_property_violations(
         "numbered_pages": len(numbered),
     }
 
+    def _page_anchor(page_num: int) -> Tuple[Optional[str], Optional[int]]:
+        '''Возвращает блок и раздел первой строки страницы.'''
+        for block in document.blocks:
+            if getattr(block, "page_start_est", None) == page_num:
+                return (
+                    getattr(block, "block_id", None),
+                    getattr(block, "section_idx", None),
+                )
+        return None, None
+
     def _add(
         page: Any,
         property_key: str,
@@ -669,11 +679,14 @@ def _pdf_page_number_property_violations(
         expected_text: str,
         found_text: str,
     ) -> None:
+        anchor_block_id, anchor_section_idx = _page_anchor(page.page_num)
         violations.append(
             _build_violation(
                 rule,
                 address=f"page:{page.page_num}:{property_key}",
                 location=ViolationLocation(
+                    block_id=anchor_block_id,
+                    section_idx=anchor_section_idx,
                     page_start_est=page.page_num,
                     snippet=f"страница {page.page_num}",
                 ),

@@ -206,6 +206,7 @@ def _check_table_layout_rule(
     borders_not_measured: List[str] = []
     alignment_checked = 0
     alignment_not_set = 0
+    alignment_not_observed = 0
     number_column_checked = 0
 
     for table in tables:
@@ -273,8 +274,24 @@ def _check_table_layout_rule(
                 )
 
         if expected.alignment is not None:
-            actual_alignment = table.alignment
-            if actual_alignment is None:
+            section_for_alignment = sections.get(table.section_idx)
+            if (
+                section_for_alignment is not None
+                and table.total_width_mm is not None
+                and table.total_width_mm
+                >= section_for_alignment.text_area_width_mm - 5.0
+            ):
+                # Таблица на всю ширину полосы: выравнивание по краям не
+                # наблюдаемо — проверять его нельзя.
+                alignment_not_observed += 1
+                actual_alignment = None
+                width_unobservable = True
+            else:
+                actual_alignment = table.alignment
+                width_unobservable = False
+            if width_unobservable:
+                pass
+            elif actual_alignment is None:
                 alignment_not_set += 1
             else:
                 alignment_checked += 1
@@ -287,11 +304,11 @@ def _check_table_layout_rule(
                             expected={"alignment": expected.alignment},
                             found={"alignment": actual_alignment},
                             expected_text=(
-                                "таблица выровнена по "
+                                "таблица выровнена: "
                                 f"{ALIGNMENT_LABELS.get(expected.alignment, expected.alignment)}"
                             ),
                             found_text=(
-                                "таблица выровнена по "
+                                "таблица выровнена: "
                                 f"{ALIGNMENT_LABELS.get(actual_alignment, actual_alignment)}"
                             ),
                         )
@@ -319,6 +336,7 @@ def _check_table_layout_rule(
         "borders_not_measured": len(borders_not_measured),
         "alignment_checked": alignment_checked,
         "alignment_not_set": alignment_not_set,
+        "alignment_not_observed": alignment_not_observed,
         "number_column_checked": number_column_checked,
     }
     if (
@@ -613,23 +631,13 @@ def _check_table_header_format_rule(
         for order, row in enumerate(_header_rows(table)):
             headers.append((table, row, order))
     expected_text = "заголовки граф и строк таблицы с заглавной буквы, без точки в конце"
-    captions = _caption_by_id(document)
     violations: List[Violation] = []
     headerless_tables = [table for table in tables if not _header_rows(table)]
-    if expected.require_header_row:
-        for table in headerless_tables:
-            violations.append(
-                _build_violation(
-                    rule,
-                    address=f"{table.block_id}:header_row",
-                    location=_table_location(table, _table_snippet(table, captions)),
-                    expected={"header_row": True},
-                    found={"header_rows": 0, "table_id": table.block_id},
-                    expected_text="у таблицы размечена строка-шапка",
-                    found_text="строка-шапка не найдена (TableRow.is_tbl_header пуст)",
-                )
-            )
-    if not headers and not violations:
+    # Требование «строка-шапка есть» не превращается в находку: в DOCX
+    # шапку часто не помечают флагом is_tbl_header, и находка спорила бы
+    # с видимой на странице шапкой. Таблицы без разметки уходят в
+    # not_assessed, а число таких таблиц видно в details.
+    if not headers:
         return (
             [],
             0,
@@ -642,7 +650,11 @@ def _check_table_header_format_rule(
                     "(TableRow.is_tbl_header пуст): проверять заголовки нечего"
                 ),
                 confidence="low",
-                details={"tables": len(tables), "header_rows": 0},
+                details={
+                    "tables": len(tables),
+                    "header_rows": 0,
+                    "headerless_tables": len(tables),
+                },
             ),
         )
 
@@ -723,5 +735,4 @@ def _check_table_header_format_rule(
             "headerless_tables": len(headerless_tables),
         },
     )
-    checked = len(headers) + (len(headerless_tables) if expected.require_header_row else 0)
-    return violations, checked, assessment
+    return violations, len(headers), assessment

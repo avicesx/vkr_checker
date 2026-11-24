@@ -65,6 +65,11 @@ def _body_font_size(document: ParsedDocxDocument) -> Optional[float]:
     return weights.most_common(1)[0][0]
 
 
+# Предел для кегля, который меньше кегля основного текста: методичка
+# разрешает уменьшать шрифт в таблицах, но не ниже 10 pt.
+SMALLER_FONT_FLOOR_PT = 10.0
+
+
 def _check_font_rule(
     rule: FontRule,
     document: ParsedDocxDocument,
@@ -103,15 +108,18 @@ def _check_font_rule(
                 mismatched.append((run, diff))
             elif body_size is not None and (
                 run.effective_props.size_pt
-                < body_size - rule.params.size_tolerance_pt - EPSILON
+                < SMALLER_FONT_FLOOR_PT - rule.params.size_tolerance_pt - EPSILON
             ):
                 mismatched.append(
                     (
                         run,
                         (
-                            {"size_pt": body_size},
+                            {"min_size_pt": SMALLER_FONT_FLOOR_PT},
                             {"size_pt": run.effective_props.size_pt},
-                            ["кегль не меньше кегля основного текста"],
+                            [
+                                "кегль не меньше 10 pt: меньший кегль "
+                                "допустим, но не ниже предела"
+                            ],
                             [
                                 f"кегль {run.effective_props.size_pt} пт "
                                 f"при основном тексте {body_size} пт"

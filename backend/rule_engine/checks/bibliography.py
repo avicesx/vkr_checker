@@ -889,6 +889,29 @@ def _legal_force_rank(entry: BibliographyEntry) -> Optional[Tuple[int, str]]:
     return None
 
 
+def _entry_author(entry: BibliographyEntry) -> str:
+    """Возвращает автора записи для групповой сортировки.
+
+    Автором считается начало описания до точки: «Иванов И. И.» или
+    «Дубровина О. А.». Записи без автора (сборники, словари) в групповую
+    сортировку не попадают.
+    """
+    text = (entry.raw_text or "").strip()
+    match = re.match(r"^\s*([А-ЯЁA-Z][A-Za-zА-Яа-яЁё\-]+(?:\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]?\.?)?)", text)
+    if not match:
+        return ""
+    return " ".join(match.group(1).replace(".", ". ").split()).casefold()
+
+
+def _entry_title_text(entry: BibliographyEntry) -> str:
+    """Возвращает название записи без автора и служебных знаков."""
+    text = (entry.raw_text or "").strip()
+    match = re.match(r"^\s*[А-ЯЁA-Z][A-Za-zА-Яа-яЁё\-]+(?:\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]?\.?)?\s*[.:]?\s*", text)
+    if match:
+        text = text[match.end():]
+    return text.lstrip("«\"„ “”")
+
+
 def _check_bibliography_order_rule(
     rule: BibliographyOrderRule,
     document: ParsedDocxDocument,
@@ -1095,17 +1118,22 @@ def _check_bibliography_order_rule(
                 )
 
     if expected.author_group_sort:
-        previous_author = ""
-        previous_entry: Optional[BibliographyEntry] = None
+        previous_key: Optional[Tuple[str, str]] = None
         for entry in entries:
             if _is_group_header(entry):
-                previous_author = ""
-                previous_entry = None
+                previous_key = None
                 continue
-            letter = _first_letter(entry.raw_text)
-            if not letter:
+            if _legal_force_rank(entry) is not None:
+                # Нормативные акты группируются по юридической силе, а не по
+                # авторам: сравнивать их с фамилиями нельзя.
+                previous_key = None
                 continue
-            if previous_author and letter < previous_author:
+            author = _entry_author(entry)
+            letter = _first_letter(_entry_title_text(entry))
+            if not author or not letter:
+                previous_key = None
+                continue
+            if previous_key is not None and previous_key[0] == author and letter < previous_key[1]:
                 violations.append(
                     _build_violation(
                         rule,
@@ -1113,24 +1141,19 @@ def _check_bibliography_order_rule(
                         location=_bibliography_location(entry, blocks),
                         expected={"author_group_sort": True},
                         found={
-                            "previous": previous_author,
-                            "current": letter,
-                            "previous_bib_id": (
-                                previous_entry.bib_id
-                                if previous_entry is not None
-                                else None
-                            ),
+                            "author": author,
+                            "previous_title_letter": previous_key[1],
+                            "current_title_letter": letter,
                         },
-                        expected_text="записи внутри группы упорядочены по авторам",
+                        expected_text="работы одного автора упорядочены по названиям",
                         found_text=(
-                            f"порядок нарушен: «{previous_author}», затем «{letter}»"
+                            f"у автора «{author}» название на «{letter}» стоит "
+                            f"после названия на «{previous_key[1]}»"
                         ),
                         confidence="high",
                     )
                 )
-                continue
-            previous_author = letter
-            previous_entry = entry
+            previous_key = (author, letter)
 
     if expected.legal_force_order:
         previous_rank: Optional[int] = None

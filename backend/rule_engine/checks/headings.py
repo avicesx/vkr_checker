@@ -346,8 +346,31 @@ def _check_heading_format_rule(
                 )
 
         if expected.prefix_word and _heading_section_number(record):
-            actual_prefix = _section_number_prefix_word(_heading_section_number(record))
-            if not _same_word(actual_prefix, expected.prefix_word):
+            # Слово перед номером требуется только у глав: подразделы
+            # нумеруются без «Глава», и требование к ним давало ложные находки.
+            is_chapter = record.node.semantic_role == "main_chapter" or (
+                record.node.level == 1
+                and record.node.semantic_role != "sub_section"
+            )
+            title_text_for_prefix = (
+                heading.clean_title_text or record.paragraph.text_visible or ""
+            )
+            actual_prefix = _section_number_prefix_word(
+                _heading_section_number(record)
+            )
+            combined_title_text = " ".join(
+                (
+                    title_text_for_prefix,
+                    record.paragraph.text_visible or "",
+                )
+            )
+            if not actual_prefix and re.search(
+                rf"(?<![А-Яа-яЁё]){re.escape(expected.prefix_word)}(?![А-Яа-яЁё])",
+                combined_title_text,
+                re.IGNORECASE,
+            ):
+                actual_prefix = expected.prefix_word
+            if is_chapter and not _same_word(actual_prefix, expected.prefix_word):
                 expected_values["prefix_word"] = expected.prefix_word
                 found_values["prefix_word"] = actual_prefix
                 expected_parts.append(f"слово «{expected.prefix_word}» перед номером")

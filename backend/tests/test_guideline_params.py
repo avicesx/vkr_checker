@@ -514,7 +514,7 @@ def test_table_number_column_forbidden() -> None:
 
 
 def test_table_requires_header_row() -> None:
-    """Обязательная строка-шапка проверяется параметром require_header_row."""
+    """Без разметки шапки правило уходит в not_assessed, а не в находку."""
     with_header = _doc(blocks=[_table("tbl1", texts=("Наименование", "Значение"), header=True)])
     without_header = _doc(blocks=[_table("tbl1", texts=("Наименование",))])
     engine = _engine(
@@ -522,7 +522,9 @@ def test_table_requires_header_row() -> None:
     )
 
     assert _ids(engine.check(with_header), "th") == []
-    assert len(_ids(engine.check(without_header), "th")) == 1
+    report = engine.check(without_header)
+    assert _ids(report, "th") == []
+    assert _assessment(report, "th").status == "not_assessed"
 
 
 # ---------------------------------------------------------------------
@@ -574,21 +576,21 @@ def test_required_subsections() -> None:
 
 
 def test_font_smaller_than_body_text() -> None:
-    """Кегль ячейки меньше кегля основного текста даёт нарушение."""
-    cell_paragraph = _para(
-        "p_cell",
-        "Значение",
-        runs=[
-            _run("r_cell", "Значение", size_pt=12.0)
-        ],
-        container_type="table_cell",
-    )
-    body = _para(
-        "p_body",
-        "Основной текст",
-        runs=[_run("r_body", "Основной текст")],
-    )
-    document = _doc(blocks=[body, cell_paragraph])
+    """Уменьшенный кегль допустим до предела 10 pt, ниже — нарушение."""
+    def _document(size_pt: float):
+        cell_paragraph = _para(
+            "p_cell",
+            "Значение",
+            runs=[_run("r_cell", "Значение", size_pt=size_pt)],
+            container_type="table_cell",
+        )
+        body = _para(
+            "p_body",
+            "Основной текст",
+            runs=[_run("r_body", "Основной текст")],
+        )
+        return _doc(blocks=[body, cell_paragraph])
+
     engine = _engine(
         _rule(
             "font",
@@ -598,7 +600,8 @@ def test_font_smaller_than_body_text() -> None:
         )
     )
 
-    assert len(_ids(engine.check(document), "font")) == 1
+    assert _ids(engine.check(_document(12.0)), "font") == []
+    assert len(_ids(engine.check(_document(9.0)), "font")) == 1
 
 
 # ---------------------------------------------------------------------
@@ -746,17 +749,23 @@ def test_bibliography_number_style() -> None:
 
 
 def test_bibliography_author_group_sort() -> None:
-    """Порядок записей по фамилии автора проверяется author_group_sort."""
+    """Работы одного автора упорядочиваются по названиям."""
     broken = _doc(
         bibliography=[
             _bib("b1", 1, "Яковлев Я. Я. Психология. М.: Наука, 2021."),
-            _bib("b2", 2, "Абрамов А. А. Педагогика. М.: Наука, 2020."),
+            _bib("b2", 2, "Яковлев Я. Я. Анатомия. М.: Наука, 2020."),
         ]
     )
     good = _doc(
         bibliography=[
-            _bib("b1", 1, "Абрамов А. А. Педагогика. М.: Наука, 2020."),
+            _bib("b1", 1, "Яковлев Я. Я. Анатомия. М.: Наука, 2020."),
             _bib("b2", 2, "Яковлев Я. Я. Психология. М.: Наука, 2021."),
+        ]
+    )
+    other_authors = _doc(
+        bibliography=[
+            _bib("b1", 1, "Яковлев Я. Я. Психология. М.: Наука, 2021."),
+            _bib("b2", 2, "Абрамов А. А. Педагогика. М.: Наука, 2020."),
         ]
     )
     engine = _engine(
@@ -765,6 +774,7 @@ def test_bibliography_author_group_sort() -> None:
 
     assert len(_ids(engine.check(broken), "order")) == 1
     assert _ids(engine.check(good), "order") == []
+    assert _ids(engine.check(other_authors), "order") == []
 
 
 def test_bibliography_legal_force_order() -> None:

@@ -96,6 +96,39 @@ def _node_location(node: DocumentTreeNode, snippet: str) -> ViolationLocation:
     )
 
 
+def _top_level_appendix_ranges(
+    document: ParsedDocxDocument,
+) -> List[Tuple[int, int]]:
+    """Возвращает объединённые диапазоны страниц верхнеуровневых приложений.
+
+    Вложенные узлы («Продолжение приложения А») входят в диапазон родителя,
+    поэтому их страницы не суммируются повторно: иначе доля приложений может
+    превысить весь объём работы.
+    """
+    intervals: List[Tuple[int, int]] = []
+    tree = document.document_tree
+    roots = tree if isinstance(tree, list) else [tree]
+    stack: List[Tuple[DocumentTreeNode, bool]] = [
+        (node, False) for node in roots if node is not None
+    ]
+    while stack:
+        node, inside_appendix = stack.pop()
+        is_appendix = node.semantic_role == "appendix"
+        if is_appendix and not inside_appendix:
+            if node.page_start_est is not None and node.page_end_est is not None:
+                intervals.append((node.page_start_est, node.page_end_est))
+        stack.extend(
+            (child, inside_appendix or is_appendix) for child in node.children
+        )
+    merged: List[Tuple[int, int]] = []
+    for start, end in sorted(intervals):
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 def _check_document_volume_rule(
     rule: DocumentVolumeRule,
     document: ParsedDocxDocument,
@@ -243,10 +276,10 @@ def _check_document_volume_rule(
 
     appendix_share = None
     if expected.max_appendix_share is not None:
-        appendix_matches = role_nodes.get("appendix", [])
-        if appendix_matches:
+        appendix_ranges = _top_level_appendix_ranges(document)
+        if appendix_ranges:
             section_checks += 1
-            appendix_pages = sum(node_pages for _, node_pages in appendix_matches)
+            appendix_pages = sum(end - start + 1 for start, end in appendix_ranges)
             appendix_share = round(appendix_pages / pages, 3)
             if appendix_share > expected.max_appendix_share:
                 violations.append(
