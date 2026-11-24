@@ -313,7 +313,7 @@ erDiagram
 - **Индексы:** `ix_rule_type_id` (`id`); `rule_type_code_key` (`code`, unique)
 - **CHECK:** нет
 
-Каталог кодов живёт в `backend/app/rule_types.py` (27 записей) и засевается в
+Каталог кодов живёт в `backend/app/rule_types.py` (36 записей) и засевается в
 таблицу функцией `seed_rule_types`; модель БД этот список не ограничивает.
 
 ### 4.6 `ruleset`
@@ -458,7 +458,7 @@ erDiagram
 | Таблиц | 10 | рабочие таблицы; `alembic_version` не считается (в БД 11) |
 | Колонок | 89 | во всех 10 таблицах (в БД 90 — с `alembic_version.version_num`) |
 | Первичных ключей | 10 | по одному на таблицу, у `upload_check` — `varchar` |
-| Внешних ключей | 14 | 12 на чужие таблицы + 2 самоссылки (`org_unit`, `guideline`) + 2 (`ruleset`, `rule`) |
+| Внешних ключей | 14 | 10 на чужие таблицы + 4 самоссылки: `org_unit.parent_id`, `guideline.previous_version_id`, `ruleset.parent_ruleset_id`, `rule.inherited_from_rule_id` |
 | UNIQUE-ограничений | 3 | `guideline.text_hash`, `rule_type.code`, `ruleset(guideline_id, version)` |
 | Физических индексов | 24 | 10 под PK + 14 прочих (включая 3 индекса от UNIQUE и 1 частичный) |
 | Из них частичных | 1 | `uq_ruleset_active_per_guideline` |
@@ -496,7 +496,7 @@ erDiagram
 | `violation.severity` | VARCHAR(50), NULL | `error`, `warning`, `info` | `Strictness` движка; в БД пишется как есть |
 | `rule.scope` | VARCHAR(50), NULL | `body_text`, `body_paragraphs`, `all_paragraphs`, `table_cells`, `headers_footers`, `footnotes`, `sections`, `headings`, `document_structure`, `toc`, `bibliography`, `captions`, `document` | `Scope` в `backend/rule_engine/rules.py` |
 | `org_unit.kind` | VARCHAR(50), NOT NULL | `university`, `institute`, `department` | `Literal` в `backend/api/admin.py` (`OrgUnitUpdate`) |
-| `rule_type.code` | VARCHAR(50), NOT NULL | 27 кодов каталога | `backend/app/rule_types.py`, сид `seed_rule_types` |
+| `rule_type.code` | VARCHAR(50), NOT NULL | 36 кодов каталога | `backend/app/rule_types.py`, сид `seed_rule_types` |
 
 ### 6.2 Особенности перечислений
 
