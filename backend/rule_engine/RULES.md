@@ -1920,3 +1920,32 @@ ruleset = load_profile_ruleset("urgpu")    # 60 правил: база 4.3.0 + 3
 начинают проверять титульный лист, задание и приложения (`heading_levels` +22
 у Бикчуркиной, `heading_numbering` +6 у Мартемьяновой). Если наборы переедут в
 базу, эти роли нужно хранить отдельным полем.
+
+## 11. Опциональные параметры расширения охвата
+
+В наборе 4.3.0 появились 32 опциональных параметра: без них поведение правил не
+меняется, поэтому действующий набор и профили дают прежние находки. Параметры
+включаются в `params` конкретного правила; взаимоисключающие значения проверяет
+`RuleSet` при загрузке набора, а не при проверке документа.
+
+| `code` | Новые параметры | Что проверяют |
+| --- | --- | --- |
+| `heading_numbering` | `number_style`, `forbid_prefix_words` | запись номера (арабская, римская, со словом «Глава») и запрещённые слова перед номером |
+| `heading_format` | `prefix_word`, `forbid_quotes` | обязательное слово перед номером и кавычки в заголовке |
+| `caption_format` | `forbid_hyphenation`, `forbid_break_after_prefix`, `forbid_number_sign`, `sentence_case` | перенос в подписи, разрыв после префикса, знак `№` и регистр названия |
+| `toc` | `start_page`, `require_entry_number` | страница начала оглавления и номер у обязательной записи |
+| `appendix_order` | `label_scheme` | буквенная или арабская запись обозначений приложений |
+| `page_number_position` | `first_numbered_page` | страница, с которой печатается номер (только PDF-режим) |
+| `table_layout` | `alignment`, `forbid_number_column` | выравнивание таблицы и колонка «№» |
+| `table_header_format` | `require_header_row` | наличие строки-шапки |
+| `required_sections` | `require_subsections` | наличие подразделов у каждой главы |
+| `font` | `smaller_than_body_text` | кегль рана не меньше кегля основного текста (взаимоисключающе с `size_pt` и `min_size_pt`) |
+| `document_volume` | `section_page_limits`, `section_min_pages`, `max_appendix_share` | границы страниц по разделам и доля приложений |
+| `bibliography_order` | `foreign_sources_last`, `number_style`, `author_group_sort`, `legal_force_order` | иностранные источники в конце, запись номеров, порядок по авторам и юридической силе |
+| `bibliography_format` | `require_author`, `require_journal_title`, `require_publication_place`, `require_publication_source`, `require_archive_details`, `description_schema` | обязательные области описания и их порядок |
+| `equation_numbering` | `number_position`, `number_style` | положение и запись номера формулы |
+
+Запись номера разделов восстанавливается из текста заголовка, если парсер не
+заполнил `section_number_raw` (например, «I. ВВЕДЕНИЕ» или «ГЛАВА II»). Тесты
+каждого параметра — в `tests/test_guideline_params.py`, положительный и
+отрицательный случай в одном тесте.
