@@ -874,7 +874,13 @@ def _check_caption_placement_rule(
         if expected.prefix_word is not None and expected_prefix is not None:
             measurable = True
             actual_prefix = _normalize_caption_prefix(entity.prefix_word)
-            if actual_prefix != expected_prefix:
+            # «Рис.» и «Рисунок» — одна форма подписи рисунка: методички
+            # допускают обе, поэтому при совпадении семейства расхождение
+            # в сокращении не считается нарушением.
+            expected_family = CAPTION_PREFIX_FAMILIES.get(expected_prefix)
+            actual_family = CAPTION_PREFIX_FAMILIES.get(actual_prefix)
+            same_family = bool(expected_family) and expected_family == actual_family
+            if actual_prefix != expected_prefix and not same_family:
                 expected_values["prefix_word"] = expected.prefix_word
                 found_values["prefix_word"] = entity.prefix_word
                 expected_parts.append(f"подпись начинается с «{expected.prefix_word}»")

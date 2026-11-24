@@ -69,7 +69,13 @@ RE_EQ_NUM_STANDALONE = re.compile(r"^\s*\(\s*(?P<num>[А-ЯЁA-Z]?\s*\d+(?:\.\d+
 RE_WHERE_START = re.compile(r"^\s*(?P<word>где)(?P<colon>\s*:)?\s+\S+", re.IGNORECASE)
 
 RE_BIB_MANUAL_NUM = re.compile(r"^\s*(?P<raw_pref>\[\s*\d+\s*\]|\d+\.|\d+\))\s*(?P<body>\S.*)$")
-RE_BIB_YEAR = re.compile(r"\b(19\d{2}|20[0-3]\d)\b")
+RE_BIB_YEAR = re.compile(r"(?<!\d)(19\d{2}|20[0-3]\d)(?!\d)")
+"""Год в описании источника.
+
+Границы слова не подходят: в записях встречается «2002г.» без пробела перед
+«г.», а между цифрой и буквой граница слова не срабатывает. Ограничиваемся
+запретом соседних цифр, чтобы не принять за год часть ISBN или номера.
+"""
 RE_BIB_PAGES = re.compile(r"\b(?:[СсPp]\.\s*\d+(?:\s*[\—\–\-]\s*\d+)?|\d+\s*[сp]\.)")
 RE_BIB_ISBN_ISSN = re.compile(r"\b(?:ISBN|ISSN)\s*([0-9Xx\-\–\s]{8,20})\b", re.IGNORECASE)
 RE_BIB_URL = re.compile(r"https?://[^\s\)\]\>\"«»]+", re.IGNORECASE)

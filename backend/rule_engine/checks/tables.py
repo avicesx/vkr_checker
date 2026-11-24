@@ -24,7 +24,7 @@ from .builders import (
     _collapse_text,
     _counted_assessment,
 )
-from .common import _safe_page_est
+from .common import _is_pdf_only, _safe_page_est
 from .constants import ALIGNMENT_LABELS
 from parser.core.schema import (
     BorderEdge,
@@ -74,6 +74,40 @@ def _missing_border_edges(cell: TableCell) -> List[str]:
         ("right", borders.right),
     )
     return [name for name, edge in sides if not _border_visible(edge)]
+
+
+_BORDER_SIDES = ("top", "bottom", "left", "right")
+
+
+def _border_defined(edge: Optional[BorderEdge]) -> bool:
+    """Проверяет, что разбор дал линию, а не умолчание схемы.
+
+    Умолчание ``BorderEdge`` — стиль ``none``; настоящая линия приходит
+    стилем single/double/dotted или ненулевой толщиной. Если разбор PDF не
+    измерил границы таблицы, все стороны остаются умолчанием: на странице
+    рамка видна, но в данных ее нет, и проверять ее нельзя.
+    """
+    if edge is None:
+        return False
+    style = (edge.style or "").strip().lower()
+    return style not in _HIDDEN_BORDER_STYLES or bool(edge.width_pt)
+
+
+def _table_borders_measured(table: TableBlock) -> bool:
+    """True, если хотя бы одна линия таблицы пришла из разбора."""
+    borders = table.table_borders
+    if borders is not None:
+        names = _BORDER_SIDES + ("inside_h", "inside_v")
+        if any(_border_defined(getattr(borders, name, None)) for name in names):
+            return True
+    for cell in _iter_cells(table):
+        cell_borders = cell.effective_borders
+        if any(
+            _border_defined(getattr(cell_borders, name, None))
+            for name in _BORDER_SIDES
+        ):
+            return True
+    return False
 
 
 def _caption_by_id(
@@ -152,8 +186,10 @@ def _check_table_layout_rule(
 
     captions = _caption_by_id(document)
     sections = {section.section_idx: section for section in document.sections}
+    pdf_only = _is_pdf_only(document)
     violations: List[Violation] = []
     cells_checked = 0
+    borders_not_measured: List[str] = []
 
     for table in tables:
         snippet = _table_snippet(table, captions)
@@ -161,30 +197,33 @@ def _check_table_layout_rule(
 
         if expected.require_all_sides_borders:
             cells = list(_iter_cells(table))
-            cells_checked += len(cells)
-            broken = [cell for cell in cells if _missing_border_edges(cell)]
-            if broken:
-                first = broken[0]
-                violations.append(
-                    _build_violation(
-                        rule,
-                        address=f"{table.block_id}:borders",
-                        location=location,
-                        expected={"borders": "all_sides"},
-                        found={
-                            "cells_without_borders": len(broken),
-                            "cells_total": len(cells),
-                            "first_cell_id": first.cell_id,
-                            "missing_edges": _missing_border_edges(first),
-                        },
-                        expected_text="линии со всех сторон таблицы и между ячейками",
-                        found_text=(
-                            f"без полной рамки {len(broken)} из {len(cells)} ячеек, "
-                            f"первая — {first.cell_id}"
-                        ),
-                        occurrences=len(broken),
+            if pdf_only and not _table_borders_measured(table):
+                borders_not_measured.append(table.block_id)
+            else:
+                cells_checked += len(cells)
+                broken = [cell for cell in cells if _missing_border_edges(cell)]
+                if broken:
+                    first = broken[0]
+                    violations.append(
+                        _build_violation(
+                            rule,
+                            address=f"{table.block_id}:borders",
+                            location=location,
+                            expected={"borders": "all_sides"},
+                            found={
+                                "cells_without_borders": len(broken),
+                                "cells_total": len(cells),
+                                "first_cell_id": first.cell_id,
+                                "missing_edges": _missing_border_edges(first),
+                            },
+                            expected_text="линии со всех сторон таблицы и между ячейками",
+                            found_text=(
+                                f"без полной рамки {len(broken)} из {len(cells)} ячеек, "
+                                f"первая — {first.cell_id}"
+                            ),
+                            occurrences=len(broken),
+                        )
                     )
-                )
 
         if expected.require_full_text_width:
             section = sections.get(table.section_idx)
@@ -216,6 +255,34 @@ def _check_table_layout_rule(
                     )
                 )
 
+    details = {
+        "tables": len(tables),
+        "cells_checked": cells_checked,
+        "width_checked": expected.require_full_text_width,
+        "borders_not_measured": len(borders_not_measured),
+    }
+    if (
+        not violations
+        and expected.require_all_sides_borders
+        and borders_not_measured
+        and len(borders_not_measured) == len(tables)
+    ):
+        return (
+            [],
+            len(tables),
+            _build_assessment(
+                rule,
+                "not_assessed",
+                expected_text=expected_text,
+                observed_text=(
+                    "рамки таблиц на PDF не измерены: границы видны как линии "
+                    "страницы, а не как свойства таблицы — нужен DOCX-режим или "
+                    "ручная проверка"
+                ),
+                confidence="low",
+                details=details,
+            ),
+        )
     assessment = _counted_assessment(
         rule,
         violations,
@@ -223,11 +290,7 @@ def _check_table_layout_rule(
         expected_text=expected_text,
         confidence="high",
         empty_observed="в документе нет таблиц",
-        details={
-            "tables": len(tables),
-            "cells_checked": cells_checked,
-            "width_checked": expected.require_full_text_width,
-        },
+        details=details,
     )
     return violations, len(tables), assessment
 
@@ -451,10 +514,23 @@ def _cell_text(cell: TableCell) -> str:
 
 
 def _first_alpha(text: str) -> str:
-    """Возвращает первую букву текста или пустую строку."""
-    for char in text:
-        if char.isalpha():
-            return char
+    """Возвращает первую букву содержательного слова текста.
+
+    Знак номера «№» и сокращения с косой чертой («п/п», «ед./изм.») —
+    служебные обозначения графы, а не слово заголовка: с шапки «№ п/п»
+    регистр не проверяется, иначе стандартная таблица дает ложную находку.
+    """
+    for token in text.split():
+        token = token.lstrip("№#")
+        if not token:
+            continue
+        if "/" in token:
+            # «п/п», «UX/UI» — сокращение или латинское обозначение, а не слово:
+            # регистр с него не проверяется, следующее слово уже не первый смысл.
+            return ""
+        for char in token:
+            if char.isalpha():
+                return char
     return ""
 
 

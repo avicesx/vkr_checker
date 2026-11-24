@@ -1353,10 +1353,15 @@ class BibliographyFormatExpectation(BaseModel):
         ),
     )
     exempt_categories: List[BibliographyCategory] = Field(
-        default_factory=lambda: ["electronic_resource", "normative_act_law"],
+        default_factory=lambda: [
+            "electronic_resource",
+            "normative_act_law",
+            "standard_gost",
+        ],
         description=(
-            "Категории, к которым запрет точки-тире не применяется: у электронных "
-            "ресурсов и нормативных актов «. — » входит в форму описания"
+            "Категории с особым описанием: у электронных ресурсов, нормативных "
+            "актов и стандартов не требуются страницы и год, а «. — » входит в "
+            "форму описания, поэтому запрет точки-тире к ним не применяется"
         ),
     )
 

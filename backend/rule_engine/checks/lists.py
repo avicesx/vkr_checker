@@ -42,13 +42,30 @@ RE_RUSSIAN_LETTER = re.compile(r"^([А-ЯЁа-яё])\s*([.)]?)\s*$")
 
 _BULLET_CHARS = frozenset({"•", "·", "◦", "▪", "▫", "*", "o"})
 
+_PUA_BULLET_CODES = frozenset({0xF0B7, 0xF0A7, 0xF076, 0xF0D8, 0xF0FC, 0xF0A8, 0xF0E8})
+"""Коды частной области Unicode, которыми Word рисует кружок маркера."""
+
+
+def _normalize_marker_char(char: str) -> str:
+    """Заменяет символ частной области Unicode печатным маркером.
+
+    Разбор документа уже нормализует маркеры списков, но разборы, сделанные
+    раньше, могут нести в ``rendered_marker`` символы 0xE000–0xF8FF. Правило
+    не должно считать их текстом: неизвестный символ частной области считаем
+    дефисом, потому что в маркерах это шрифтовой дефис, а не буква.
+    """
+    code = ord(char) if char else 0
+    if 0xE000 <= code <= 0xF8FF:
+        return "•" if code in _PUA_BULLET_CODES else "-"
+    return char
+
 
 def _classify_marker(marker: str) -> str:
     """Определяет вид отрисованного маркера перечисления."""
     text = (marker or "").strip()
     if not text:
         return "other"
-    first = text[0]
+    first = _normalize_marker_char(text[0])
     if first in ("-", "\u2010", "\u2011"):
         return "hyphen"
     if first in ("\u2013", "\u2014"):

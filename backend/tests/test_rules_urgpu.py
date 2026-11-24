@@ -23,6 +23,7 @@ from parser.core.schema import (
     BorderEdge,
     BoxBorders,
     CrossReferenceIndex,
+    DocumentCapabilities,
     DocumentMeta,
     DocumentTreeNode,
     GlobalSettings,
@@ -186,6 +187,7 @@ def _table(
     *,
     texts: Sequence[str] = ("Ячейка",),
     borders: Optional[BoxBorders] = None,
+    border_style: str = "single",
     page: int = 2,
     total_width_mm: float = 160.0,
     header: bool = False,
@@ -202,7 +204,7 @@ def _table(
             col_idx=0,
             blocks=[paragraph],
             text_combined=row_text,
-            effective_borders=borders if borders is not None else _borders(),
+            effective_borders=borders if borders is not None else _borders(border_style),
         )
         rows.append(
             TableRow(
@@ -218,7 +220,7 @@ def _table(
         page_start_est=page,
         page_end_est=page,
         total_width_mm=total_width_mm,
-        table_borders=_borders(),
+        table_borders=_borders(border_style),
         rows=rows,
         continuation_of_table_id=continuation_of,
     )
@@ -264,12 +266,14 @@ def _doc(
     bibliography: Sequence[BibliographyEntry] = (),
     mentions: Sequence[TextCrossReferenceMention] = (),
     visuals: Sequence[VisualObject] = (),
+    capabilities: Optional[DocumentCapabilities] = None,
 ) -> ParsedDocxDocument:
     """Собирает минимальный документ с нужными для проверки данными."""
     return ParsedDocxDocument(
         meta=DocumentMeta(filename="vkr.docx", file_sha256="0" * 64),
         settings=GlobalSettings(),
         theme=ThemeData(),
+        capabilities=capabilities or DocumentCapabilities(),
         page_count=PageCountInfo(
             total_pages=3, method="docx_native_breaks", confidence="high"
         ),
@@ -501,6 +505,80 @@ def test_table_layout_passes_with_borders_and_width() -> None:
     assert engine.check(document).passed is True
 
 
+def test_table_layout_pdf_borders_go_to_not_assessed() -> None:
+    """В PDF границы таблицы не измерены: рамки не оцениваются, а не «нарушены»."""
+    document = _doc(
+        blocks=[_table("tbl1", border_style="none")],
+        capabilities=DocumentCapabilities(styles_parsed=False),
+    )
+    engine = _engine(
+        _rule(
+            "layout",
+            "table_layout",
+            params={"require_all_sides_borders": True, "require_full_text_width": False},
+            scope="table_cells",
+        )
+    )
+    report = engine.check(document)
+
+    assert report.violations == []
+    assessment = _assessment(report, "layout")
+    assert assessment.status == "not_assessed"
+    assert assessment.details["borders_not_measured"] == 1
+
+
+def test_table_layout_pdf_measured_borders_are_checked() -> None:
+    """Если PDF-разбор дал линии, рамки проверяются как обычно."""
+    document = _doc(
+        blocks=[_table("tbl1", border_style="single", borders=BoxBorders())],
+        capabilities=DocumentCapabilities(styles_parsed=False),
+    )
+    engine = _engine(
+        _rule(
+            "layout",
+            "table_layout",
+            params={"require_all_sides_borders": True, "require_full_text_width": False},
+            scope="table_cells",
+        )
+    )
+    report = engine.check(document)
+
+    assert set(_ids(report, "layout")) == {"layout:tbl1:borders"}
+    assert _assessment(report, "layout").details["borders_not_measured"] == 0
+
+
+def test_list_format_symbolic_marker_is_hyphen() -> None:
+    """Маркер-символ частной области (Wingdings) считается дефисом, а не «другим»."""
+    document = _doc(
+        blocks=[
+            _para(
+                "p1",
+                "Первый пункт",
+                list_info=ListItemMetadata(
+                    mechanism="openxml_numPr",
+                    level=0,
+                    rendered_marker="\uf02d",
+                    body_text_without_marker="Первый пункт",
+                    first_letter_case="uppercase",
+                    ending_punctuation="none",
+                ),
+            )
+        ]
+    )
+    engine = _engine(
+        _rule(
+            "list",
+            "list_format",
+            params={
+                "level_markers": [{"level": 0, "allowed": ["hyphen"]}],
+                "forbid_other_markers": True,
+            },
+        )
+    )
+
+    assert engine.check(document).violations == []
+
+
 def test_table_continuation_requires_label() -> None:
     """Продолжение таблицы без подписи «Продолжение таблицы N» ловится."""
     document = _doc(
@@ -572,6 +650,45 @@ def test_table_header_format_checks_case_and_dot() -> None:
         "header:tbl1_c0:first_letter",
         "header:tbl1_c0:trailing_dot",
     }
+
+
+def test_table_header_numbering_column_is_ignored() -> None:
+    """Шапка «№ п/п» — служебное обозначение, а не слово со строчной буквы."""
+    document = _doc(
+        blocks=[_table("tbl1", texts=("№ п/п", "Наименование"), header=True)]
+    )
+    engine = _engine(
+        _rule(
+            "header",
+            "table_header_format",
+            params={"first_letter": "capitalize"},
+            scope="table_cells",
+        )
+    )
+    report = engine.check(document)
+
+    assert _ids(report, "header") == []
+    assert report.passed is True
+
+
+def test_caption_placement_accepts_prefix_family() -> None:
+    """«Рис.» и «Рисунок» — одна форма подписи, сокращение не нарушение."""
+    caption = _para("cap", "Рисунок 1 — Схема", alignment="center", page=4)
+    document = _doc(
+        blocks=[caption],
+        figures=[_caption("f1", "figure", "1", caption_block_id="cap", prefix="Рисунок")],
+    )
+    engine = _engine(
+        _rule(
+            "place",
+            "caption_placement",
+            params={"entity_type": "figure", "prefix_word": "Рис.", "alignment": "center"},
+        )
+    )
+    report = engine.check(document)
+
+    assert _ids(report, "place") == []
+    assert report.passed is True
 
 
 def test_table_header_absent_is_not_assessed() -> None:

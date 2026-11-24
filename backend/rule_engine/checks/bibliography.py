@@ -380,6 +380,32 @@ def _check_bibliography_cited_rule(
     )
 
 
+RE_NORMATIVE_ACT = re.compile(
+    r"^\s*(?:"
+    r"закон|постановлени|распоряжени|письмо|приказ|указ|решение|"
+    r"инструкци|типов\w*\s+инструкци|форма\s|санпин|"
+    r"гост|ост\b|снип|правила|конвенци"
+    r")",
+    re.IGNORECASE,
+)
+"""Начало описания нормативного акта или стандарта.
+
+Парсер не всегда узнает такие записи: «Закон РФ», «Письмо комитета»,
+«Типовая инструкция» попадают в категорию ``unknown``. Страниц у них не
+бывает, поэтому для требований страниц и года они приравниваются к
+нормативным актам.
+"""
+
+
+def _is_normative_entry(entry: BibliographyEntry) -> bool:
+    """True, если запись описывает нормативный акт или стандарт.
+
+    Категория парсера остается основным признаком; текстовый признак нужен
+    для актов, которые разбор не распознал и пометил как ``unknown``.
+    """
+    return bool(RE_NORMATIVE_ACT.match(entry.raw_text or ""))
+
+
 def _check_bibliography_format_rule(
     rule: BibliographyFormatRule,
     document: ParsedDocxDocument,
@@ -391,7 +417,8 @@ def _check_bibliography_format_rule(
     года дает два нарушения, чтобы нормоконтролер видел оба пропуска.
     Фильтр ``categories`` ограничивает выборку категориями источников:
     URL и дата обращения обычно обязательны для электронного ресурса, но
-    не для книги.
+    не для книги. Категории из ``exempt_categories`` не проверяются на год
+    и страницы: у сайта страниц не бывает, у нормативного акта тоже.
 
     Два поля восстанавливаются из того, что парсер уже сохранил, если
     обогащение их не увидело: URL гиперссылки (``TextRun.hyperlink_target``)
@@ -437,20 +464,31 @@ def _check_bibliography_format_rule(
 
     violations: List[Violation] = []
     blocks = _paragraph_index(document)
+    exempt_entries = 0
     for entry in entries:
         block = blocks.get(entry.block_id)
         urls_value = entry.urls or _hyperlink_urls(block)
         access_value = entry.access_date_raw or _access_date_from_raw_text(
             entry.raw_text
         )
+        # У электронных ресурсов и нормативных актов нет страниц, а год
+        # выпуска сайта часто не указан: эти категории исключены из
+        # требований страниц и года, как и из запрета точки-тире.
+        category_exempt = entry.detected_category in expected.exempt_categories or (
+            entry.detected_category == "unknown"
+            and "normative_act_law" in expected.exempt_categories
+            and _is_normative_entry(entry)
+        )
+        if category_exempt:
+            exempt_entries += 1
         checks: List[Tuple[str, Any]] = []
         if expected.require_url:
             checks.append(("urls", urls_value))
         if expected.require_access_date:
             checks.append(("access_date_raw", access_value))
-        if expected.require_year:
+        if expected.require_year and not category_exempt:
             checks.append(("year_extracted", entry.year_extracted))
-        if expected.require_pages:
+        if expected.require_pages and not category_exempt:
             checks.append(("pages_extracted", entry.pages_extracted))
         if expected.require_isbn_or_issn:
             checks.append(("isbn_or_issn", entry.isbn_or_issn))
@@ -521,6 +559,7 @@ def _check_bibliography_format_rule(
             details={
                 "entries_considered": len(entries),
                 "mismatches_total": len(violations),
+                "exempt_entries": exempt_entries,
                 "categories": (
                     list(expected.categories)
                     if expected.categories is not None

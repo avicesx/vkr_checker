@@ -77,6 +77,27 @@ def _bibliography(document: ParsedDocument) -> list:
 # ---------------------------------------------------------------------
 
 
+def test_year_without_space_before_g_is_extracted(
+    docx_builder: DocxPackageBuilder,
+) -> None:
+    """«2002г.» без пробела перед «г.» — тоже год.
+
+    В записи встречается слитное «2002г.»: граница слова между цифрой и буквой
+    не срабатывает, поэтому год ищется без опоры на границы слова.
+    """
+    body = (
+        _heading("СПИСОК ЛИТЕРАТУРЫ")
+        + _paragraph(
+            "1. Москва проглотит еще сотни новых ресторанов. //Русский Фокус №31 2002г."
+        )
+    )
+    document = _parse(docx_builder, body)
+    entries = _bibliography(document)
+
+    assert len(entries) == 1
+    assert entries[0].year_extracted == 2002
+
+
 def test_numbered_entries_then_plain_text_stops_collection(
     docx_builder: DocxPackageBuilder,
 ) -> None:
