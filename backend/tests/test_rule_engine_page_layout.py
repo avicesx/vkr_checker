@@ -212,6 +212,10 @@ def _engine_for_code(profile_id: str, code: RuleCode) -> tuple[RuleEngine, Rule]
     """Берет из профиля вуза одно правило нужного вида и создает движок."""
     ruleset = load_profile_ruleset(profile_id)
     rules = [rule for rule in ruleset.rules if rule.code == code]
+    if len(rules) > 1:
+        body_rules = [rule for rule in rules if rule.target.scope == "body_text"]
+        if len(body_rules) == 1:
+            rules = body_rules
     assert len(rules) == 1, f"в профиле {profile_id} ожидалось одно правило вида {code}"
     rule = rules[0]
     engine = RuleEngine(
@@ -238,9 +242,16 @@ def _assessment(report: RuleCheckReport, rule_id: str) -> RuleAssessment:
 def test_page_number_bottom_center_passes_for_footer_profiles(profile_id: str) -> None:
     """Нижний колонтитул по центру соответствует профилям УрГПУ и УрФУ."""
     engine, rule = _engine_for_code(profile_id, "page_number_position")
+    # УрГПУ не ставит номер на титульном листе, УрФУ нумерует все страницы.
+    pages_audit = (
+        _audit_pages(1, location="none", alignment="none") + _audit_pages(5, start=2)
+        if profile_id == "urgpu"
+        else _audit_pages(6)
+    )
+    expected_numbers = 5 if profile_id == "urgpu" else 6
     document = _make_document(
         sections=[_section()],
-        pdf_pages_audit=_audit_pages(6),
+        pdf_pages_audit=pages_audit,
         parse_mode="pdf_only",
         has_pdf=True,
     )
@@ -252,7 +263,7 @@ def test_page_number_bottom_center_passes_for_footer_profiles(profile_id: str) -
     assert assessment.confidence == "medium"
     assert assessment.expected_text == "нижний колонтитул, по центру"
     assert assessment.details["source"] == "pdf_pages_audit"
-    assert assessment.details["pages_with_number"] == 6
+    assert assessment.details["pages_with_number"] == expected_numbers
     assert report.violations == []
     assert report.not_assessed == []
     assert report.summary.not_assessed_total == 0
@@ -311,8 +322,9 @@ def test_page_number_not_assessed_when_too_few_numbers() -> None:
     document = _make_document(
         sections=[_section()],
         pdf_pages_audit=(
-            _audit_pages(2, start=1)
-            + _audit_pages(4, start=3, location="none", alignment="none")
+            _audit_pages(1, location="none", alignment="none")
+            + _audit_pages(2, start=2)
+            + _audit_pages(3, start=4, location="none", alignment="none")
         ),
         parse_mode="pdf_only",
         has_pdf=True,
@@ -874,11 +886,14 @@ def test_line_spacing_modes_agree_on_word_multiplier(
 def test_report_assessments_are_deterministic() -> None:
     """Повторный прогон на том же документе дает идентичный JSON отчета."""
     ruleset = load_profile_ruleset("urfu")
-    rules = [
-        rule
-        for rule in ruleset.rules
-        if rule.code in {"page_number_position", "page_format", "line_spacing"}
-    ]
+    rules = sorted(
+        (
+            rule
+            for rule in ruleset.rules
+            if rule.code in {"page_number_position", "page_format", "line_spacing"}
+        ),
+        key=lambda rule: rule.code,
+    )
     assert len(rules) == 3
     engine = RuleEngine(
         RuleSet(ruleset_id="test-three-checks", ruleset_version="1.0.0", rules=rules)

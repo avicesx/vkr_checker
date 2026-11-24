@@ -279,6 +279,8 @@ def _check_caption_numbering_rule(
 
     if expected.appendix != "any":
         for entity in entities:
+            if entity.entity_type != "appendix":
+                continue
             entity_scheme = entity.numbering_scheme or "invalid"
             if expected.appendix == "own" and entity_scheme == "continuous_arabic":
                 extra_violations.append(

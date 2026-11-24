@@ -1,0 +1,630 @@
+{
+  "ruleset_id": "urgpu-vkr-profile",
+  "ruleset_version": "2.0.0",
+  "extends": "vkr-rule-engine-test",
+  "description": "Профиль УрГПУ: переопределения требований к оформлению ВКР поверх штатного набора",
+  "rules": [
+    {
+      "rule_id": "font_body_text",
+      "code": "font",
+      "strictness": "error",
+      "message": "Полужирное начертание в основном тексте не допускается",
+      "quote": "для выделения в тексте можно использовать курсив; полужирный не допускается.",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "family": "Times New Roman",
+        "size_pt": 14.0,
+        "size_tolerance_pt": 0.5,
+        "bold": false
+      }
+    },
+    {
+      "rule_id": "indent_first_line",
+      "code": "indent",
+      "strictness": "error",
+      "message": "Абзац основного текста начинается с отступа 12,5 мм",
+      "quote": "Шрифт: 14pt Times New Roman, 1,5 интервала, по ширине, отступ 1,25 (красная строка)",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "first_line_mm": 12.5,
+        "tolerance_mm": 2.5
+      }
+    },
+    {
+      "rule_id": "page_margins",
+      "code": "margin",
+      "strictness": "error",
+      "message": "Поля страницы: левое 30, правое 20, верхнее и нижнее 25 мм",
+      "quote": "Поля (см): левое – 3 , правое – 2, верхнее и нижнее – 2,5.",
+      "target": {
+        "scope": "sections"
+      },
+      "params": {
+        "left_mm": 30.0,
+        "right_mm": 20.0,
+        "top_mm": 25.0,
+        "bottom_mm": 25.0,
+        "tolerance_mm": 3.0
+      }
+    },
+    {
+      "rule_id": "page_number_position",
+      "code": "page_number_position",
+      "strictness": "error",
+      "message": "Номер страницы проставляется внизу по центру арабскими цифрами без точки, нумерация сквозная",
+      "quote": "Нумерация страниц, включая приложения, начинается с Титульного листа, которому присваивается № 1, но на странице он не ставится.",
+      "target": {
+        "scope": "headers_footers"
+      },
+      "params": {
+        "zone": "footer",
+        "alignment": "center",
+        "skip_first_page": true,
+        "require_arabic_digits": true,
+        "forbid_trailing_dot": true,
+        "require_continuous": true,
+        "include_appendices": true
+      }
+    },
+    {
+      "rule_id": "heading_numbering",
+      "code": "heading_numbering",
+      "strictness": "error",
+      "message": "Разделы нумеруются арабскими цифрами без точки после последней цифры",
+      "quote": "Нумерация разделов, подразделов, пунктов и т.д.: арабские цифры, без точки после последней цифры. Образец: 1.2",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "check_sequence": true,
+        "check_parent_number": true,
+        "check_depth_matches_level": true,
+        "number_ending": "without_dot",
+        "require_number_for_roles": [
+          "main_chapter",
+          "sub_section"
+        ]
+      }
+    },
+    {
+      "rule_id": "heading_page_break",
+      "code": "heading_page_break",
+      "strictness": "error",
+      "message": "Параграф не начинается с новой страницы, раздел — с новой",
+      "quote": "Начинать новый параграф с новой страницы не нужно.",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "roles": [
+          "main_chapter",
+          "introduction",
+          "conclusion",
+          "bibliography",
+          "appendix"
+        ],
+        "forbid_new_page_roles": [
+          "sub_section"
+        ]
+      }
+    },
+    {
+      "rule_id": "heading_format_text",
+      "code": "heading_format",
+      "strictness": "error",
+      "message": "Заголовки разделов набираются заглавными буквами, без точки в конце и без подчеркивания",
+      "quote": "Заголовки разделов (глав): оформляются жирным шрифтом, заглавными буквами по центру, не подчеркивая, без точки в конце.",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "case": "uppercase",
+        "trailing_dot": "forbid",
+        "underline": "forbid"
+      }
+    },
+    {
+      "rule_id": "required_sections",
+      "code": "required_sections",
+      "strictness": "error",
+      "message": "Документ содержит титульный лист, оглавление, введение, основную часть, заключение, список литературы и приложения",
+      "quote": "Структурными элементами курсовой работы являются: титульный лист, оглавление, введение, основная часть, заключение, список литературы, приложения.",
+      "target": {
+        "scope": "document_structure"
+      },
+      "params": {
+        "sections": [
+          {
+            "label": "введение",
+            "role": "introduction",
+            "titles": [
+              "введение"
+            ],
+            "required": true
+          },
+          {
+            "label": "основная часть",
+            "role": "main_chapter",
+            "required": true
+          },
+          {
+            "label": "заключение",
+            "role": "conclusion",
+            "titles": [
+              "заключение"
+            ],
+            "required": true
+          },
+          {
+            "label": "список литературы",
+            "role": "bibliography",
+            "titles": [
+              "список литературы",
+              "список использованных источников"
+            ],
+            "required": true
+          },
+          {
+            "label": "приложения",
+            "role": "appendix",
+            "titles": [
+              "приложения",
+              "приложение"
+            ],
+            "required": false
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "toc",
+      "code": "toc",
+      "strictness": "error",
+      "message": "Оглавление содержит введение, заключение, список литературы и приложения",
+      "quote": "Введение, заключение, список литературы, приложения в содержании не нумеруются.",
+      "target": {
+        "scope": "toc"
+      },
+      "params": {
+        "require_toc": true,
+        "require_page_numbers": true,
+        "check_titles": true,
+        "check_completeness": true,
+        "max_depth": 2,
+        "required_entries": [
+          {
+            "label": "введение",
+            "role": "introduction",
+            "require_number": false
+          },
+          {
+            "label": "заключение",
+            "role": "conclusion",
+            "require_number": false
+          },
+          {
+            "label": "список литературы",
+            "role": "bibliography",
+            "require_number": false
+          },
+          {
+            "label": "приложения",
+            "role": "appendix",
+            "require_number": false
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "heading_hyphenation_default",
+      "code": "heading_hyphenation",
+      "strictness": "error",
+      "message": "В заголовках не допускаются переносы слов и аббревиатуры",
+      "quote": "Перенос слов и аббревиатуры в заголовках не допускаются.",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "forbid_hyphenation": true,
+        "forbid_abbreviations": true
+      }
+    },
+    {
+      "rule_id": "toc_format_default",
+      "code": "toc",
+      "strictness": "error",
+      "message": "В содержании названия с левого края, с заглавной буквы, нежирно, без отточия",
+      "quote": "Содержание: все названия с левого края страницы, с Заглавной буквы; нежирно; не делать: ….. (строчки точек до номера страницы).",
+      "target": {
+        "scope": "toc"
+      },
+      "params": {
+        "require_toc": true,
+        "forbid_dot_leader": true,
+        "entry_alignment": "left",
+        "entry_bold": false,
+        "capitalize_entry": true
+      }
+    },
+    {
+      "rule_id": "list_format_default",
+      "code": "list_format",
+      "strictness": "error",
+      "message": "Перечисления начинают с дефиса, затем буквы со скобкой, затем цифры со скобкой",
+      "quote": "Перечисления: дефис (другие маркеры не допустимы), при необходимости – русские буквы со скобкой: б) и) /кроме ё,з,о,ч,ы,ъ,ь,й/; для дальнейшей детализации – арабские цифры: 2)",
+      "target": {
+        "scope": "body_paragraphs"
+      },
+      "params": {
+        "level_markers": [
+          {
+            "level": 0,
+            "allowed": [
+              "hyphen"
+            ]
+          },
+          {
+            "level": 1,
+            "allowed": [
+              "russian_letter_parenthesis"
+            ]
+          },
+          {
+            "level": 2,
+            "allowed": [
+              "arabic_parenthesis"
+            ]
+          }
+        ],
+        "forbid_other_markers": true
+      }
+    },
+    {
+      "rule_id": "caption_placement_table",
+      "code": "caption_placement",
+      "strictness": "error",
+      "message": "Слово «Таблица» без сокращения и кавычек пишется в правом верхнем углу над таблицей",
+      "quote": "Слово «Таблица» без сокращения и кавычек пишется в правом верхнем углу над самой таблицей и ее заголовком.",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "table",
+        "position": "above_table",
+        "alignment": "right",
+        "prefix_word": "Таблица",
+        "require_number": true,
+        "forbid_quotes": true
+      }
+    },
+    {
+      "rule_id": "caption_placement_figure",
+      "code": "caption_placement",
+      "strictness": "error",
+      "message": "Номер и заглавие иллюстрации пишутся внизу под изображением после слова «Рис.»",
+      "quote": "Номера иллюстраций и их заглавия пишутся внизу под изображением, обозначаются арабскими цифрами без номера после слова «Рис.»",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "figure",
+        "position": "below_object",
+        "alignment": "center",
+        "prefix_word": "Рис.",
+        "title_case": "capitalized",
+        "require_number": true
+      }
+    },
+    {
+      "rule_id": "caption_format_tables",
+      "code": "caption_format",
+      "strictness": "error",
+      "message": "Название таблицы пишется с заглавной буквы без точки в конце",
+      "quote": "Название таблицы располагается между ее нумерацией и собственным содержанием и пишется с заглавной буквы без точки в конце.",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "table",
+        "separator": "dot",
+        "require_trailing_dot": false,
+        "capitalize_first_letter": true
+      }
+    },
+    {
+      "rule_id": "caption_numbering_tables",
+      "code": "caption_numbering",
+      "strictness": "error",
+      "message": "Таблицы нумеруются сквозной нумерацией или в пределах раздела, в приложениях — своя",
+      "quote": "Нумерация таблиц: арабскими цифрами, без знака номер и точки в конце, сквозная по всему тексту работы или самостоятельной в каждом разделе, за исключением приложений (в приложении нумерация своя)",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "table",
+        "scheme": "any_of",
+        "schemes": [
+          "continuous_arabic",
+          "section_based"
+        ],
+        "appendix": "own",
+        "allow_gaps": false,
+        "allow_duplicates": false,
+        "allow_out_of_order": false
+      }
+    },
+    {
+      "rule_id": "caption_numbering_single_table",
+      "code": "caption_numbering",
+      "strictness": "error",
+      "message": "Единственной в тексте таблице номер не присваивается",
+      "quote": "если в тексте только одна таблица, то номер ей не присваивается и слово «таблица» не пишется.",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "table",
+        "skip_number_when_single": true
+      }
+    },
+    {
+      "rule_id": "table_header_format_default",
+      "code": "table_header_format",
+      "strictness": "error",
+      "message": "Заголовки граф начинаются с заглавной буквы, подзаголовки — со строчной",
+      "quote": "Заголовки граф и строк табл. (без точки в конце): с Заглавной буквы в ед. числе, подзаголовки – со строчной (маленькой) буквы, если составляют одно предложение с заголовком, или с Заглавной, если имеют самостоятельное значение.",
+      "target": {
+        "scope": "table_cells"
+      },
+      "params": {
+        "first_letter": "capitalize",
+        "forbid_trailing_dot": true,
+        "subheader_case": "lowercase_if_continuation"
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_body",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "Ссылка на источник оформлена в квадратных скобках с номером и страницей",
+      "quote": "Ссылки на цитаты и заимствованные данные в тексте: [3, с. 15] (номер в списке использованных источников и номер страницы, с которой взята информация).",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "bibliography",
+        "style": "square_brackets",
+        "require_number": true,
+        "require_page": true
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_quoted_from",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "Цитата не по первоисточнику оформлена как [Цит. по кн.: 6. С.240]",
+      "quote": "Если текст цитируется не по первоисточнику, а по другому изданию, то следует оформлять так: [Цит. по кн.: 6. С.240].",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "bibliography",
+        "style": "quoted_from",
+        "patterns": [
+          "\\[\\s*Цит\\.\\s*по"
+        ]
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_author",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "После кавычек в скобках указаны фамилия автора, номер источника и страница",
+      "quote": "текст берется в кавычки, затем в скобках указывается фамилия автора, номер в списке литературы и страница.",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "bibliography",
+        "style": "author_then_number_and_page"
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_ibid",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "Повторная ссылка оформлена как [там же] или [Там же. С. 309]",
+      "quote": "Далее в квадратных скобках принято писать [там же] или при цитировании [Там же. С. 309].",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "bibliography",
+        "style": "ibid",
+        "patterns": [
+          "\\[\\s*[Тт]ам\\s+же"
+        ]
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_section",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "Ссылка на раздел оформлена в круглых скобках с сокращением (см.)",
+      "quote": "Ссылку в тексте на отдельный раздел работы, не входящий в строй данной фразы, заключают в круглые скобки, помещая впереди сокращение (см.).",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "section",
+        "style": "parentheses_see"
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_figure",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "Ссылка на рисунок оформлена с сокращением «рис.»",
+      "quote": "При оформлении ссылки используют сокращения. Например: рис. 2.",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "figure",
+        "require_abbrev": "рис."
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_appendix",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "Ссылка на приложение оформлена как (см. прил. 2)",
+      "quote": "При оформлении ссылки на приложение используют сокращения. Например: (см. прил. 2).",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "appendix",
+        "style": "parentheses_see",
+        "require_abbrev": "прил."
+      }
+    },
+    {
+      "rule_id": "bibliography_order",
+      "code": "bibliography_order",
+      "strictness": "error",
+      "message": "Список литературы без деления на группы, источники в алфавитном порядке",
+      "quote": "Список литературы: сквозная нумерация, группы не выделяются",
+      "target": {
+        "scope": "bibliography"
+      },
+      "params": {
+        "start_at": 1,
+        "allow_gaps": false,
+        "allow_duplicates": false,
+        "allow_groups": false,
+        "sort": "alphabetical"
+      }
+    },
+    {
+      "rule_id": "bibliography_count",
+      "code": "bibliography_count",
+      "strictness": "warning",
+      "message": "Список литературы содержит не менее 35 источников",
+      "quote": "Список литературы должен включать не менее 35-37 источников в полном библиографическом описании.",
+      "target": {
+        "scope": "bibliography"
+      },
+      "params": {
+        "min_sources": 35
+      }
+    },
+    {
+      "rule_id": "bibliography_format_article",
+      "code": "bibliography_format",
+      "strictness": "error",
+      "message": "Статья в списке литературы оформлена с разделителем «//», годом и страницами",
+      "quote": "Кольцова Е.Ю. Производство новостей: скрытые механизмы контроля // Журнал социологии и социальной антропологии. 1999. №3. С.87-104.",
+      "target": {
+        "scope": "bibliography"
+      },
+      "params": {
+        "categories": [
+          "journal_article"
+        ],
+        "require_double_slash": true,
+        "require_year": true,
+        "require_pages": true
+      }
+    },
+    {
+      "rule_id": "required_sections_chapters",
+      "code": "required_sections",
+      "strictness": "error",
+      "message": "Работа состоит из 2–3 основных глав",
+      "quote": "Основная часть, как правило, не может состоять лишь из одной главы, она состоит из нескольких (двух-трех) глав.",
+      "target": {
+        "scope": "document_structure"
+      },
+      "params": {
+        "sections": [],
+        "min_main_chapters": 2,
+        "max_main_chapters": 3
+      }
+    },
+    {
+      "rule_id": "title_page_content_default",
+      "code": "title_page_content",
+      "strictness": "error",
+      "message": "Титульный лист ВКР содержит министерство, вуз, институт, кафедру, вид работы, тему, автора, руководителя, оценку, город и год",
+      "quote": "Титульный лист курсовой работы должен содержать: … полное наименование министерства РФ, вуза, института, кафедры, где выполнена работа; … вид исследовательской работы (курсовая работа); … название темы курсовой работы; … сведения об авторе (Ф.И.О. студента, курс, номер группы и отделение); … сведения о научном руководителе (Ф.И.О., ученая степень, должность преподавателя, ученое звание). … строка для проставления оценки; … город, год написания.",
+      "target": {
+        "scope": "document_structure"
+      },
+      "params": {
+        "required_fields": [
+          "министерство",
+          "вуз",
+          "институт",
+          "кафедра",
+          "вид работы",
+          "тема",
+          "автор",
+          "руководитель",
+          "оценка",
+          "город",
+          "год"
+        ],
+        "work_type": "ВКР"
+      }
+    },
+    {
+      "rule_id": "font_table_min",
+      "code": "font",
+      "strictness": "error",
+      "message": "Кегль текста в таблице не меньше 10 pt",
+      "quote": "Текст внутри таблицы может выполняться меньшим шрифтом (но не меньше 10pt).",
+      "target": {
+        "scope": "table_cells"
+      },
+      "params": {
+        "min_size_pt": 10.0,
+        "size_tolerance_pt": 0.5
+      }
+    },
+    {
+      "rule_id": "bibliography_format_dot_dash",
+      "code": "bibliography_format",
+      "strictness": "error",
+      "message": "В описании источника указаны год и страницы, тире между элементами не ставится",
+      "quote": "Валукин М.Е. Эволюция движений в мужском классическом танце. М.: ГИТИС, 2006. 251 с.",
+      "target": {
+        "scope": "bibliography"
+      },
+      "params": {
+        "require_year": true,
+        "require_pages": true,
+        "forbid_dot_dash": true
+      }
+    },
+    {
+      "rule_id": "caption_format_figures",
+      "code": "caption_format",
+      "strictness": "error",
+      "message": "Номер и название рисунка разделены точкой, точка в конце подписи не ставится",
+      "quote": "Номера иллюстраций и их заглавия пишутся внизу под изображением, обозначаются арабскими цифрами без номера после слова «Рис.»",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "figure",
+        "separator": "dot",
+        "require_trailing_dot": false
+      }
+    }
+  ]
+}

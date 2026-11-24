@@ -626,7 +626,9 @@ PAGE_NUMBER_PROPERTY_LABELS = {
 def _appendix_page_ranges(document: ParsedDocxDocument) -> List[Tuple[int, int]]:
     """Возвращает диапазоны страниц разделов с ролью «appendix»."""
     ranges: List[Tuple[int, int]] = []
-    stack = list(document.document_tree.children) if document.document_tree else []
+    tree = document.document_tree
+    roots = tree if isinstance(tree, list) else [tree]
+    stack = [node for node in roots if node is not None]
     while stack:
         node = stack.pop()
         if node.semantic_role == "appendix":
@@ -956,8 +958,10 @@ def _check_page_number_position_rule(
                 ),
             )
         return violations, number_count, assessment
-    if assessment.status == "fail":
-        return violations, number_count, assessment
+    if assessment.status in ("fail", "not_assessed"):
+        # Мало распознанных номеров — оценка положения остаётся неполной,
+        # даже если проверки свойств номера прошли.
+        return violations, number_count, assessment.model_copy(update={"details": details})
     return (
         violations,
         number_count,

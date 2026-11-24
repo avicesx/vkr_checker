@@ -232,27 +232,27 @@ CONTENT_RULE_NOISE_BASELINE_BY_RULE: Dict[str, int] = {
 FONT_INDENT_BUDGET_SHARE = 0.20
 TOTAL_NOISE_BUDGET = 700
 
-#: Правила УрГПУ (t22, набор 3.1.0): это отдельный набор требований методички,
-#: поэтому у него свой бюджет первого замера на корпусе из 7 документов.
-#: Числа детерминированы; рост бюджета — только с новым замером.
+#: Правила УрГПУ (t22, наборы 3.1.0 и 4.0.0): это отдельный набор требований
+#: методички, поэтому у него свой бюджет первого замера на корпусе из 7
+#: документов. Числа детерминированы; рост бюджета — только с новым замером.
 URGPU_NOISE_BASELINE_BY_RULE: Dict[str, int] = {
+    "heading_hyphenation_default": 0,
+    "required_sections_chapters": 1,
+    "toc_format_default": 1,
     "bibliography_format_dot_dash": 350,
-    "list_format_urgpu": 217,
-    "inline_reference_format_body": 199,
-    "toc_format_urgpu": 177,
-    "table_layout_borders": 29,
-    "heading_page_break_subsection": 17,
-    "caption_numbering_urgpu": 11,
+    "caption_reference_appendix": 0,
     "caption_placement_table": 10,
-    "caption_placement_appendix": 8,
     "caption_placement_figure": 5,
-    "title_page_content_default": 4,
-    "required_sections_chapters": 3,
+    "caption_placement_appendix": 8,
+    "inline_reference_format_body": 199,
+    "table_layout_borders": 29,
+    "table_continuation_default": 0,
     "table_header_format_default": 3,
-    "page_number_position_extended": 2,
-    "caption_format_capitalize": 1,
+    "list_format_default": 217,
+    "appendix_order_default": 0,
+    "title_page_content_default": 4,
 }
-URGPU_NOISE_BASELINE = 1036
+URGPU_NOISE_BASELINE = 827
 
 #: Итог корпуса после правок f1–f6 и t12: font 0, indent 0, остальное — реальные находки.
 TOTAL_NOISE_TARGET = 148

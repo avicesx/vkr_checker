@@ -372,7 +372,7 @@ def test_inline_reference_requires_page_and_number() -> None:
 
 
 def test_inline_reference_style_quoted_from() -> None:
-    """Стиль «Цит. по» распознается, а простая ссылка под него не подходит."""
+    """Правило про «Цит. по» не считает обычную ссылку цитатой из чужой книги."""
     document = _doc(
         blocks=[
             _para("p1", "Как отмечено в исследовании [Цит. по кн.: 5. С. 12], вывод верен."),
@@ -388,9 +388,11 @@ def test_inline_reference_style_quoted_from() -> None:
     )
     report = engine.check(document)
 
-    addresses = _ids(report, "quoted")
-    assert len(addresses) == 1
-    assert addresses[0].startswith("quoted:p2:ref")
+    assessment = _assessment(report, "quoted")
+    assert _ids(report, "quoted") == []
+    assert assessment.status == "pass"
+    assert assessment.details["references"] == 1
+    assert assessment.details["skipped_other_styles"] == 1
 
 
 def test_inline_reference_pattern_and_abbrev() -> None:
@@ -1298,7 +1300,7 @@ def test_table_layout_expectation_defaults() -> None:
 
 def test_inline_reference_expectation_rejects_patterns_with_style() -> None:
     """Свой шаблон и стиль одновременно задавать нельзя."""
-    with pytest.raises(ValidationError, match="взаимоисключающи"):
+    with pytest.raises(ValidationError, match="patterns"):
         InlineReferenceExpectation(style="square_brackets", patterns=[r"^\d+$"])
 
 

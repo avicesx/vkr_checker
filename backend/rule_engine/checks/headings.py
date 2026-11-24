@@ -438,6 +438,34 @@ RE_TRAILING_HYPHEN = re.compile(r"[А-Яа-яЁёA-Za-z]-\s*$")
 RE_ABBREVIATION = re.compile(r"(?<![А-ЯЁA-Z])[А-ЯЁA-Z]{2,}(?![А-ЯЁA-Z])")
 """Аббревиатура из двух и более прописных букв."""
 
+RE_LOWERCASE = re.compile(r"[а-яёa-z]")
+"""Строчная буква: признак обычного текста, а не аббревиатуры."""
+
+ABBREVIATION_STOP_WORDS = frozenset(
+    {
+        "реферат",
+        "введение",
+        "заключение",
+        "содержание",
+        "оглавление",
+        "приложение",
+        "приложения",
+        "список",
+        "литература",
+        "литературы",
+        "глава",
+        "раздел",
+        "таблица",
+        "рисунок",
+        "схема",
+        "тема",
+        "цель",
+        "задачи",
+        "выводы",
+    }
+)
+"""Слова-заголовки, которые не являются аббревиатурами."""
+
 SOFT_HYPHEN = "\u00ad"
 """Мягкий перенос: невидимый знак, который ставит Word при переносе."""
 
@@ -458,9 +486,17 @@ def _heading_hyphenation_issues(
         or RE_TRAILING_HYPHEN.search(text) is not None
     )
     abbreviation = None
-    match = RE_ABBREVIATION.search(text)
-    if match is not None:
-        abbreviation = match.group(0)
+    if RE_LOWERCASE.search(text) is not None:
+        for word in text.split():
+            candidate = word.strip(".,;:()[]«»\"'")
+            if not RE_ABBREVIATION.fullmatch(candidate):
+                continue
+            if len(candidate) > 8:
+                continue
+            if candidate.casefold() in ABBREVIATION_STOP_WORDS:
+                continue
+            abbreviation = candidate
+            break
     return hyphenated, abbreviation
 
 

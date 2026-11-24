@@ -313,7 +313,45 @@ def _check_inline_reference_format_rule(
             ),
         )
 
+    in_scope: List[Tuple[ParagraphBlock, str, int, Dict[str, object]]] = []
     for paragraph, snippet, position, classified in candidates:
+        actual_style = str(classified["style"])
+        if expected.patterns is not None:
+            # Образцы уточняют форму записи: чужие формы (обычная скобочная
+            # ссылка в правиле про «Цит. по») не проверяются этим правилом.
+            if actual_style == expected.style or _matches_patterns(
+                snippet, expected.patterns
+            ):
+                in_scope.append((paragraph, snippet, position, classified))
+            continue
+        if expected.style != "any" and actual_style != expected.style:
+            continue
+        in_scope.append((paragraph, snippet, position, classified))
+
+    skipped_other_styles = len(candidates) - len(in_scope)
+    if not in_scope:
+        return (
+            [],
+            0,
+            _build_assessment(
+                rule,
+                "not_assessed",
+                expected_text=expected_text,
+                observed_text=(
+                    "ссылок нужной формы записи в тексте не найдено: "
+                    "проверять нечего"
+                ),
+                confidence="low",
+                details={
+                    "references": 0,
+                    "ref_type": ref_type,
+                    "paragraphs_checked": len(paragraphs),
+                    "skipped_other_styles": skipped_other_styles,
+                },
+            ),
+        )
+
+    for paragraph, snippet, position, classified in in_scope:
         actual_style = str(classified["style"])
         if expected.patterns is not None:
             if not _matches_patterns(snippet, expected.patterns):
@@ -384,22 +422,23 @@ def _check_inline_reference_format_rule(
             )
 
     by_style: Dict[str, int] = {}
-    for _, _, _, classified in candidates:
+    for _, _, _, classified in in_scope:
         style = str(classified["style"])
         by_style[style] = by_style.get(style, 0) + 1
 
     assessment = _counted_assessment(
         rule,
         violations,
-        len(candidates),
+        len(in_scope),
         expected_text=expected_text,
         confidence="medium",
         empty_observed="ссылок выбранного вида в тексте не найдено",
         details={
-            "references": len(candidates),
+            "references": len(in_scope),
             "ref_type": ref_type,
             "paragraphs_checked": len(paragraphs),
             "by_style": by_style,
+            "skipped_other_styles": skipped_other_styles,
         },
     )
-    return violations, len(candidates), assessment
+    return violations, len(in_scope), assessment

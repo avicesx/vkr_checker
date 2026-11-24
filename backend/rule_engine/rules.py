@@ -181,9 +181,9 @@ SCOPE_LABELS: dict[str, str] = {
 DEFAULT_RULESET_PATH = Path(__file__).resolve().parent / "rules" / "vkr_test_rules.json"
 
 PROFILE_RULESET_PATHS: dict[str, Path] = {
-    "mpgu": Path(__file__).resolve().parent / "rules" / "mpgu.json",
-    "urgpu": Path(__file__).resolve().parent / "rules" / "urgpu.json",
-    "urfu": Path(__file__).resolve().parent / "rules" / "urfu.json",
+    "mpgu": Path(__file__).resolve().parent / "rules" / "profiles" / "mpgu.json",
+    "urgpu": Path(__file__).resolve().parent / "rules" / "profiles" / "urgpu.json",
+    "urfu": Path(__file__).resolve().parent / "rules" / "profiles" / "urfu.json",
 }
 """Наборы правил профилей вузов: идентификатор вуза → файл правил."""
 
@@ -1949,10 +1949,10 @@ class InlineReferenceExpectation(BaseModel):
                 "InlineReferenceExpectation пусто: задайте ref_type, style, require_page, "
                 "require_abbrev, require_number или patterns"
             )
-        if self.patterns is not None and self.style != "any":
+        if self.patterns is not None and self.style not in ("any", "quoted_from", "ibid"):
             raise ValueError(
-                "InlineReferenceExpectation: patterns и style взаимоисключающи, "
-                "выберите форму через style или задайте свое выражение"
+                "InlineReferenceExpectation: patterns уточняют стили quoted_from и ibid, "
+                "для остальных стилей задайте style='any' или уберите patterns"
             )
         return self
 
@@ -2494,6 +2494,13 @@ class RuleSet(BaseModel):
     ruleset_id: str = Field(description="Идентификатор набора, попадает в отчет")
     ruleset_version: str = Field(description="Версия набора правил")
     description: Optional[str] = Field(default=None, description="Назначение набора")
+    extends: Optional[str] = Field(
+        default=None,
+        description=(
+            "Идентификатор базового набора, поверх которого профиль задает "
+            "переопределения по rule_id"
+        ),
+    )
     rules: List[Rule] = Field(min_length=1, description="Перечень правил")
 
     @field_validator("ruleset_id", "ruleset_version")
@@ -2550,14 +2557,38 @@ class RuleSet(BaseModel):
         raise KeyError(f"Правило '{rule_id}' отсутствует в наборе '{self.ruleset_id}'")
 
 
-def load_ruleset(path: str | Path) -> RuleSet:
-    """Читает JSON-файл набора правил и валидирует его структуру."""
-    ruleset_path = Path(path)
-    raw_text = ruleset_path.read_text(encoding="utf-8")
+def _read_ruleset_payload(path: Path) -> dict:
+    """Читает JSON набора правил и возвращает словарь до валидации схемой."""
+    raw_text = path.read_text(encoding="utf-8")
     try:
         payload = json.loads(raw_text)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"{ruleset_path}: некорректный JSON ({exc})") from exc
+        raise ValueError(f"{path}: некорректный JSON ({exc})") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path}: ожидался JSON-объект набора правил")
+    return payload
+
+
+def load_ruleset(path: str | Path) -> RuleSet:
+    """Читает JSON-файл набора правил и валидирует его структуру."""
+    return RuleSet.model_validate(_read_ruleset_payload(Path(path)))
+
+
+def merge_ruleset(base: RuleSet, overlay: RuleSet) -> RuleSet:
+    """Накладывает профиль на базовый набор по правилам с тем же rule_id.
+
+    Порядок правил базового набора сохраняется, новые правила профиля
+    добавляются в конец. Идентификатор и версия берутся у профиля, поэтому
+    профиль остается самостоятельным набором для движка.
+    """
+    overrides = {rule.rule_id: rule for rule in overlay.rules}
+    merged: List[Rule] = []
+    for rule in base.rules:
+        replacement = overrides.pop(rule.rule_id, None)
+        merged.append(replacement if replacement is not None else rule)
+    merged.extend(overrides.values())
+    payload = overlay.model_dump()
+    payload["rules"] = [rule.model_dump() for rule in merged]
     return RuleSet.model_validate(payload)
 
 
@@ -2577,6 +2608,8 @@ def load_profile_ruleset(profile_id: str) -> RuleSet:
     Идентификатор сравнивается без учета регистра и пробелов по краям.
     Неизвестный профиль — ошибка, а не молчаливый переход к набору по
     умолчанию: проверять работу чужими требованиями опаснее, чем упасть.
+    Профиль с полем extends накладывается на базовый набор: правило с тем
+    же rule_id заменяется, остальные правила наследуются из базы.
     """
     if not isinstance(profile_id, str):
         raise ValueError(f"Идентификатор профиля должен быть строкой: {profile_id!r}")
@@ -2587,4 +2620,13 @@ def load_profile_ruleset(profile_id: str) -> RuleSet:
         raise ValueError(
             f"Неизвестный профиль оформления: {profile_id!r}; доступны: {known}"
         )
-    return load_ruleset(ruleset_path)
+    profile = RuleSet.model_validate(_read_ruleset_payload(ruleset_path))
+    if profile.extends is None:
+        return profile
+    base = load_default_ruleset()
+    if profile.extends.strip() != base.ruleset_id:
+        raise ValueError(
+            f"Профиль {normalized!r} расширяет неизвестный набор "
+            f"{profile.extends!r}; ожидается {base.ruleset_id!r}"
+        )
+    return merge_ruleset(base, profile)

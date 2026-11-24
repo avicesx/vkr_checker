@@ -212,37 +212,73 @@ def docx_builder(tmp_path: Path) -> DocxPackageBuilder:
 # НАБОР 3.0.0: БАЗОВЫЕ ПРАВИЛА БЕЗ ДОБАВЛЕННЫХ ТРЕБОВАНИЙ УрГПУ
 # =====================================================================
 
+LEGACY_RULE_IDS: frozenset[str] = frozenset(
+    {
+        "font_body_text",
+        "indent_first_line",
+        "alignment_body_text",
+        "line_spacing_body",
+        "microtypography_prose",
+        "microtypography_nbsp",
+        "page_margins",
+        "page_number_position",
+        "page_format",
+        "widow_control_body",
+        "heading_levels",
+        "heading_numbering",
+        "heading_format_text",
+        "heading_font",
+        "heading_alignment",
+        "heading_page_break",
+        "heading_keep_next",
+        "required_sections",
+        "toc",
+        "document_volume",
+        "equation_numbering",
+        "bibliography_links_resolved",
+        "bibliography_all_cited",
+        "bibliography_count",
+        "bibliography_order",
+        "bibliography_recency",
+        "bibliography_format_electronic",
+        "bibliography_format_article",
+        "caption_numbering_figures",
+        "caption_numbering_tables",
+        "caption_format_figures",
+        "caption_format_tables",
+        "caption_reference_figures",
+        "caption_reference_tables",
+        "alignment_captions",
+        "alignment_table_cells",
+        "font_table_cells",
+    }
+)
+"""Правила базового набора 3.0.0: сценарии, посчитанные до требований УрГПУ."""
+
 URGPU_RULE_IDS: frozenset[str] = frozenset(
     {
+        "heading_hyphenation_default",
+        "required_sections_chapters",
+        "toc_format_default",
+        "bibliography_format_dot_dash",
+        "caption_reference_appendix",
+        "caption_placement_table",
+        "caption_placement_figure",
+        "caption_placement_appendix",
         "inline_reference_format_body",
         "table_layout_borders",
         "table_continuation_default",
         "table_header_format_default",
-        "caption_placement_table",
-        "caption_placement_figure",
-        "caption_placement_appendix",
-        "list_format_urgpu",
-        "heading_hyphenation_default",
+        "list_format_default",
         "appendix_order_default",
         "title_page_content_default",
-        "font_table_min",
-        "heading_format_no_underline",
-        "page_number_position_extended",
-        "toc_format_urgpu",
-        "required_sections_chapters",
-        "caption_numbering_urgpu",
-        "caption_format_capitalize",
-        "caption_reference_appendix",
-        "bibliography_format_dot_dash",
-        "bibliography_order_groups",
-        "heading_page_break_subsection",
     }
 )
-"""Правила, добавленные в набор 3.1.0 поверх базовых 37 правил версии 3.0.0."""
+"""Правила, добавленные в набор 4.0.0 под требования УрГПУ."""
 
 
 def load_legacy_default_ruleset():
-    """Возвращает базовый набор 3.0.0 без правил УрГПУ.
+    """Возвращает базовый набор 3.0.0 (37 правил) без правил УрГПУ.
 
     Сценарии, посчитанные до появления требований УрГПУ, фиксируют числа
     базового набора. Правила УрГПУ проверяются отдельными тестами на своих
@@ -260,7 +296,7 @@ def load_legacy_default_ruleset():
             "rules": [
                 rule.model_dump()
                 for rule in ruleset.rules
-                if rule.rule_id not in URGPU_RULE_IDS
+                if rule.rule_id in LEGACY_RULE_IDS
             ],
         }
     )

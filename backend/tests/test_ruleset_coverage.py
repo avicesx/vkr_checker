@@ -55,7 +55,7 @@ CODE_TO_RULE_CLASS: Dict[str, type] = {
 }
 
 #: JSON-наборы, поставляемые в каталоге правил (штатный и профили вузов).
-RULESET_FILES: List[Path] = sorted(RULES_DIR.glob("*.json"))
+RULESET_FILES: List[Path] = sorted(RULES_DIR.rglob("*.json"))
 
 #: Имена полей правила из словаря ERD (Rule/Rule_Type).
 RULE_FIELDS = frozenset({"rule_id", "code", "params", "strictness", "quote", "message", "target"})
