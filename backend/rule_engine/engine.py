@@ -79,6 +79,7 @@ from .checks.bibliography import (
 from .checks.captions import (
     _check_caption_format_rule,
     _check_caption_numbering_rule,
+    _check_caption_placement_rule,
     _check_caption_reference_rule,
 )
 from .checks.common import (
@@ -88,6 +89,7 @@ from .checks.common import (
 from .checks.equations import _check_equation_numbering_rule
 from .checks.headings import (
     _check_heading_format_rule,
+    _check_heading_hyphenation_rule,
     _check_heading_levels_rule,
     _check_heading_numbering_rule,
 )
@@ -109,6 +111,17 @@ from .checks.text import (
     _check_font_rule,
     _check_indent_rule,
 )
+from .checks.inline_refs import _check_inline_reference_format_rule
+from .checks.lists import _check_list_format_rule
+from .checks.structure_extra import (
+    _check_appendix_order_rule,
+    _check_title_page_content_rule,
+)
+from .checks.tables import (
+    _check_table_continuation_rule,
+    _check_table_header_format_rule,
+    _check_table_layout_rule,
+)
 from .checks.toc import _check_toc_rule
 from .checks.volume import _check_document_volume_rule
 from .findings import (
@@ -120,6 +133,7 @@ from .findings import (
 )
 from .rules import (
     AlignmentRule,
+    AppendixOrderRule,
     BibliographyCitedRule,
     BibliographyCountRule,
     BibliographyFormatRule,
@@ -128,16 +142,20 @@ from .rules import (
     BibliographyRecencyRule,
     CaptionFormatRule,
     CaptionNumberingRule,
+    CaptionPlacementRule,
     CaptionReferenceRule,
     DocumentVolumeRule,
     EquationNumberingRule,
     FontRule,
     HeadingFormatRule,
+    HeadingHyphenationRule,
     HeadingLevelsRule,
     HeadingNumberingRule,
     HeadingPageBreakRule,
     IndentRule,
+    InlineReferenceFormatRule,
     KeepNextRule,
+    ListFormatRule,
     LineSpacingRule,
     MarginRule,
     MicroTypographyRule,
@@ -146,6 +164,10 @@ from .rules import (
     RequiredSectionsRule,
     Rule,
     RuleSet,
+    TableContinuationRule,
+    TableHeaderFormatRule,
+    TableLayoutRule,
+    TitlePageContentRule,
     TocRule,
     WidowControlRule,
     load_ruleset,
@@ -243,6 +265,15 @@ class RuleEngine:
         CaptionNumberingRule: _check_caption_numbering_rule,
         CaptionFormatRule: _check_caption_format_rule,
         CaptionReferenceRule: _check_caption_reference_rule,
+        CaptionPlacementRule: _check_caption_placement_rule,
+        InlineReferenceFormatRule: _check_inline_reference_format_rule,
+        TableLayoutRule: _check_table_layout_rule,
+        TableContinuationRule: _check_table_continuation_rule,
+        TableHeaderFormatRule: _check_table_header_format_rule,
+        ListFormatRule: _check_list_format_rule,
+        HeadingHyphenationRule: _check_heading_hyphenation_rule,
+        AppendixOrderRule: _check_appendix_order_rule,
+        TitlePageContentRule: _check_title_page_content_rule,
         AlignmentRule: _check_alignment_rule,
         WidowControlRule: _check_widow_control_rule,
         KeepNextRule: _check_keep_next_rule,

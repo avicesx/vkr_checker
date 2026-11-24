@@ -1,6 +1,7 @@
 """Семейство заголовков: уровни, нумерация, начертание и регистр."""
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..findings import (
@@ -9,6 +10,7 @@ from ..findings import (
 )
 from ..rules import (
     HeadingFormatRule,
+    HeadingHyphenationRule,
     HeadingLevelsRule,
     HeadingNumberingRule,
     NUMBERLESS_HEADING_ROLES,
@@ -32,7 +34,10 @@ from .constants import (
     FOUND_CASE_LABELS,
     NUMBER_ENDING_LABELS,
 )
-from parser.core.schema import ParsedDocxDocument
+from parser.core.schema import ParagraphBlock, ParsedDocxDocument
+
+LINE_UNIT_PT = 21.0
+"""Один межстрочный интервал при кегле 14 пт: 14 × 1,5 = 21 пт."""
 
 
 def _check_heading_levels_rule(
@@ -309,6 +314,73 @@ def _check_heading_format_rule(
                 expected_parts.append(ALIGNMENT_LABELS[expected.alignment])
                 found_parts.append(ALIGNMENT_LABELS.get(actual_alignment, "не задано"))
 
+        if expected.underline != "any":
+            visible_runs = [
+                run
+                for run in record.paragraph.runs
+                if run.visible_text.strip()
+                and not run.in_field
+                and not run.effective_props.vanish_hidden
+                and not _is_symbolic_run(run)
+            ]
+            has_underline = any(
+                bool(run.effective_props.underline)
+                and str(run.effective_props.underline).strip().lower()
+                not in ("", "none", "false")
+                for run in visible_runs
+            )
+            if expected.underline == "forbid" and has_underline:
+                expected_values["underline"] = False
+                found_values["underline"] = True
+                expected_parts.append("без подчеркивания")
+                found_parts.append("заголовок подчеркнут")
+            elif expected.underline == "require" and visible_runs and not has_underline:
+                expected_values["underline"] = True
+                found_values["underline"] = False
+                expected_parts.append("с подчеркиванием")
+                found_parts.append("заголовок без подчеркивания")
+
+        props = record.paragraph.effective_props
+        if expected.space_after_lines is not None:
+            want_pt = round(expected.space_after_lines * LINE_UNIT_PT, 1)
+            actual_pt = props.space_after_pt
+            label = f"после заголовка {expected.space_after_lines:g} интервала ({want_pt} пт)"
+            if props.space_after_auto:
+                expected_values["space_after_pt"] = want_pt
+                found_values["space_after_pt"] = "auto"
+                expected_parts.append(label)
+                found_parts.append("интервал после заголовка задан автоматически")
+            elif actual_pt is None or abs(actual_pt - want_pt) > expected.tolerance_pt:
+                expected_values["space_after_pt"] = want_pt
+                found_values["space_after_pt"] = (
+                    round(actual_pt, 1) if actual_pt is not None else None
+                )
+                expected_parts.append(label)
+                found_parts.append(
+                    "интервал после заголовка: "
+                    + (f"{round(actual_pt, 1)} пт" if actual_pt is not None else "не задан")
+                )
+
+        if expected.space_before_lines is not None:
+            want_pt = round(expected.space_before_lines * LINE_UNIT_PT, 1)
+            actual_pt = props.space_before_pt
+            label = f"перед заголовком {expected.space_before_lines:g} интервала ({want_pt} пт)"
+            if props.space_before_auto:
+                expected_values["space_before_pt"] = want_pt
+                found_values["space_before_pt"] = "auto"
+                expected_parts.append(label)
+                found_parts.append("интервал перед заголовком задан автоматически")
+            elif actual_pt is None or abs(actual_pt - want_pt) > expected.tolerance_pt:
+                expected_values["space_before_pt"] = want_pt
+                found_values["space_before_pt"] = (
+                    round(actual_pt, 1) if actual_pt is not None else None
+                )
+                expected_parts.append(label)
+                found_parts.append(
+                    "интервал перед заголовком: "
+                    + (f"{round(actual_pt, 1)} пт" if actual_pt is not None else "не задан")
+                )
+
         occurrences = 1
         if expected.font is not None:
             mismatched_font = []
@@ -349,6 +421,86 @@ def _check_heading_format_rule(
             )
         )
 
+    assessment = _counted_assessment(
+        rule,
+        violations,
+        len(records),
+        expected_text=rule.message,
+        confidence="medium" if _is_pdf_only(document) else "high",
+        empty_observed="заголовки в области действия правила не найдены",
+        details={"headings": len(records)},
+    )
+    return violations, len(records), assessment
+
+RE_TRAILING_HYPHEN = re.compile(r"[А-Яа-яЁёA-Za-z]-\s*$")
+"""Дефис в конце строки: признак переноса слова."""
+
+RE_ABBREVIATION = re.compile(r"(?<![А-ЯЁA-Z])[А-ЯЁA-Z]{2,}(?![А-ЯЁA-Z])")
+"""Аббревиатура из двух и более прописных букв."""
+
+SOFT_HYPHEN = "\u00ad"
+"""Мягкий перенос: невидимый знак, который ставит Word при переносе."""
+
+
+def _heading_hyphenation_issues(
+    paragraph: ParagraphBlock,
+) -> Tuple[bool, Optional[str]]:
+    """Ищет перенос слова и аббревиатуру в заголовке.
+
+    Переносом считается мягкий перенос, разрыв строки по дефису на конце и
+    признак ``pdf_has_hyphenated_break``: дефис внутри слова («учебно-
+    методический») переносом не является и находкой не становится.
+    """
+    text = (paragraph.text_visible or "").strip()
+    hyphenated = (
+        SOFT_HYPHEN in text
+        or bool(paragraph.pdf_has_hyphenated_break)
+        or RE_TRAILING_HYPHEN.search(text) is not None
+    )
+    abbreviation = None
+    match = RE_ABBREVIATION.search(text)
+    if match is not None:
+        abbreviation = match.group(0)
+    return hyphenated, abbreviation
+
+
+def _check_heading_hyphenation_rule(
+    rule: HeadingHyphenationRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Проверяет отсутствие переносов и аббревиатур в заголовках."""
+    expected = rule.params
+    records = _heading_records(document, rule.target)
+    violations: List[Violation] = []
+    for record in records:
+        hyphenated, abbreviation = _heading_hyphenation_issues(record.paragraph)
+        expected_values: Dict[str, Any] = {}
+        found_values: Dict[str, Any] = {}
+        expected_parts: List[str] = []
+        found_parts: List[str] = []
+        if expected.forbid_hyphenation and hyphenated:
+            expected_values["hyphenation"] = False
+            found_values["hyphenation"] = True
+            expected_parts.append("без переноса слов")
+            found_parts.append("перенос слова в заголовке")
+        if expected.forbid_abbreviations and abbreviation:
+            expected_values["abbreviation"] = False
+            found_values["abbreviation"] = abbreviation
+            expected_parts.append("без аббревиатур")
+            found_parts.append(f"аббревиатура «{abbreviation}»")
+        if not expected_values:
+            continue
+        violations.append(
+            _heading_violation(
+                rule,
+                record,
+                expected_values,
+                found_values,
+                expected_parts,
+                found_parts,
+            )
+        )
     assessment = _counted_assessment(
         rule,
         violations,

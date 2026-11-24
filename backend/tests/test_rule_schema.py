@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import URGPU_RULE_IDS
 
 from rule_engine import (
     DEFAULT_RULESET_PATH,
@@ -153,8 +154,8 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "3.0.0"
-    assert [rule.rule_id for rule in ruleset.rules] == [
+    assert ruleset.ruleset_version == "3.1.0"
+    expected_rule_ids = [
         "font_body_text",
         "indent_first_line",
         "alignment_body_text",
@@ -193,6 +194,9 @@ def test_default_ruleset_describes_all_checks() -> None:
         "alignment_table_cells",
         "font_table_cells",
     ]
+    # Набор 3.1.0 дополнен правилами УрГПУ; базовые 37 идут первыми и не менялись.
+    assert [rule.rule_id for rule in ruleset.rules][: len(expected_rule_ids)] == expected_rule_ids
+    assert {rule.rule_id for rule in ruleset.rules[len(expected_rule_ids) :]} == URGPU_RULE_IDS
     expected_types = [
         FontRule,
         IndentRule,
@@ -232,8 +236,8 @@ def test_default_ruleset_describes_all_checks() -> None:
         AlignmentRule,
         FontRule,
     ]
-    assert len(expected_types) == len(ruleset.rules)
-    for rule, expected_type in zip(ruleset.rules, expected_types):
+    assert len(expected_types) == 37
+    for rule, expected_type in zip(ruleset.rules[:37], expected_types):
         assert isinstance(rule, expected_type), rule.rule_id
     assert ruleset.get_rule("alignment_body_text").params.alignment == "justify"
     assert ruleset.get_rule("line_spacing_body").params.ratio == 1.5
@@ -802,5 +806,5 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "bibliography_recency",
     } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "3.0.0"
+    assert default_ruleset.ruleset_version == "3.1.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

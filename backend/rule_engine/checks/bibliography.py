@@ -461,6 +461,24 @@ def _check_bibliography_format_rule(
                 ("has_text_type_designation", entry.has_text_type_designation)
             )
 
+        if expected.forbid_dot_dash and entry.dot_dash_count:
+            label = BIBLIOGRAPHY_FORMAT_LABELS["dot_dash_count"]
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:dot_dash_count",
+                    location=_bibliography_location(entry, blocks),
+                    expected={"dot_dash_count": 0},
+                    found={
+                        "dot_dash_count": entry.dot_dash_count,
+                        "bib_id": entry.bib_id,
+                        "category": entry.detected_category,
+                    },
+                    expected_text=f"{label}: не допускается",
+                    found_text=f"{label}: {entry.dot_dash_count}",
+                )
+            )
+
         for field, actual in checks:
             if _bibliography_field_present(actual):
                 continue
@@ -595,6 +613,52 @@ def _check_bibliography_count_rule(
     return violations, count, assessment
 
 
+#: Заголовок группы внутри списка литературы: «Нормативные акты:».
+RE_GROUP_HEADER = re.compile(r"^\s*[А-ЯЁ][А-ЯЁа-яё\s,\-]{2,60}:\s*$")
+
+#: Слова-маркеры, по которым распознаётся тема группы.
+GROUP_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "normative_act_law": ("норматив", "закон", "кодекс"),
+    "book_monograph": ("книг", "монограф", "учебник", "пособ"),
+    "journal_article": ("стать", "журнал"),
+    "conference_paper": ("конференц", "сборник"),
+    "electronic_resource": ("электрон", "интернет", "ресурс"),
+    "dissertation_autoref": ("диссертац", "автореф"),
+    "standard_gost": ("гост", "стандарт"),
+    "patent": ("патент",),
+}
+
+
+def _is_group_header(entry: BibliographyEntry) -> bool:
+    """Определяет запись-заголовок группы, а не источник.
+
+    Заголовок группы не имеет номера и библиографических признаков (год,
+    URL, ISBN), а его текст заканчивается двоеточием.
+    """
+    if entry.raw_number_prefix:
+        return False
+    if entry.urls or entry.isbn_or_issn or entry.year_extracted is not None:
+        return False
+    return bool(RE_GROUP_HEADER.match(entry.raw_text.strip()))
+
+
+def _group_category(entry: BibliographyEntry) -> str:
+    """Определяет тему группы по словам в заголовке."""
+    text = entry.raw_text.casefold()
+    for category, words in GROUP_KEYWORDS.items():
+        if any(word in text for word in words):
+            return category
+    return "unknown"
+
+
+def _first_letter(text: str) -> str:
+    """Возвращает первую букву текста в нижнем регистре."""
+    for char in text:
+        if char.isalpha():
+            return char.casefold()
+    return ""
+
+
 def _check_bibliography_order_rule(
     rule: BibliographyOrderRule,
     document: ParsedDocxDocument,
@@ -651,6 +715,104 @@ def _check_bibliography_order_rule(
         seen.add(actual)
         expected_number += 1
 
+    # Деление списка на группы: запись-заголовок группы («Нормативные акты:»).
+    group_headers = [entry for entry in entries if _is_group_header(entry)]
+    if not expected.allow_groups:
+        for entry in group_headers:
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:group",
+                    location=_bibliography_location(entry, blocks),
+                    expected={"group": False},
+                    found={"group": True},
+                    expected_text="список без деления на группы",
+                    found_text=f"запись-заголовок группы: «{entry.raw_text.strip()}»",
+                    confidence="high",
+                )
+            )
+
+    if expected.group_order is not None and group_headers:
+        allowed_groups = [
+            frozenset(part.strip() for part in group.split("|"))
+            for group in expected.group_order
+        ]
+        for position, entry in enumerate(group_headers):
+            actual_category = _group_category(entry)
+            if position < len(allowed_groups) and actual_category in allowed_groups[position]:
+                continue
+            if position < len(allowed_groups):
+                expected_label = " или ".join(sorted(allowed_groups[position]))
+            else:
+                expected_label = f"групп не больше {len(allowed_groups)}"
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:group_order",
+                    location=_bibliography_location(entry, blocks),
+                    expected={"group": expected_label},
+                    found={"group": actual_category},
+                    expected_text=f"группа: {expected_label}",
+                    found_text=f"группа: {actual_category}",
+                    confidence="high",
+                )
+            )
+        if len(group_headers) < len(allowed_groups):
+            missing = [
+                " или ".join(sorted(group))
+                for group in allowed_groups[len(group_headers):]
+            ]
+            violations.append(
+                _build_violation(
+                    rule,
+                    address="bibliography:group_order",
+                    location=_bibliography_summary_location(entries),
+                    expected={"groups": missing},
+                    found={"groups": len(group_headers)},
+                    expected_text="группы: " + ", ".join(missing),
+                    found_text=f"групп в списке: {len(group_headers)}",
+                    confidence="high",
+                )
+            )
+
+    if expected.sort == "alphabetical":
+        previous_letter = ""
+        previous_entry: Optional[BibliographyEntry] = None
+        for entry in entries:
+            if _is_group_header(entry):
+                previous_letter = ""
+                previous_entry = None
+                continue
+            letter = _first_letter(entry.raw_text)
+            if not letter:
+                continue
+            if previous_letter and letter < previous_letter:
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{entry.bib_id}:sort",
+                        location=_bibliography_location(entry, blocks),
+                        expected={"sort": "alphabetical"},
+                        found={
+                            "previous": previous_letter,
+                            "current": letter,
+                            "previous_bib_id": (
+                                previous_entry.bib_id
+                                if previous_entry is not None
+                                else None
+                            ),
+                        },
+                        expected_text="записи упорядочены по алфавиту",
+                        found_text=(
+                            f"порядок нарушен: «{previous_letter}», затем «{letter}»"
+                        ),
+                        confidence="high",
+                    )
+                )
+                continue
+            previous_letter = letter
+            previous_entry = entry
+
     assessment = _counted_assessment(
         rule,
         violations,
@@ -658,7 +820,16 @@ def _check_bibliography_order_rule(
         expected_text=expected_text,
         confidence="high",
         empty_observed="список литературы не найден",
-        details={"sources": len(entries), "start_at": expected.start_at},
+        details={
+            "sources": len(entries),
+            "start_at": expected.start_at,
+            "groups": (
+                len(group_headers)
+                if not expected.allow_groups or expected.group_order is not None
+                else None
+            ),
+            "sorted": expected.sort,
+        },
     )
     return violations, len(entries), assessment
 

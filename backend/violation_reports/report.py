@@ -347,6 +347,51 @@ _CODE_DETAILS: dict[
         ReportSeverity.MEDIUM,
         "Добавьте в текст корректную ссылку на рисунок или таблицу.",
     ),
+    "caption_placement": (
+        ReportCategory.CAPTIONS,
+        ReportSeverity.MEDIUM,
+        "Расположите подпись относительно объекта, как требует методичка, и проверьте её выравнивание.",
+    ),
+    "inline_reference_format": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.MEDIUM,
+        "Оформите внутритекстовую ссылку по образцу: тип ссылки, номер и страница.",
+    ),
+    "table_layout": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Обведите таблицу видимыми рамками и впишите её в полосу набора.",
+    ),
+    "table_continuation": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Обозначьте продолжение таблицы, повторите шапку и уберите нижнюю рамку на переносе.",
+    ),
+    "table_header_format": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Приведите шапку таблицы к требуемому регистру и уберите точку в конце.",
+    ),
+    "list_format": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Приведите маркеры перечисления к требуемым для каждого уровня вложенности.",
+    ),
+    "heading_hyphenation": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.LOW,
+        "Уберите переносы и сокращения из заголовка раздела.",
+    ),
+    "appendix_order": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.MEDIUM,
+        "Расположите приложения в порядке первой ссылки и начинайте каждое с новой страницы.",
+    ),
+    "title_page_content": (
+        ReportCategory.STRUCTURE,
+        ReportSeverity.HIGH,
+        "Добавьте на титульный лист обязательные реквизиты по методичке.",
+    ),
 }
 
 # резервные категории для семейств правил, которых нет в _CODE_DETAILS:

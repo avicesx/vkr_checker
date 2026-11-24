@@ -207,3 +207,60 @@ class DocxPackageBuilder:
 @pytest.fixture
 def docx_builder(tmp_path: Path) -> DocxPackageBuilder:
     return DocxPackageBuilder(tmp_path)
+
+# =====================================================================
+# НАБОР 3.0.0: БАЗОВЫЕ ПРАВИЛА БЕЗ ДОБАВЛЕННЫХ ТРЕБОВАНИЙ УрГПУ
+# =====================================================================
+
+URGPU_RULE_IDS: frozenset[str] = frozenset(
+    {
+        "inline_reference_format_body",
+        "table_layout_borders",
+        "table_continuation_default",
+        "table_header_format_default",
+        "caption_placement_table",
+        "caption_placement_figure",
+        "caption_placement_appendix",
+        "list_format_urgpu",
+        "heading_hyphenation_default",
+        "appendix_order_default",
+        "title_page_content_default",
+        "font_table_min",
+        "heading_format_no_underline",
+        "page_number_position_extended",
+        "toc_format_urgpu",
+        "required_sections_chapters",
+        "caption_numbering_urgpu",
+        "caption_format_capitalize",
+        "caption_reference_appendix",
+        "bibliography_format_dot_dash",
+        "bibliography_order_groups",
+        "heading_page_break_subsection",
+    }
+)
+"""Правила, добавленные в набор 3.1.0 поверх базовых 37 правил версии 3.0.0."""
+
+
+def load_legacy_default_ruleset():
+    """Возвращает базовый набор 3.0.0 без правил УрГПУ.
+
+    Сценарии, посчитанные до появления требований УрГПУ, фиксируют числа
+    базового набора. Правила УрГПУ проверяются отдельными тестами на своих
+    документах, поэтому здесь они исключаются по идентификатору правила.
+    """
+    from rule_engine import load_default_ruleset
+    from rule_engine.rules import RuleSet
+
+    ruleset = load_default_ruleset()
+    return RuleSet.model_validate(
+        {
+            "ruleset_id": ruleset.ruleset_id,
+            "ruleset_version": "3.0.0",
+            "description": ruleset.description,
+            "rules": [
+                rule.model_dump()
+                for rule in ruleset.rules
+                if rule.rule_id not in URGPU_RULE_IDS
+            ],
+        }
+    )

@@ -1,6 +1,6 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "3.0.0",
+  "ruleset_version": "3.1.0",
   "description": "Штатный набор нормоконтроля ВКР: основной текст (шрифт, отступ, интервал, выравнивание, микротипографика), поля, нумерация и формат страниц, заголовки и структура, объём работы, формулы, список литературы (ссылки, цитирование, количество, порядок и свежесть источников), подписи рисунков, таблиц и приложений, шрифт ячеек таблиц.",
   "rules": [
     {
@@ -652,6 +652,384 @@
         "family": "Times New Roman",
         "size_pt": 12.0,
         "size_tolerance_pt": 0.5
+      }
+    },
+    {
+      "rule_id": "inline_reference_format_body",
+      "code": "inline_reference_format",
+      "strictness": "error",
+      "message": "Ссылка на источник оформлена в квадратных скобках с номером и страницей",
+      "quote": "Ссылки на источники приводят в квадратных скобках с указанием страницы",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "ref_type": "bibliography",
+        "style": "square_brackets",
+        "require_page": true,
+        "require_number": true
+      }
+    },
+    {
+      "rule_id": "table_layout_borders",
+      "code": "table_layout",
+      "strictness": "error",
+      "message": "Таблица ограничена линиями со всех сторон и вписана в полосу набора",
+      "quote": "Таблицу ограничивают линиями, ширина таблицы соответствует полосе набора",
+      "target": {
+        "scope": "table_cells"
+      },
+      "params": {
+        "require_all_sides_borders": true,
+        "require_full_text_width": true,
+        "width_tolerance_mm": 1.0
+      }
+    },
+    {
+      "rule_id": "table_continuation_default",
+      "code": "table_continuation",
+      "strictness": "error",
+      "message": "Продолжение таблицы оформлено с надписью и повторенной шапкой",
+      "quote": "При переносе таблицы пишут «Продолжение таблицы» и повторяют шапку",
+      "target": {
+        "scope": "table_cells"
+      },
+      "params": {
+        "require_label": true,
+        "forbid_bottom_border_on_break": true,
+        "repeat_header": true,
+        "forbid_repeated_caption": true
+      }
+    },
+    {
+      "rule_id": "table_header_format_default",
+      "code": "table_header_format",
+      "strictness": "error",
+      "message": "Шапка таблицы набрана с заглавной буквы без точки в конце",
+      "quote": "Заголовки граф таблицы начинают с заглавной буквы, точку не ставят",
+      "target": {
+        "scope": "table_cells"
+      },
+      "params": {
+        "first_letter": "capitalize",
+        "forbid_trailing_dot": true,
+        "subheader_case": "any"
+      }
+    },
+    {
+      "rule_id": "caption_placement_table",
+      "code": "caption_placement",
+      "strictness": "error",
+      "message": "Подпись таблицы размещена над таблицей, справа, без кавычек",
+      "quote": "Над таблицей справа помещают надпись «Таблица N — Название»",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "table",
+        "position": "above_table",
+        "alignment": "right",
+        "forbid_quotes": true,
+        "prefix_word": "Таблица",
+        "require_number": true
+      }
+    },
+    {
+      "rule_id": "caption_placement_figure",
+      "code": "caption_placement",
+      "strictness": "error",
+      "message": "Подпись рисунка размещена под рисунком, по центру",
+      "quote": "Под рисунком по центру помещают надпись «Рисунок N — Название»",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "figure",
+        "position": "below_object",
+        "alignment": "center",
+        "prefix_word": "Рисунок",
+        "title_case": "capitalized",
+        "require_number": true
+      }
+    },
+    {
+      "rule_id": "caption_placement_appendix",
+      "code": "caption_placement",
+      "strictness": "error",
+      "message": "Обозначение приложения размещено по центру, номер выше названия",
+      "quote": "Приложение обозначают по центру, номер размещают над названием",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "appendix",
+        "alignment": "center",
+        "require_number": true,
+        "title_case": "capitalized"
+      }
+    },
+    {
+      "rule_id": "list_format_urgpu",
+      "code": "list_format",
+      "strictness": "error",
+      "message": "Перечисления оформлены маркерами требуемого вида",
+      "quote": "Перечисления начинают с дефиса, затем буквы со скобкой, затем цифры со скобкой",
+      "target": {
+        "scope": "body_paragraphs"
+      },
+      "params": {
+        "level_markers": [
+          {
+            "level": 0,
+            "allowed": [
+              "hyphen"
+            ]
+          },
+          {
+            "level": 1,
+            "allowed": [
+              "russian_letter_parenthesis"
+            ]
+          },
+          {
+            "level": 2,
+            "allowed": [
+              "arabic_parenthesis"
+            ]
+          }
+        ],
+        "forbid_other_markers": true
+      }
+    },
+    {
+      "rule_id": "heading_hyphenation_default",
+      "code": "heading_hyphenation",
+      "strictness": "error",
+      "message": "В заголовках не допускаются переносы слов",
+      "quote": "В заголовках не допускается перенос слов",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "forbid_hyphenation": true,
+        "forbid_abbreviations": false
+      }
+    },
+    {
+      "rule_id": "appendix_order_default",
+      "code": "appendix_order",
+      "strictness": "error",
+      "message": "Приложения расположены в порядке ссылок в тексте",
+      "quote": "Приложения располагают в порядке ссылок на них в тексте работы",
+      "target": {
+        "scope": "document_structure"
+      },
+      "params": {
+        "order": "by_first_mention",
+        "new_page_each": true
+      }
+    },
+    {
+      "rule_id": "title_page_content_default",
+      "code": "title_page_content",
+      "strictness": "error",
+      "message": "Титульный лист содержит обязательные реквизиты",
+      "quote": "Титульный лист содержит наименование ведомства, вуза, кафедры, вид работы, тему, автора, руководителя, город и год",
+      "target": {
+        "scope": "document_structure"
+      },
+      "params": {
+        "required_fields": [
+          "министерство",
+          "вуз",
+          "кафедра",
+          "вид работы",
+          "тема",
+          "автор",
+          "руководитель",
+          "город",
+          "год"
+        ],
+        "work_type": "ВКР"
+      }
+    },
+    {
+      "rule_id": "font_table_min",
+      "code": "font",
+      "strictness": "error",
+      "message": "Кегль текста в таблице не меньше 10 pt",
+      "quote": "В таблицах допускается кегль не менее 10 pt",
+      "target": {
+        "scope": "table_cells"
+      },
+      "params": {
+        "min_size_pt": 10.0,
+        "size_tolerance_pt": 0.5
+      }
+    },
+    {
+      "rule_id": "heading_format_no_underline",
+      "code": "heading_format",
+      "strictness": "error",
+      "message": "Заголовки набраны без подчеркивания",
+      "quote": "Заголовки не подчеркивают",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "underline": "forbid"
+      }
+    },
+    {
+      "rule_id": "page_number_position_extended",
+      "code": "page_number_position",
+      "strictness": "error",
+      "message": "Нумерация страниц — арабскими цифрами внизу по центру, без номера на первой странице",
+      "quote": "Номер страницы проставляют внизу по центру арабскими цифрами, титульный лист не нумеруют",
+      "target": {
+        "scope": "headers_footers"
+      },
+      "params": {
+        "zone": "footer",
+        "alignment": "center",
+        "skip_first_page": true,
+        "require_continuous": true,
+        "require_arabic_digits": true,
+        "forbid_trailing_dot": true
+      }
+    },
+    {
+      "rule_id": "toc_format_urgpu",
+      "code": "toc",
+      "strictness": "error",
+      "message": "Оглавление набрано без отточия, строки выровнены слева, без полужирного",
+      "quote": "В оглавлении не ставят отточие, записи выравнивают по левому краю и не выделяют полужирным",
+      "target": {
+        "scope": "toc"
+      },
+      "params": {
+        "require_toc": true,
+        "forbid_dot_leader": true,
+        "entry_alignment": "left",
+        "entry_bold": false,
+        "capitalize_entry": true
+      }
+    },
+    {
+      "rule_id": "required_sections_chapters",
+      "code": "required_sections",
+      "strictness": "error",
+      "message": "Работа состоит из 2–3 основных глав",
+      "quote": "Основная часть работы состоит из двух или трех глав",
+      "target": {
+        "scope": "document_structure"
+      },
+      "params": {
+        "sections": [],
+        "min_main_chapters": 2,
+        "max_main_chapters": 3
+      }
+    },
+    {
+      "rule_id": "caption_numbering_urgpu",
+      "code": "caption_numbering",
+      "strictness": "error",
+      "message": "Таблицы пронумерованы сквозной нумерацией или в пределах раздела",
+      "quote": "Таблицы нумеруют сквозной нумерацией или в пределах раздела",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "table",
+        "scheme": "any_of",
+        "schemes": [
+          "continuous_arabic",
+          "section_based"
+        ],
+        "appendix": "own",
+        "allow_gaps": false,
+        "allow_duplicates": false
+      }
+    },
+    {
+      "rule_id": "caption_format_capitalize",
+      "code": "caption_format",
+      "strictness": "error",
+      "message": "Название таблицы начинается с заглавной буквы",
+      "quote": "Название таблицы пишут с заглавной буквы",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "table",
+        "capitalize_first_letter": true
+      }
+    },
+    {
+      "rule_id": "caption_reference_appendix",
+      "code": "caption_reference",
+      "strictness": "error",
+      "message": "На каждое приложение есть ссылка в тексте работы",
+      "quote": "В тексте работы должны быть ссылки на все приложения",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {
+        "entity_type": "appendix",
+        "required": true
+      }
+    },
+    {
+      "rule_id": "bibliography_format_dot_dash",
+      "code": "bibliography_format",
+      "strictness": "error",
+      "message": "В описании источника указаны год и страницы, без тире между элементами",
+      "quote": "Библиографическое описание приводят без разделителя «.–»",
+      "target": {
+        "scope": "bibliography"
+      },
+      "params": {
+        "require_year": true,
+        "require_pages": true,
+        "forbid_dot_dash": true
+      }
+    },
+    {
+      "rule_id": "bibliography_order_groups",
+      "code": "bibliography_order",
+      "strictness": "error",
+      "message": "Список литературы единый, без деления на тематические группы",
+      "quote": "Список литературы не делят на тематические группы",
+      "target": {
+        "scope": "bibliography"
+      },
+      "params": {
+        "start_at": 1,
+        "allow_gaps": false,
+        "allow_duplicates": false,
+        "allow_groups": false
+      }
+    },
+    {
+      "rule_id": "heading_page_break_subsection",
+      "code": "heading_page_break",
+      "strictness": "error",
+      "message": "Подразделы начинают на текущей странице, а не с новой",
+      "quote": "Подраздел начинают на текущей странице, новую страницу не используют",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "roles": [
+          "main_chapter",
+          "introduction",
+          "conclusion",
+          "bibliography",
+          "appendix"
+        ],
+        "forbid_new_page_roles": [
+          "sub_section"
+        ]
       }
     }
   ]

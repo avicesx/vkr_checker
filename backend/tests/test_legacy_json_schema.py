@@ -64,6 +64,6 @@ def test_legacy_json_report_is_checked_by_rule_engine(stem: str) -> None:
 
     report = RuleEngine(load_default_ruleset()).check(document)
 
-    assert report.summary.rules_applied == 37
+    assert report.summary.rules_applied == len(load_default_ruleset().rules)
     assert report.summary.violations_total >= 0
     assert report.document.filename is not None
