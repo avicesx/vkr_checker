@@ -1954,6 +1954,14 @@ ruleset = load_profile_ruleset("urgpu")    # 67 правил: база 5.1.0 + 3
 | `bibliography_format` | `require_author`, `require_journal_title`, `require_publication_place`, `require_publication_source`, `require_archive_details`, `description_schema` | обязательные области описания и их порядок |
 | `equation_numbering` | `number_position`, `number_style` | положение и запись номера формулы |
 
+Три параметра — `require_archive_details` (`bibliography_format`),
+`legal_force_order` (`bibliography_order`) и `require_header_row`
+(`table_header_format`) — нельзя включать в наборы без доработки: по ним
+известны ложные срабатывания. Архивные реквизиты встречаются у описаний
+конференций и не означают архивного хранения, порядок по юридической силе не
+выводится из текста записи, а у строки-шапки таблицы в DOCX часто нет разметки
+`is_tbl_header`, поэтому отсутствие шапки неотличимо от её наличия.
+
 Запись номера разделов восстанавливается из текста заголовка, если парсер не
 заполнил `section_number_raw` (например, «I. ВВЕДЕНИЕ» или «ГЛАВА II»). Тесты
 каждого параметра — в `tests/test_guideline_params.py`, положительный и
