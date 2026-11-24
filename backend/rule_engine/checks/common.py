@@ -2,6 +2,7 @@
 правила, форматирование ожиданий, сравнение шрифтов и мер."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -27,7 +28,6 @@ from .builders import (
 from .constants import (
     CONFIDENCE_RANK,
     EPSILON,
-    RE_SECTION_NUMBER,
     SECTION_TITLE_SYNONYMS,
 )
 from parser.core.schema import (
@@ -58,14 +58,76 @@ def _normalize_heading_text(text: str) -> str:
     return collapsed.strip(" .:;")
 
 
+RE_ROMAN_NUMBER = re.compile(r"^[IVXLCDM]+$")
+ROMAN_DIGIT_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+RE_SECTION_PREFIX_WORD = re.compile(
+    r"^(?:глава|раздел|часть|параграф|пункт|гл)\s*\.?\s+", re.IGNORECASE
+)
+
+
+def _roman_to_int(value: str) -> Optional[int]:
+    """Переводит римскую запись в число; None — запись не является римской."""
+    upper = value.upper()
+    if not upper or not RE_ROMAN_NUMBER.match(upper):
+        return None
+    total = 0
+    previous = 0
+    for char in reversed(upper):
+        digit = ROMAN_DIGIT_VALUES[char]
+        if digit < previous:
+            total -= digit
+        else:
+            total += digit
+            previous = digit
+    return total if total > 0 else None
+
+
 def _parse_section_number(raw: Optional[str]) -> Optional[Tuple[int, ...]]:
-    """Разбирает номер раздела вида '1', '2.3', '1.2.' в кортеж чисел."""
+    """Разбирает номер раздела в кортеж чисел.
+
+    Поддерживаются арабская и римская запись, в том числе со словом перед
+    номером: «1», «2.3», «1.2.», «I», «IV.2», «Глава 2», «ГЛАВА I».
+    """
     if not raw:
         return None
-    cleaned = raw.strip().strip(".")
-    if not RE_SECTION_NUMBER.match(cleaned):
+    cleaned = raw.strip().strip(".").strip()
+    cleaned = RE_SECTION_PREFIX_WORD.sub("", cleaned)
+    parts = [part for part in re.split(r"[.\s]+", cleaned) if part]
+    if not parts:
         return None
-    return tuple(int(part) for part in cleaned.split("."))
+    numbers: List[int] = []
+    for part in parts:
+        if part.isdigit():
+            numbers.append(int(part))
+            continue
+        roman = _roman_to_int(part)
+        if roman is None:
+            return None
+        numbers.append(roman)
+    return tuple(numbers)
+
+
+def _section_number_prefix_word(raw: Optional[str]) -> Optional[str]:
+    """Возвращает слово перед номером раздела («Глава», «Параграф»), если оно есть."""
+    if not raw:
+        return None
+    match = RE_SECTION_PREFIX_WORD.match(raw.strip())
+    return match.group(0).strip().rstrip(".").strip() if match else None
+
+
+def _section_number_digit_style(raw: Optional[str]) -> Optional[str]:
+    """Возвращает систему записи цифр номера: «arabic», «roman» или None."""
+    if not raw:
+        return None
+    cleaned = RE_SECTION_PREFIX_WORD.sub("", raw.strip().strip(".").strip())
+    parts = [part for part in re.split(r"[.\s]+", cleaned) if part]
+    if not parts:
+        return None
+    if all(part.isdigit() for part in parts):
+        return "arabic"
+    if all(_roman_to_int(part) is not None for part in parts):
+        return "roman"
+    return None
 
 
 def _format_section_number(parts: Tuple[int, ...]) -> str:
@@ -73,12 +135,38 @@ def _format_section_number(parts: Tuple[int, ...]) -> str:
     return ".".join(str(part) for part in parts)
 
 
+RE_TEXT_SECTION_NUMBER = re.compile(
+    r"^\s*(?:(?P<prefix>глава|раздел|часть|параграф|пункт|гл)\s*\.?\s+)?"
+    r"(?P<number>[IVXLCDM]+(?:\.[IVXLCDM0-9]+)*|\d+(?:\.\d+)*)\s*\.?(?=\s|$)",
+    re.IGNORECASE,
+)
+
+
+def _section_number_from_text(text: Optional[str]) -> Optional[str]:
+    """Извлекает номер раздела из начала текста заголовка.
+
+    Разбор не всегда выделяет номер в метаданные: римская запись «I.» и запись
+    со словом «ГЛАВА II» остаются частью текста. Для проверок нумерации номер
+    восстанавливается из текста, чтобы такие главы не считались ненумерованными.
+    """
+    if not text:
+        return None
+    match = RE_TEXT_SECTION_NUMBER.match(text)
+    if match is None:
+        return None
+    return match.group(0).strip()
+
+
 def _heading_section_number(record: _HeadingRecord) -> Optional[str]:
-    """Возвращает номер заголовка из метаданных абзаца или из узла дерева."""
+    """Возвращает номер заголовка из метаданных абзаца, узла дерева или текста."""
     heading = record.paragraph.heading_info
     if heading is not None and heading.section_number_raw:
         return heading.section_number_raw
-    return record.node.section_number
+    if record.node.section_number:
+        return record.node.section_number
+    if heading is not None:
+        return _section_number_from_text(record.paragraph.text_visible)
+    return None
 
 
 def _expected_number_depth(record: _HeadingRecord) -> Optional[int]:

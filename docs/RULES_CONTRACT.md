@@ -106,7 +106,7 @@
 
 ### 2.3. Параметры по кодам
 
-Параметры каждого кода — закрытый объект: ключи, которых нет в таблице кода, отвергаются. Обязательные ключи (столбец «Обязательность» = «да») должны присутствовать всегда; остальные можно опускать, тогда действует значение по умолчанию. У кода может быть несколько правил с разными `params` и разными областями — так описываются, например, разные требования к шрифту основного текста и ячеек таблиц. Всего в реестре 149 ключей `params`; обязательных из них — 5.
+Параметры каждого кода — закрытый объект: ключи, которых нет в таблице кода, отвергаются. Обязательные ключи (столбец «Обязательность» = «да») должны присутствовать всегда; остальные можно опускать, тогда действует значение по умолчанию. У кода может быть несколько правил с разными `params` и разными областями — так описываются, например, разные требования к шрифту основного текста и ячеек таблиц. Всего в реестре 181 ключей `params`; обязательных из них — 5.
 
 #### `alignment` — Выравнивание абзаца
 
@@ -142,6 +142,7 @@
 |---|---|---|---|---|---|---|
 | `order` | `by_first_mention` / `any` | нет | `by_first_mention` | одно из: `by_first_mention`, `any` | Требуемый порядок приложений: в порядке упоминания в тексте | `by_first_mention` |
 | `new_page_each` | boolean | нет | `true` | `true` или `false` | Требовать начало каждого приложения с нового листа | `true` |
+| `label_scheme` | `any` / `russian_letters` / `arabic` | нет | `any` | одно из: `any`, `russian_letters`, `arabic` | Схема обозначения приложений: заглавными русскими буквами (А, Б, В) или арабскими цифрами (1, 2, 3); any — не проверять | `any` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -231,6 +232,12 @@
 | `require_double_slash` | boolean | нет | `false` | `true` или `false` | Требовать разделитель «//» перед названием источника (статья, глава) | `false` |
 | `require_text_type_designation` | boolean | нет | `false` | `true` или `false` | Требовать обозначение вида издания: [Текст], [Электронный ресурс] и т.п. | `false` |
 | `forbid_dot_dash` | boolean | нет | `false` | `true` или `false` | Запрещать разделитель «. — » между областями описания: по методичке области разделяются точкой | `false` |
+| `require_author` | boolean | нет | `false` | `true` или `false` | Требовать автора или ответственное лицо: фамилию с инициалами либо организацию-автора в начале описания | `false` |
+| `require_journal_title` | boolean | нет | `false` | `true` или `false` | Требовать название журнала или сборника после разделителя «//» | `false` |
+| `require_publication_place` | boolean | нет | `false` | `true` или `false` | Требовать место издания (М., СПб. и т. п.) перед издательством | `false` |
+| `require_publication_source` | boolean | нет | `false` | `true` или `false` | Требовать источник публикации: журнал или сборник для статьи, издательство или адрес ресурса для книги и электронного ресурса | `false` |
+| `require_archive_details` | boolean | нет | `false` | `true` или `false` | Требовать архивные реквизиты диссертации или автореферата: пометки «дис.»/«автореф.» и место защиты | `false` |
+| `description_schema` | (`author` / `title` / `publication` / `edition` / `year` / `pages`)[] или `null` | нет | `null` | одно из: `author`, `title`, `publication`, `edition`, `year`, `pages` | Порядок областей описания: элементы перечисляются в требуемой последовательности (author, title, publication, edition, year, pages); проверяется, что позиции элементов в тексте не убывают | `null` |
 | `exempt_categories` | (`book_monograph` / `journal_article` / `conference_paper` / `electronic_resource` / `normative_act_law` / `standard_gost` / `dissertation_autoref` / `patent` / `unknown`)[] | нет | `["electronic_resource", "normative_act_law", "standard_gost"]` | список, элементы — одно из: `book_monograph`, `journal_article`, `conference_paper`, `electronic_resource`, `normative_act_law`, `standard_gost`, `dissertation_autoref`, `patent`, `unknown` | Категории с особым описанием: не требуются страницы и год, запрет точки-тире не применяется | `["electronic_resource", "normative_act_law", "standard_gost"]` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
@@ -299,6 +306,10 @@
 | `allow_groups` | boolean | нет | `true` | `true` или `false` | Разрешить выделение групп источников заголовками вида «Нормативные акты:». false — группы запрещены, список нумеруется сквозняком | `true` |
 | `group_order` | string[] или `null` | нет | `null` | список строк или `null` | Требуемый порядок групп: элемент списка — одна группа, категории внутри группы перечисляются через '\|', например 'book_monograph\|journal_article\|conference_paper'. Запись попадает в группу по detected_category | `["normative_act_law", "book_monograph\|journal_article"]` |
 | `sort` | `alphabetical` или `null` | нет | `null` | одно из: `alphabetical` или `null` | Требуемый порядок записей внутри списка: 'alphabetical' — по первой букве описания без учета регистра | `null` |
+| `foreign_sources_last` | boolean | нет | `false` | `true` или `false` | Иностранные источники размещаются в конце списка: true — запись с латинским названием или автором не может стоять перед русскоязычной | `false` |
+| `number_style` | `arabic` / `roman` или `null` | нет | `null` | одно из: `arabic`, `roman` | Форма записи номеров списка: 'arabic' — арабские цифры, 'roman' — римские; None — форма не проверяется | `null` |
+| `author_group_sort` | boolean | нет | `false` | `true` или `false` | Записи внутри группы упорядочены по фамилии первого автора: true — алфавитный порядок соблюдается с учётом границ групп | `false` |
+| `legal_force_order` | boolean | нет | `false` | `true` или `false` | Нормативные акты упорядочены по убыванию юридической силы: закон, кодекс, указ, постановление, распоряжение, приказ, письмо, инструкция | `false` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -365,6 +376,10 @@
 | `prefix_words` | string[] или `null` | нет | `null` | список строк или `null` | Допустимые слова-префиксы подписи (None — не проверять) | `null` |
 | `uppercase` | boolean или `null` | нет | `null` | `true` или `false` или `null` | Требовать текст подписи прописными буквами (None — не проверять) | `null` |
 | `capitalize_first_letter` | boolean или `null` | нет | `null` | `true` или `false` или `null` | Требовать заглавную первую букву названия подписи, например «Таблица 1. Данные» (None — не проверять) | `null` |
+| `forbid_hyphenation` | boolean | нет | `false` | `true` или `false` | Запрещать переносы в тексте подписи: мягкий перенос, перенос строки по дефису и разрыв слова на границе строк | `false` |
+| `forbid_break_after_prefix` | boolean | нет | `false` | `true` или `false` | Запрещать перенос строки сразу после префикса и номера подписи: «Таблица 1» и название должны оставаться на одной строке | `false` |
+| `forbid_number_sign` | boolean | нет | `false` | `true` или `false` | Запрещать знак номера «№» перед номером подписи: «Таблица 1», а не «Таблица № 1» | `false` |
+| `sentence_case` | boolean или `null` | нет | `null` | значение или `null` | Требовать запись названия подписи с прописной буквы без заглавных букв в остальных словах (None — не проверять) | `null` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -500,6 +515,9 @@
 | `max_pages` | integer или `null` | нет | `null` | целое число, не меньше 1 или `null` (страницы) | Максимум страниц | `null` |
 | `min_words` | integer или `null` | нет | `null` | целое число, не меньше 1 или `null` (слова) | Минимум слов | `null` |
 | `max_words` | integer или `null` | нет | `null` | целое число, не меньше 1 или `null` (слова) | Максимум слов | `null` |
+| `section_page_limits` | typing.Dict[str, int] | нет | `{}` | объект | Максимум страниц по разделам: ключ — роль узла дерева (introduction, conclusion, appendix, main_chapter и т. п.), значение — предел страниц | `{}` |
+| `section_min_pages` | typing.Dict[str, int] | нет | `{}` | объект | Минимум страниц по разделам: ключ — роль узла дерева, значение — минимальный объём раздела | `{}` |
+| `max_appendix_share` | number или `null` | нет | `null` | границы: 0.0, 1.0 | Максимальная доля страниц приложений в общем объёме работы (0.3 — не более 30 % страниц) | `null` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -530,6 +548,8 @@
 | Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
 |---|---|---|---|---|---|---|
 | `require_numbering` | boolean | нет | `true` | `true` или `false` | Требовать номер у вынесенной в отдельную строку формулы | `true` |
+| `number_position` | `left` / `center` / `right` или `null` | нет | `null` | одно из: `left`, `center`, `right` | Положение номера формулы: 'right' — у правого поля, 'center' — по центру, 'left' — у левого поля; None — положение не проверяется | `null` |
+| `number_style` | `arabic` / `roman` или `null` | нет | `null` | одно из: `arabic`, `roman` | Форма записи номера формулы: 'arabic' — арабские цифры, 'roman' — римские; None — форма не проверяется | `null` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -564,6 +584,7 @@
 | `size_tolerance_pt` | number | нет | `0.5` | число, не меньше 0.0 (пункты) | Допуск по кеглю в пунктах (Word хранит half-points) | `0.5` |
 | `check_complex_script` | boolean | нет | `false` | `true` или `false` | Учитывать complex script (font_cs): источники шума, по умолчанию выключено | `false` |
 | `normalize_family` | boolean | нет | `true` | `true` или `false` | Сравнивать гарнитуру по нормализованному имени: без учета регистра, пробелов, дефисов, subset-префикса 'XXXXXX+' и стилевых маркеров (MT/PS/PSMT/Bold/Italic/Regular/Roman). false — прежнее строгое сравнение | `true` |
+| `smaller_than_body_text` | boolean | нет | `false` | `true` или `false` | Запрещать кегль меньше кегля основного текста: кегль основного текста определяется по самому частому кеглю абзацев тела документа. Взаимоисключающе с size_pt и min_size_pt | `false` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -594,6 +615,8 @@
 | Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
 |---|---|---|---|---|---|---|
 | `trailing_dot` | `any` / `forbid` / `require` | нет | `any` | одно из: `any`, `forbid`, `require` | Точка в конце текста заголовка: 'forbid' — не допускается, 'require' — обязательна | `any` |
+| `prefix_word` | string или `null` | нет | `null` | значение или `null` | Обязательное слово перед номером заголовка, например «ГЛАВА». Сравнение без учета регистра; проверяется только у нумерованных заголовков | `null` |
+| `forbid_quotes` | boolean | нет | `false` | `true` или `false` | Запрещать кавычки в тексте заголовка (« », „ “, " ") | `false` |
 | `trailing_dot_in_number` | `any` / `forbid` / `require` | нет | `any` | одно из: `any`, `forbid`, `require` | Точка после номера заголовка (например '1.' в начале строки) | `any` |
 | `case` | `any` / `uppercase` / `capitalized` / `not_uppercase` | нет | `any` | одно из: `any`, `uppercase`, `capitalized`, `not_uppercase` | 'uppercase' — весь заголовок прописными, 'capitalized' — с прописной буквы и не целиком прописными, 'not_uppercase' — не целиком прописными | `"uppercase"` |
 | `alignment` | `left` / `center` / `right` / `both` / `distribute` или `null` | нет | `null` | одно из: `left`, `center`, `right`, `both`, `distribute` или `null` | Ожидаемое выравнивание абзаца заголовка (effective_props.alignment) | `null` |
@@ -704,6 +727,8 @@
 | `check_depth_matches_level` | boolean | нет | `true` | `true` или `false` | Требовать, чтобы глубина номера совпадала с уровнем заголовка: 1.1 — второй уровень | `true` |
 | `number_ending` | `any` / `with_dot` / `without_dot` | нет | `any` | одно из: `any`, `with_dot`, `without_dot` | Требование к точке после последней цифры номера | `"without_dot"` |
 | `require_number_for_roles` | (`title_page` / `task_sheet` / `abstract_referat` / `toc` / `abbreviations` / `introduction` / `main_chapter` / `sub_section` / `conclusion` / `bibliography` / `appendix` / `unknown`)[] | нет | `["main_chapter", "sub_section"]` | список, элементы — одно из: `title_page`, `task_sheet`, `abstract_referat`, `toc`, `abbreviations`, `introduction`, `main_chapter`, `sub_section`, `conclusion`, `bibliography`, `appendix`, `unknown` | Заголовки этих ролей обязаны иметь номер (пусто — нумерация не обязательна). Роли из NUMBERLESS_HEADING_ROLES (введение, заключение, список литературы, приложения, лист задания, перечень сокращений) номер не требуют | `["main_chapter", "sub_section"]` |
+| `number_style` | `any` / `arabic` / `roman` / `chapter` | нет | `any` | одно из: `any`, `arabic`, `roman`, `chapter` | Стиль записи номера заголовка: 'arabic' — арабские цифры («2», «2.1»), 'roman' — римские («II», «II.1»), 'chapter' — номер со словом «Глава» перед ним («Глава 2», «ГЛАВА II»). 'any' — стиль не проверяется | `any` |
+| `forbid_prefix_words` | string[] | нет | `[]` | массив значений | Слова, которые не должны стоять перед номером заголовка, например «параграф» или «пункт»; сравнение без учета регистра | `[]` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -1049,6 +1074,7 @@
 | `forbid_trailing_dot` | boolean | нет | `false` | `true` или `false` | После номера страницы нет точки | `false` |
 | `require_continuous` | boolean | нет | `false` | `true` или `false` | Сквозная нумерация: напечатанный номер совпадает с физическим номером страницы на всем документе (нужны данные PDF) | `false` |
 | `include_appendices` | boolean | нет | `false` | `true` или `false` | Учитывать страницы приложений при проверке сквозной нумерации; без этого приложения из сверки исключаются | `false` |
+| `first_numbered_page` | integer или `null` | нет | `null` | границы: 1 | Страница, на которой впервые напечатан номер: по методичке номер впервые появляется на второй странице (None — не проверять) | `null` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -1083,6 +1109,7 @@
 | `sections` | SectionSpec[] | нет | `[]` | список объектов SectionSpec (см. §2.4) | Разделы в требуемом порядке следования | `[{"label": "Введение", "role": "introduction", "require_number": false}]` |
 | `min_main_chapters` | integer или `null` | нет | `null` | целое число, не меньше 1, не больше 20 или `null` | Минимальное число глав основной части (роль main_chapter) | `2` |
 | `max_main_chapters` | integer или `null` | нет | `null` | целое число, не меньше 1, не больше 20 или `null` | Максимальное число глав основной части (роль main_chapter) | `null` |
+| `require_subsections` | boolean | нет | `false` | `true` или `false` | Требовать, чтобы у каждой главы основной части был хотя бы один подраздел: глава без подразделов считается нераскрытой | `false` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -1192,6 +1219,7 @@
 | `first_letter` | `capitalize` / `any` | нет | `capitalize` | одно из: `capitalize`, `any` | Требовать заглавную первую букву заголовка графы или строки | `capitalize` |
 | `forbid_trailing_dot` | boolean | нет | `true` | `true` или `false` | Запрещать точку в конце заголовка графы или строки | `true` |
 | `subheader_case` | `any` / `lowercase` / `lowercase_if_continuation` | нет | `any` | одно из: `any`, `lowercase`, `lowercase_if_continuation` | Регистр подзаголовков-продолжений: 'lowercase' — со строчной буквы, если подзаголовок составляет одно предложение с заголовком; 'lowercase_if_continuation' — то же для строк ниже первой строки шапки | `any` |
+| `require_header_row` | boolean | нет | `false` | `true` или `false` | Требовать размеченную строку-шапку (Таблица должна иметь шапку, а не начинаться сразу с данных) | `false` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -1222,6 +1250,8 @@
 | `require_all_sides_borders` | boolean | нет | `true` | `true` или `false` | Требовать линии со всех сторон таблицы и между ячейками | `true` |
 | `require_full_text_width` | boolean | нет | `false` | `true` или `false` | Требовать, чтобы ширина таблицы совпадала с шириной текстового поля | `false` |
 | `width_tolerance_mm` | number | нет | `1.0` | число, не меньше 0.0, не больше 50.0 (мм) | Допуск сравнения ширины таблицы с текстовым полем, мм | `1.0` |
+| `alignment` | `left` / `center` / `right` или `null` | нет | `null` | одно из: `left`, `center`, `right` | Ожидаемое выравнивание таблицы в тексте: по методичке таблица выравнивается по левому краю (None — не проверять) | `null` |
+| `forbid_number_column` | boolean | нет | `false` | `true` или `false` | Запрещать служебную графу «№ п/п»: по методичке номер строки не выносят в отдельную графу таблицы | `false` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -1299,6 +1329,8 @@
 | `check_completeness` | boolean или `null` | нет | `null` | `true` или `false` или `null` | Требовать, чтобы обязательные разделы были перечислены в оглавлении; по умолчанию включается, если задан required_entries | `null` |
 | `required_entries` | SectionSpec[] | нет | `[]` | список объектов SectionSpec (см. §2.4) | Разделы, которые обязаны быть в оглавлении: роль и/или допустимые названия. Названия отделяют структурный раздел «Заключение» от главы «Выводы» | `[{"label": "Заключение", "role": "conclusion"}]` |
 | `max_depth` | integer или `null` | нет | `null` | целое число, не меньше 1, не больше 9 или `null` | До какой глубины заголовки обязаны быть в оглавлении: при 2 сверяются главы и разделы, подразделы глубже второго уровня пропуском не считаются. Пусто — все уровни. Записи оглавления глубже этой глубины допускаются | `null` |
+| `start_page` | integer или `null` | нет | `null` | границы: 1 | Страница, на которой должно начинаться оглавление: по методичке оглавление идёт после титульного листа (None — не проверять) | `null` |
+| `require_entry_number` | boolean | нет | `false` | `true` или `false` | Требовать номер раздела в записи оглавления, если у самого заголовка номер есть: у «Глава 2» в оглавлении тоже стоит «2» | `false` |
 
 Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
 
@@ -1408,6 +1440,7 @@
 | `size_tolerance_pt` | number | нет | `0.5` | число, не меньше 0.0 (пункты) | Допуск по кеглю в пунктах (Word хранит half-points) | `0.5` |
 | `check_complex_script` | boolean | нет | `false` | `true` или `false` | Учитывать complex script (font_cs): источники шума, по умолчанию выключено | `false` |
 | `normalize_family` | boolean | нет | `true` | `true` или `false` | Сравнивать гарнитуру по нормализованному имени: без учета регистра, пробелов, дефисов, subset-префикса 'XXXXXX+' и стилевых маркеров (MT/PS/PSMT/Bold/Italic/Regular/Roman). false — прежнее строгое сравнение | `true` |
+| `smaller_than_body_text` | boolean | нет | `false` | `true` или `false` | Запрещать кегль меньше кегля основного текста: кегль основного текста определяется по самому частому кеглю абзацев тела документа. Взаимоисключающе с size_pt и min_size_pt | `false` |
 
 #### `SectionSpec`
 

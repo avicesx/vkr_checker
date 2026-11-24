@@ -376,7 +376,7 @@ def test_doc_states_registry_counts() -> None:
     assert f"обязательных из них — {required_params}" in text
     assert f"Областей всего {len(SCOPES)}" in text
     # числа из этого теста обязаны совпадать с ответом задачи
-    assert (len(CODES), total_params, len(SCOPES)) == (36, 149, 13)
+    assert (len(CODES), total_params, len(SCOPES)) == (36, 181, 13)
 
 
 def test_code_registry_table_matches_code() -> None:
@@ -431,7 +431,7 @@ def test_params_tables_match_models() -> None:
             _check_field_row(cells, model.model_fields[key], f"§2.3, код `{code}`, строка {lineno}")
             assert cells[6].strip(), f"строка {lineno}: у `{code}.{key}` нет примера значения"
         total += len(doc_keys)
-    assert total == 149, f"в таблицах params описано {total} ключей, ожидалось 149"
+    assert total == 181, f"в таблицах params описано {total} ключей, ожидалось 181"
 
 
 def test_nested_model_tables_match_code() -> None:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
 
 from ..findings import (
@@ -32,12 +33,36 @@ from .common import (
 )
 from .constants import (
     ALIGNMENT_LABELS,
+    EPSILON,
     INDENT_LABELS,
 )
 from parser.core.schema import (
     ParagraphBlock,
     ParsedDocxDocument,
 )
+
+
+def _body_font_size(document: ParsedDocxDocument) -> Optional[float]:
+    """Определяет кегль основного текста по самому частому кеглю его ранов.
+
+    Кегль считается по видимым ранам абзацев тела без заголовков: взвешивание
+    по числу знаков устойчиво к отдельным вставкам формул и сносок. Если
+    измерить нечего, возвращается ``None`` и проверка не оценивается.
+    """
+    weights: Counter = Counter()
+    for block in document.blocks:
+        if not isinstance(block, ParagraphBlock) or block.container_type != "body":
+            continue
+        if block.heading_info is not None:
+            continue
+        for run in block.runs:
+            text = run.visible_text.strip()
+            if not text or run.in_field or run.effective_props.vanish_hidden:
+                continue
+            weights[round(float(run.effective_props.size_pt), 1)] += len(text)
+    if not weights:
+        return None
+    return weights.most_common(1)[0][0]
 
 
 def _check_font_rule(
@@ -57,6 +82,7 @@ def _check_font_rule(
     violations: List[Violation] = []
     targets = _paragraph_targets(document, rule.target, contexts)
     pdf_only = _is_pdf_only(document)
+    body_size = _body_font_size(document) if rule.params.smaller_than_body_text else None
 
     for paragraph in targets:
         mismatched = []
@@ -75,6 +101,24 @@ def _check_font_rule(
             )
             if diff is not None:
                 mismatched.append((run, diff))
+            elif body_size is not None and (
+                run.effective_props.size_pt
+                < body_size - rule.params.size_tolerance_pt - EPSILON
+            ):
+                mismatched.append(
+                    (
+                        run,
+                        (
+                            {"size_pt": body_size},
+                            {"size_pt": run.effective_props.size_pt},
+                            ["кегль не меньше кегля основного текста"],
+                            [
+                                f"кегль {run.effective_props.size_pt} пт "
+                                f"при основном тексте {body_size} пт"
+                            ],
+                        ),
+                    )
+                )
 
         if not mismatched:
             continue
@@ -100,7 +144,11 @@ def _check_font_rule(
         expected_text=rule.message,
         confidence="medium" if pdf_only else "high",
         empty_observed="в области действия правила нет абзацев",
-        details={"scope": rule.target.scope, "pdf_only": pdf_only},
+        details={
+            "scope": rule.target.scope,
+            "pdf_only": pdf_only,
+            "body_size_pt": body_size,
+        },
     )
     return violations, len(targets), assessment
 

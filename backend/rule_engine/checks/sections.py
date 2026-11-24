@@ -107,7 +107,32 @@ def _check_required_sections_rule(
             )
         )
 
-    checked = len(rule.params.sections) + (1 if chapters_bounded else 0)
+    subsections_checked = 0
+    subsections_missing = 0
+    if rule.params.require_subsections:
+        for record in chapter_records:
+            subsections_checked += 1
+            has_subsection = any(
+                child.semantic_role == "sub_section" for child in record.node.children
+            )
+            if not has_subsection:
+                subsections_missing += 1
+                violations.append(
+                    _heading_violation(
+                        rule,
+                        record,
+                        {"subsections": True},
+                        {"subsections": 0},
+                        ["у главы есть подразделы"],
+                        ["у главы нет подразделов"],
+                    )
+                )
+
+    checked = (
+        len(rule.params.sections)
+        + (1 if chapters_bounded else 0)
+        + (subsections_checked if rule.params.require_subsections else 0)
+    )
     assessment = _counted_assessment(
         rule,
         violations,
@@ -122,6 +147,8 @@ def _check_required_sections_rule(
             ),
             "headings": len(records),
             "main_chapters": chapter_count if chapters_bounded else None,
+            "subsections_checked": subsections_checked,
+            "subsections_missing": subsections_missing,
         },
     )
     return violations, checked, assessment

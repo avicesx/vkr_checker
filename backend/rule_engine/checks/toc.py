@@ -369,6 +369,8 @@ def _check_toc_rule(
     paragraph_index = _paragraph_index(document)
     entries_checked = 0
     alignment_not_set = 0
+    start_page_not_set = 0
+    entry_number_skipped = 0
     for toc in tocs:
         checked += len(toc.entries)
         entries_checked += len(toc.entries)
@@ -391,6 +393,27 @@ def _check_toc_rule(
                 )
             )
 
+        if expected.start_page is not None and toc.page_start_est is not None:
+            if toc.page_start_est != expected.start_page:
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"toc:{toc.block_id}:start_page",
+                        location=ViolationLocation(
+                            block_id=toc.block_id,
+                            section_idx=toc.section_idx,
+                            page_start_est=toc.page_start_est,
+                            page_end_est=toc.page_end_est,
+                            snippet=f"оглавление, записей {len(toc.entries)}",
+                        ),
+                        expected={"start_page": expected.start_page},
+                        found={"start_page": toc.page_start_est},
+                        expected_text=f"оглавление начинается со страницы {expected.start_page}",
+                        found_text=f"оглавление начинается со страницы {toc.page_start_est}",
+                    )
+                )
+        elif expected.start_page is not None:
+            start_page_not_set += 1
 
         for entry in toc.entries:
             expected_values: Dict[str, Any] = {}
@@ -403,6 +426,16 @@ def _check_toc_rule(
                 found_values["page_number"] = None
                 expected_parts.append("номер страницы в записи")
                 found_parts.append("номер страницы отсутствует")
+
+            if expected.require_entry_number and not entry.extracted_number:
+                heading_record = headings_by_block.get(entry.matched_heading_block_id)
+                if heading_record is not None and _heading_section_number(heading_record):
+                    expected_values["entry_number"] = True
+                    found_values["entry_number"] = None
+                    expected_parts.append("номер раздела в записи оглавления")
+                    found_parts.append("номер раздела отсутствует")
+                else:
+                    entry_number_skipped += 1
 
             if expected.check_page_numbers and entry.is_page_number_match is False:
                 expected_values["page_number"] = entry.actual_heading_page_est
@@ -597,6 +630,8 @@ def _check_toc_rule(
             "toc_blocks": len(tocs),
             "entries_checked": entries_checked,
             "alignment_not_set": alignment_not_set,
+            "start_page_not_set": start_page_not_set,
+            "entry_number_skipped": entry_number_skipped,
             "headings_compared": len(headings) if expected.check_completeness else 0,
         },
     )
