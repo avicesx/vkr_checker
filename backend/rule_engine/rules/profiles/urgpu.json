@@ -1,6 +1,6 @@
 {
   "ruleset_id": "urgpu-vkr-profile",
-  "ruleset_version": "2.0.0",
+  "ruleset_version": "2.1.0",
   "extends": "vkr-rule-engine-test",
   "description": "Профиль УрГПУ: переопределения требований к оформлению ВКР поверх штатного набора",
   "rules": [
@@ -281,24 +281,6 @@
           }
         ],
         "forbid_other_markers": true
-      }
-    },
-    {
-      "rule_id": "caption_placement_table",
-      "code": "caption_placement",
-      "strictness": "error",
-      "message": "Слово «Таблица» без сокращения и кавычек пишется в правом верхнем углу над таблицей",
-      "quote": "Слово «Таблица» без сокращения и кавычек пишется в правом верхнем углу над самой таблицей и ее заголовком.",
-      "target": {
-        "scope": "captions"
-      },
-      "params": {
-        "entity_type": "table",
-        "position": "above_table",
-        "alignment": "right",
-        "prefix_word": "Таблица",
-        "require_number": true,
-        "forbid_quotes": true
       }
     },
     {

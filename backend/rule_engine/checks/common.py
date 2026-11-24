@@ -592,12 +592,18 @@ def _document_violation(
     expected_text: str,
     found_text: str,
     confidence: Optional[str] = None,
+    location: Optional[ViolationLocation] = None,
 ) -> Violation:
-    """Формирует нарушение уровня документа без привязки к абзацу."""
+    """Формирует нарушение уровня документа без привязки к абзацу.
+
+    ``location`` позволяет правилу объёма и другим проверкам документа задать
+    страницы и сниппет: адрес «структура документа» без страницы не даёт
+    перейти к месту нарушения.
+    """
     return _build_violation(
         rule,
         address=address,
-        location=ViolationLocation(snippet="структура документа"),
+        location=location or ViolationLocation(snippet="структура документа"),
         expected=expected_values,
         found=found_values,
         expected_text=expected_text,

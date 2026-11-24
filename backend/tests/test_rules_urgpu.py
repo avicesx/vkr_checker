@@ -943,10 +943,14 @@ def test_page_number_position_pdf_params() -> None:
 
     found_ids = set(_ids(report, "pagenum"))
     assert found_ids == {
-        "pagenum:page:1",
-        "pagenum:page:2",
+        "pagenum:page:1:skip_first_page",
+        "pagenum:page:1:require_arabic_digits",
+        "pagenum:page:2:forbid_trailing_dot",
+        "pagenum:page:2:require_continuous",
     }
-    page_two = next(v for v in report.violations if v.violation_id == "pagenum:page:2")
+    page_two = next(
+        v for v in report.violations if v.violation_id == "pagenum:page:2:forbid_trailing_dot"
+    )
     assert page_two.location.page_start_est == 2
     assert page_two.found.get("rendered_number") == "2."
 

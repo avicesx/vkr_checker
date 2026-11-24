@@ -461,7 +461,11 @@ def _check_bibliography_format_rule(
                 ("has_text_type_designation", entry.has_text_type_designation)
             )
 
-        if expected.forbid_dot_dash and entry.dot_dash_count:
+        if (
+            expected.forbid_dot_dash
+            and entry.dot_dash_count
+            and entry.detected_category not in expected.exempt_categories
+        ):
             label = BIBLIOGRAPHY_FORMAT_LABELS["dot_dash_count"]
             violations.append(
                 _build_violation(
@@ -527,11 +531,26 @@ def _check_bibliography_format_rule(
     )
 
 
-def _bibliography_summary_location(entries: List[BibliographyEntry]) -> ViolationLocation:
-    """Строит локацию нарушения, относящегося ко всему списку литературы."""
+def _bibliography_summary_location(
+    entries: List[BibliographyEntry],
+    blocks: Dict[str, ParagraphBlock],
+) -> ViolationLocation:
+    """Строит локацию нарушения, относящегося ко всему списку литературы.
+
+    Кроме первой записи заполняется диапазон страниц: без него замечание о
+    количестве или свежести источников нельзя найти в документе.
+    """
     first = entries[0] if entries else None
+    pages = [
+        block.page_start_est
+        for entry in entries
+        if (block := blocks.get(entry.block_id)) is not None
+        and block.page_start_est is not None
+    ]
     return ViolationLocation(
         block_id=first.block_id if first is not None else None,
+        page_start_est=min(pages) if pages else None,
+        page_end_est=max(pages) if pages else None,
         snippet=f"список литературы: {len(entries)} записей",
     )
 
@@ -567,13 +586,14 @@ def _check_bibliography_count_rule(
         ))
 
     count = len(entries)
+    blocks = _paragraph_index(document)
     violations: List[Violation] = []
     if expected.min_sources is not None and count < expected.min_sources:
         violations.append(
             _build_violation(
                 rule,
                 address="bibliography",
-                location=_bibliography_summary_location(entries),
+                location=_bibliography_summary_location(entries, blocks),
                 expected={"min_sources": expected.min_sources},
                 found={"sources": count},
                 expected_text=expected_text,
@@ -587,7 +607,7 @@ def _check_bibliography_count_rule(
             _build_violation(
                 rule,
                 address="bibliography",
-                location=_bibliography_summary_location(entries),
+                location=_bibliography_summary_location(entries, blocks),
                 expected={"max_sources": expected.max_sources},
                 found={"sources": count},
                 expected_text=expected_text,
@@ -766,7 +786,7 @@ def _check_bibliography_order_rule(
                 _build_violation(
                     rule,
                     address="bibliography:group_order",
-                    location=_bibliography_summary_location(entries),
+                    location=_bibliography_summary_location(entries, blocks),
                     expected={"groups": missing},
                     found={"groups": len(group_headers)},
                     expected_text="группы: " + ", ".join(missing),
@@ -889,13 +909,14 @@ def _check_bibliography_recency_rule(
 
     recent = [year for year in years if year >= threshold_year]
     share = len(recent) / len(years)
+    blocks = _paragraph_index(document)
     violations: List[Violation] = []
     if share < expected.min_recent_share:
         violations.append(
             _build_violation(
                 rule,
                 address="bibliography",
-                location=_bibliography_summary_location(entries),
+                location=_bibliography_summary_location(entries, blocks),
                 expected={
                     "min_recent_share": expected.min_recent_share,
                     "recent_years": expected.recent_years,

@@ -66,22 +66,53 @@ def _classify_marker(marker: str) -> str:
     return "other"
 
 
+def _bibliography_block_ids(document: ParsedDocxDocument) -> set[str]:
+    """Возвращает блоки раздела литературы: это записи, а не перечисление.
+
+    Нумерация записей списка литературы задаётся правилом порядка источников,
+    поэтому проверка маркеров перечисления к ней не применяется. Раздел
+    определяется ролью ``bibliography`` в дереве документа, а записи — по
+    ``cross_ref_index.bibliography``: так исключение работает и там, где дерево
+    не распознало раздел целиком.
+    """
+    ids: set[str] = set()
+    tree = document.document_tree
+    roots = tree if isinstance(tree, list) else [tree]
+    stack = [node for node in roots if node is not None]
+    while stack:
+        node = stack.pop()
+        if node.semantic_role == "bibliography":
+            ids.update(node.direct_block_ids)
+            if node.heading_block_id:
+                ids.add(node.heading_block_id)
+        stack.extend(node.children)
+    index = document.cross_ref_index
+    if index is not None:
+        ids.update(entry.block_id for entry in index.bibliography)
+    return ids
+
+
 def _list_items(
     document: ParsedDocxDocument,
     rule: ListFormatRule,
     contexts: Dict[str, str],
-) -> List[ParagraphBlock]:
-    """Возвращает абзацы-элементы перечислений в области действия правила."""
+) -> Tuple[List[ParagraphBlock], int]:
+    """Возвращает элементы перечислений и число пропущенных записей литературы."""
     paragraphs = _paragraph_targets(document, rule.target, contexts)
+    bibliography_ids = _bibliography_block_ids(document)
     items: List[ParagraphBlock] = []
+    skipped_bibliography = 0
     for paragraph in paragraphs:
         info = paragraph.list_info
         if info is None or not info.is_list_item:
             continue
         if not (info.rendered_marker or "").strip():
             continue
+        if paragraph.block_id in bibliography_ids:
+            skipped_bibliography += 1
+            continue
         items.append(paragraph)
-    return items
+    return items, skipped_bibliography
 
 
 def _marker_spec(
@@ -109,7 +140,7 @@ def _check_list_format_rule(
     попадают в счетчик: иначе оценка говорила бы о проверке, которой не было.
     """
     expected = rule.params
-    items = _list_items(document, rule, contexts)
+    items, skipped_bibliography = _list_items(document, rule, contexts)
     expected_text = "маркеры перечисления соответствуют уровням методички"
     if not items:
         return (
@@ -121,7 +152,10 @@ def _check_list_format_rule(
                 expected_text=expected_text,
                 observed_text="в области действия правила нет элементов перечислений",
                 confidence="low",
-                details={"list_items": 0},
+                details={
+                    "list_items": 0,
+                    "bibliography_skipped": skipped_bibliography,
+                },
             ),
         )
 
@@ -180,6 +214,7 @@ def _check_list_format_rule(
                 str(level): count for level, count in sorted(skipped_levels.items())
             },
             "described_levels": sorted(described_levels),
+            "bibliography_skipped": skipped_bibliography,
         },
     )
     return violations, checked, assessment

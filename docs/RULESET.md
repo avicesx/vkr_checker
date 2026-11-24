@@ -1,11 +1,11 @@
 # Набор правил нормоконтроля ВКР
 
-Каталог наборов `backend/rule_engine/rules/vkr_test_rules.json` (версия 4.0.0) и профиля УрГПУ `backend/rule_engine/rules/profiles/urgpu.json` (версия 2.0.0) с таблицей покрытия 67 требований методички УрГПУ.
+Каталог наборов `backend/rule_engine/rules/vkr_test_rules.json` (версия 4.1.0) и профиля УрГПУ `backend/rule_engine/rules/profiles/urgpu.json` (версия 2.1.0) с таблицей покрытия 67 требований методички УрГПУ.
 
 ## Сводка
 
 - правил в наборе по умолчанию: **52**, кодов: **36**
-- значений по умолчанию общие для ВКР; требования УрГПУ живут в профиле: **33 переопределений**
+- значений по умолчанию общие для ВКР; требования УрГПУ живут в профиле: **32 переопределений**
 - объединённый профиль УрГПУ: **60 правил** (8 добавлены профилем)
 - покрыто требований методички: **61 из 67**, не покрыто: 6
 
@@ -16,14 +16,14 @@
 | Профиль | Файл | `extends` | Переопределений | Правил после слияния |
 |---|---|---|---|---|
 | `mpgu` | `backend/rule_engine/rules/profiles/mpgu.json` | `vkr-rule-engine-test` | 5 | 52 |
-| `urgpu` | `backend/rule_engine/rules/profiles/urgpu.json` | `vkr-rule-engine-test` | 33 | 60 |
+| `urgpu` | `backend/rule_engine/rules/profiles/urgpu.json` | `vkr-rule-engine-test` | 32 | 60 |
 | `urfu` | `backend/rule_engine/rules/profiles/urfu.json` | `vkr-rule-engine-test` | 6 | 52 |
 
 ## Что в базе нейтрально, а что принадлежит УрГПУ
 
 | `rule_id` | Решение |
 |---|---|
-| `caption_placement_table` | база ставит подпись таблицы слева, как ГОСТ 7.32 и МПГУ; правое выравнивание — только профиль УрГПУ |
+| `caption_placement_table` | база ставит подпись справа, как требует цитата методички и профиль УрГПУ; вариант «слева с тире» (ГОСТ 7.32, МПГУ) остаётся возможным переопределением профиля |
 | `bibliography_format_dot_dash` | база разрешает тире «. —» между элементами описания по ГОСТ 7.32; запрет — только профиль УрГПУ |
 | `toc_format_default` | оставлено нейтральным: отточие в базе разрешено, профиль УрГПУ его запрещает |
 | `caption_placement_figure` | оставлено нейтральным: база пишет «Рисунок» по ГОСТ, профиль — «Рис.» |
@@ -33,7 +33,7 @@
 | `document_volume` | оставлено нейтральным: порог 60–90 страниц пришёл из набора 3.0.0 и не является требованием УрГПУ |
 | `font_table_min` | перенесено в профиль: минимальный кегль 10 пт — требование УрГПУ, в базе остаётся только 12 пт |
 
-## Каталог набора по умолчанию (4.0.0)
+## Каталог набора по умолчанию (4.1.0)
 
 | № | `rule_id` | `code` | `scope` | `strictness` | `params` | Требование | `quote` |
 |---|---|---|---|---|---|---|---|
@@ -76,7 +76,7 @@
 | 37 | `caption_reference_figures` | `caption_reference` | `captions` | `error` | `{"entity_type": "figure", "required": true}` | №43 | Остальной иллюстрационный материал располагают в приложениях. |
 | 38 | `caption_reference_tables` | `caption_reference` | `captions` | `error` | `{"entity_type": "table", "required": true}` | №43 | Остальной иллюстрационный материал располагают в приложениях. |
 | 39 | `caption_reference_appendix` | `caption_reference` | `captions` | `error` | `{"entity_type": "appendix", "required": true}` | №50 | Необходимо следить, чтобы в тексте работы обязательно были ссылки на соответствующее приложение. |
-| 40 | `caption_placement_table` | `caption_placement` | `captions` | `error` | `{"entity_type": "table", "position": "above_table", "alignment": "left", "forbid_quotes": true, "prefix_word": "Таблица", "require_number": true}` | №25 | Слово «Таблица» без сокращения и кавычек пишется в правом верхнем углу над самой таблицей и ее заголовком. |
+| 40 | `caption_placement_table` | `caption_placement` | `captions` | `error` | `{"entity_type": "table", "position": "above_table", "alignment": "right", "forbid_quotes": true, "prefix_word": "Таблица", "require_number": true}` | №25 | Слово «Таблица» без сокращения и кавычек пишется в правом верхнем углу над самой таблицей и ее заголовком. |
 | 41 | `caption_placement_figure` | `caption_placement` | `captions` | `error` | `{"entity_type": "figure", "position": "below_object", "alignment": "center", "prefix_word": "Рисунок", "title_case": "capitalized", "require_number": true}` | №45 | Номера иллюстраций и их заглавия пишутся внизу под изображением, обозначаются арабскими цифрами без номера после слова «Рис.» |
 | 42 | `caption_placement_appendix` | `caption_placement` | `captions` | `error` | `{"entity_type": "appendix", "alignment": "center", "require_number": true, "title_case": "capitalized"}` | №46 | Приложение: по центру, нумеруется порядковым номером, заголовок пишется ниже по центру с Заглавной буквы. |
 | 43 | `alignment_captions` | `alignment` | `captions` | `error` | `{"alignment": "center"}` | №45 | Номера иллюстраций и их заглавия пишутся внизу под изображением, обозначаются арабскими цифрами без номера после слова «Рис.» |
@@ -90,7 +90,7 @@
 | 51 | `appendix_order_default` | `appendix_order` | `document_structure` | `error` | `{"order": "by_first_mention", "new_page_each": true}` | №48 | Приложения в порядке их упоминания в тексте, каждое с нового листа. |
 | 52 | `title_page_content_default` | `title_page_content` | `document_structure` | `error` | `{"required_fields": ["министерство", "вуз", "кафедра", "вид работы", "тема", "автор", "руководитель", "город", "год"]}` | №64, №65 | Титульный лист курсовой работы должен содержать: … полное наименование министерства РФ, вуза, института, кафедры, где выполнена работа; … вид исследовательской работы (курсовая работа); … название темы курсовой работы; … сведения об авторе (Ф.И.О. студента, курс, номер группы и отделение); … сведения о научном руководителе (Ф.И.О., ученая степень, должность преподавателя, ученое звание). … строка для проставления оценки; … город, год написания. |
 
-## Профиль УрГПУ (2.0.0, `extends: vkr-rule-engine-test`)
+## Профиль УрГПУ (2.1.0, `extends: vkr-rule-engine-test`)
 
 | `rule_id` | `code` | `params` профиля | Требование |
 |---|---|---|---|
@@ -106,7 +106,6 @@
 | `heading_hyphenation_default` | `heading_hyphenation` | `{"forbid_hyphenation": true, "forbid_abbreviations": true}` | №14 |
 | `toc_format_default` | `toc` | `{"require_toc": true, "forbid_dot_leader": true, "entry_alignment": "left", "entry_bold": false, "capitalize_entry": true}` | №21 |
 | `list_format_default` | `list_format` | `{"level_markers": [{"level": 0, "allowed": ["hyphen"]}, {"level": 1, "allowed": ["russian_letter_parenthesis"]}, {"level": 2, "allowed": ["arabic_parenthesis"]}], "forbid_other_markers": true}` | №24 |
-| `caption_placement_table` | `caption_placement` | `{"entity_type": "table", "position": "above_table", "alignment": "right", "prefix_word": "Таблица", "require_number": true, "forbid_quotes": true}` | №25 |
 | `caption_placement_figure` | `caption_placement` | `{"entity_type": "figure", "position": "below_object", "alignment": "center", "prefix_word": "Рис.", "title_case": "capitalized", "require_number": true}` | №45 |
 | `caption_format_tables` | `caption_format` | `{"entity_type": "table", "separator": "dot", "require_trailing_dot": false, "capitalize_first_letter": true}` | №26 |
 | `caption_numbering_tables` | `caption_numbering` | `{"entity_type": "table", "scheme": "any_of", "schemes": ["continuous_arabic", "section_based"], "appendix": "own", "allow_gaps": false, "allow_duplicates": false, "allow_out_of_order": false}` | №28, №29 |
@@ -214,6 +213,17 @@
 | `toc_format_urgpu` | `toc_format_default` | отточие, выравнивание и регистр — параметры одного правила |
 
 Остальные правила 3.1.0 сохранили `rule_id`; поведение базового набора совпадает с 3.0.0, потому что у 37 исходных правил не изменились `code`, `params`, `strictness`, `message` и `target` — заменена только `quote` на дословную формулировку методички.
+
+## Правки после верификации
+
+| `rule_id` | Что изменилось |
+|---|---|
+| `caption_placement_table` | верификация (t29): база переведена на `alignment: right` — прежнее `left` противоречило собственной цитате и давало 6 ложных находок; «слева с тире» описано как будущее переопределение профиля, а не значение базы |
+| `bibliography_format_dot_dash` | верификация (t29): добавлен `exempt_categories` — запрет точки-тире не применяется к электронным ресурсам и нормативным актам, у которых «. — » входит в форму описания |
+| `list_format_default` | верификация (t29): абзацы раздела списка литературы исключены из проверки перечислений через `document_tree` и `cross_ref_index`, нумерация записей списка больше не считается нарушением |
+| `document_volume` | верификация (t29): находки получили адрес (`section: document`, страница по числу страниц, фрагмент с объёмом) |
+| `bibliography_count` | верификация (t29): сводные находки количества и свежести источников привязаны к страницам списка литературы |
+| `page_number_position` | верификация (t29): идентификаторы нарушений уникальны — к адресу добавлен ключ требования (`page:1:skip_first_page`) |
 
 ## Косвенные основания цитат
 

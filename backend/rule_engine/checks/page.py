@@ -662,6 +662,7 @@ def _pdf_page_number_property_violations(
 
     def _add(
         page: Any,
+        property_key: str,
         values_expected: Dict[str, Any],
         values_found: Dict[str, Any],
         expected_text: str,
@@ -670,7 +671,7 @@ def _pdf_page_number_property_violations(
         violations.append(
             _build_violation(
                 rule,
-                address=f"page:{page.page_num}",
+                address=f"page:{page.page_num}:{property_key}",
                 location=ViolationLocation(
                     page_start_est=page.page_num,
                     snippet=f"страница {page.page_num}",
@@ -689,6 +690,7 @@ def _pdf_page_number_property_violations(
         if first.has_rendered_page_number:
             _add(
                 first,
+                "skip_first_page",
                 {"skip_first_page": True},
                 {
                     "page": first.page_num,
@@ -707,6 +709,7 @@ def _pdf_page_number_property_violations(
             if RE_ARABIC_PAGE_NUMBER.match(raw) is None:
                 _add(
                     page,
+                    "require_arabic_digits",
                     {"require_arabic_digits": True},
                     {"page": page.page_num, "rendered_number": page.rendered_page_number_raw},
                     PAGE_NUMBER_PROPERTY_LABELS["require_arabic_digits"],
@@ -720,6 +723,7 @@ def _pdf_page_number_property_violations(
             if raw.endswith("."):
                 _add(
                     page,
+                    "forbid_trailing_dot",
                     {"forbid_trailing_dot": True},
                     {"page": page.page_num, "rendered_number": page.rendered_page_number_raw},
                     PAGE_NUMBER_PROPERTY_LABELS["forbid_trailing_dot"],
@@ -732,6 +736,7 @@ def _pdf_page_number_property_violations(
             if page.matches_physical_page_num is False:
                 _add(
                     page,
+                    "require_continuous",
                     {"require_continuous": True},
                     {
                         "page": page.page_num,
@@ -758,6 +763,7 @@ def _pdf_page_number_property_violations(
                 if not page.has_rendered_page_number:
                     _add(
                         page,
+                        "include_appendices",
                         {"include_appendices": True},
                         {"page": page.page_num, "numbered": False},
                         PAGE_NUMBER_PROPERTY_LABELS["include_appendices"],
@@ -786,6 +792,7 @@ def _docx_page_number_property_violations(
 
     def _add(
         section: Any,
+        property_key: str,
         values_expected: Dict[str, Any],
         values_found: Dict[str, Any],
         expected_text: str,
@@ -794,7 +801,7 @@ def _docx_page_number_property_violations(
         violations.append(
             _build_violation(
                 rule,
-                address=f"section:{section.section_idx}",
+                address=f"section:{section.section_idx}:{property_key}",
                 location=ViolationLocation(
                     section_idx=section.section_idx,
                     page_start_est=section.page_start_est,
@@ -821,6 +828,7 @@ def _docx_page_number_property_violations(
         if numbered and not first.different_first_page:
             _add(
                 first,
+                "skip_first_page",
                 {"skip_first_page": True},
                 {"different_first_page": False, "number_in_footer": True},
                 PAGE_NUMBER_PROPERTY_LABELS["skip_first_page"],
@@ -834,6 +842,7 @@ def _docx_page_number_property_violations(
             if page_format != "decimal":
                 _add(
                     section,
+                    "require_arabic_digits",
                     {"require_arabic_digits": True},
                     {"page_num_fmt": page_format},
                     PAGE_NUMBER_PROPERTY_LABELS["require_arabic_digits"],
@@ -851,6 +860,7 @@ def _docx_page_number_property_violations(
             if section.page_num_start_override is not None:
                 _add(
                     section,
+                    "require_continuous",
                     {"require_continuous": True},
                     {
                         "page_num_start_override": section.page_num_start_override,

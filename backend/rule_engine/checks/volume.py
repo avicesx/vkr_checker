@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from ..findings import (
     RuleAssessment,
     Violation,
+    ViolationLocation,
 )
 from ..rules import DocumentVolumeRule
 from .builders import _counted_assessment
@@ -24,6 +25,7 @@ def _check_lower_bound(
     minimum: int,
     unit: str,
     confidence: str,
+    location: ViolationLocation,
 ) -> Optional[Violation]:
     """Собирает нарушение нижней границы объёма, если она нарушена."""
     if measured >= minimum:
@@ -32,10 +34,11 @@ def _check_lower_bound(
         rule,
         address=address,
         expected_values={f"min_{unit}": minimum},
-        found_values={unit: measured},
+        found_values={unit: measured, "section": "document"},
         expected_text=f"не менее {minimum} {unit}",
         found_text=f"{unit}: {measured}",
         confidence=confidence,
+        location=location,
     )
 
 
@@ -46,6 +49,7 @@ def _check_upper_bound(
     maximum: int,
     unit: str,
     confidence: str,
+    location: ViolationLocation,
 ) -> Optional[Violation]:
     """Собирает нарушение верхней границы объёма, если она нарушена."""
     if measured <= maximum:
@@ -54,10 +58,11 @@ def _check_upper_bound(
         rule,
         address=address,
         expected_values={f"max_{unit}": maximum},
-        found_values={unit: measured},
+        found_values={unit: measured, "section": "document"},
         expected_text=f"не более {maximum} {unit}",
         found_text=f"{unit}: {measured}",
         confidence=confidence,
+        location=location,
     )
 
 
@@ -96,18 +101,40 @@ def _check_document_volume_rule(
         )
         return [], 0, assessment
 
+    first_block_id = document.blocks[0].block_id if document.blocks else None
+    location = ViolationLocation(
+        block_id=first_block_id,
+        page_start_est=1,
+        page_end_est=max(1, pages),
+        snippet=(
+            f"весь документ: {pages} страниц"
+            + (f", {words} слов" if words is not None else "")
+        ),
+    )
     violations: List[Violation] = []
     checked = 1
 
     if expected.min_pages is not None:
         violation = _check_lower_bound(
-            rule, "document:pages", pages, expected.min_pages, "страниц", page_confidence
+            rule,
+            "document:pages",
+            pages,
+            expected.min_pages,
+            "страниц",
+            page_confidence,
+            location,
         )
         if violation is not None:
             violations.append(violation)
     if expected.max_pages is not None:
         violation = _check_upper_bound(
-            rule, "document:pages", pages, expected.max_pages, "страниц", page_confidence
+            rule,
+            "document:pages",
+            pages,
+            expected.max_pages,
+            "страниц",
+            page_confidence,
+            location,
         )
         if violation is not None:
             violations.append(violation)
@@ -116,13 +143,25 @@ def _check_document_volume_rule(
         checked += 1
         if expected.min_words is not None:
             violation = _check_lower_bound(
-                rule, "document:words", words, expected.min_words, "слов", page_confidence
+                rule,
+                "document:words",
+                words,
+                expected.min_words,
+                "слов",
+                page_confidence,
+                location,
             )
             if violation is not None:
                 violations.append(violation)
         if expected.max_words is not None:
             violation = _check_upper_bound(
-                rule, "document:words", words, expected.max_words, "слов", page_confidence
+                rule,
+                "document:words",
+                words,
+                expected.max_words,
+                "слов",
+                page_confidence,
+                location,
             )
             if violation is not None:
                 violations.append(violation)

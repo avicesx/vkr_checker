@@ -1,6 +1,6 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "4.0.0",
+  "ruleset_version": "4.1.0",
   "description": "Штатный набор нормоконтроля ВКР: общие требования к тексту, структуре, таблицам, подписям и списку литературы",
   "rules": [
     {
@@ -699,7 +699,7 @@
       "params": {
         "entity_type": "table",
         "position": "above_table",
-        "alignment": "left",
+        "alignment": "right",
         "forbid_quotes": true,
         "prefix_word": "Таблица",
         "require_number": true

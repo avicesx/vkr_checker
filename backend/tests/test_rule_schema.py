@@ -162,7 +162,7 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "4.0.0"
+    assert ruleset.ruleset_version == "4.1.0"
     expected_rule_ids = [
         "font_body_text",
         "indent_first_line",
@@ -843,5 +843,5 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "bibliography_recency",
     } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "4.0.0"
+    assert default_ruleset.ruleset_version == "4.1.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

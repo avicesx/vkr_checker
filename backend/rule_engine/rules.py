@@ -1352,6 +1352,13 @@ class BibliographyFormatExpectation(BaseModel):
             "области разделяются точкой"
         ),
     )
+    exempt_categories: List[BibliographyCategory] = Field(
+        default_factory=lambda: ["electronic_resource", "normative_act_law"],
+        description=(
+            "Категории, к которым запрет точки-тире не применяется: у электронных "
+            "ресурсов и нормативных актов «. — » входит в форму описания"
+        ),
+    )
 
     @field_validator("categories")
     @classmethod
@@ -1369,6 +1376,18 @@ class BibliographyFormatExpectation(BaseModel):
             raise ValueError(
                 "categories пуст: укажите категории источников или None (все категории)"
             )
+        return unique
+
+    @field_validator("exempt_categories")
+    @classmethod
+    def _validate_exempt_categories(
+        cls, value: List[BibliographyCategory]
+    ) -> List[BibliographyCategory]:
+        """Убирает повторы категорий, исключённых из запрета точки-тире."""
+        unique: List[BibliographyCategory] = []
+        for category in value:
+            if category not in unique:
+                unique.append(category)
         return unique
 
     @model_validator(mode="after")

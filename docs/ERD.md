@@ -3,7 +3,7 @@
 Документ описывает схему **как она есть**: то, что создаёт baseline-миграция
 `95f6b91fcc64` и что реально лежит в PostgreSQL после `alembic upgrade head`.
 Это не проект и не пожелания к схеме — предложения по её изменению живут
-отдельно, в `docs/ERD_PROPOSAL.md`, и в этой схеме **не реализованы** (см. §8).
+отдельно, в [`docs/ERD_APPENDIX.md`](ERD_APPENDIX.md), и в этой схеме **не реализованы** (см. §8).
 
 Ревизия на момент описания: ветка `feat/urgpu-ruleset`, единственная миграция
 `95f6b91fcc64_baseline_schema.py` (`down_revision = None`), PostgreSQL 16.16.
@@ -491,7 +491,7 @@ erDiagram
 | `ruleset.trust_level` | VARCHAR(50), NULL | значений не задано | свободная строка |
 | `rule.origin` | VARCHAR(50), NULL | `llm` | встречается только в тесте админки; свободная строка |
 | `rule.verification_method` | VARCHAR(50), NULL | `code`, `llm_recommendation` | `docs/RULES_CONTRACT.md`; движок значение не читает |
-| `rule.target_element` | VARCHAR(50), NULL | `heading`, `table`, `figure` | только `docs/ERD_PROPOSAL.md`; в коде не используется |
+| `rule.target_element` | VARCHAR(50), NULL | `heading`, `table`, `figure` | только в раннем предложении схемы; в коде не используется |
 | `rule.strictness` | VARCHAR(50), NULL | `error`, `warning`, `info` | `Strictness` в `backend/rule_engine/rules.py`; `NULL` → `error` при компиляции |
 | `violation.severity` | VARCHAR(50), NULL | `error`, `warning`, `info` | `Strictness` движка; в БД пишется как есть |
 | `rule.scope` | VARCHAR(50), NULL | `body_text`, `body_paragraphs`, `all_paragraphs`, `table_cells`, `headers_footers`, `footnotes`, `sections`, `headings`, `document_structure`, `toc`, `bibliography`, `captions`, `document` | `Scope` в `backend/rule_engine/rules.py` |
@@ -588,8 +588,8 @@ nullable, PK, UNIQUE, FK и индексы в моделях и в миграц�
    `primary_key=True` в моделях.
 3. **Ни одного CHECK-констрейнта.** Перечисления из §6 не проверяются БД:
    `status = 'activee'` или `strictness = 'fatal'` вставятся без ошибки.
-4. **`rule.params` — `json`, не `jsonb`.** `docs/ERD_PROPOSAL.md` предлагал
-   `jsonb`; в миграции `sa.JSON()` даёт `json`. Нет ни GIN-индексов, ни
+4. **`rule.params` — `json`, не `jsonb`.** Первоначальное предложение схемы
+   предполагало `jsonb`; в миграции `sa.JSON()` даёт `json`. Нет ни GIN-индексов, ни
    нормализации ключей, сравнение параметров в SQL невозможно.
 5. **Временные метки несогласованы.** `check.created_at`, `check.completed_at`,
    `ruleset.confirmed_at` — `timestamp` без часового пояса (в модели
@@ -612,9 +612,9 @@ nullable, PK, UNIQUE, FK и индексы в моделях и в миграц�
     устаревший путь для SQLAlchemy 2.0 (работает, но при обновлении библиотеки
     требует замены на `sqlalchemy.orm.DeclarativeBase`).
 
-### 8.3 Что из `docs/ERD_PROPOSAL.md` не реализовано
+### 8.3 Что из предложения по схеме не реализовано
 
-Предложение описывает три правки, которых в схеме нет:
+Базовые три правки [`docs/ERD_APPENDIX.md`](ERD_APPENDIX.md), которых в схеме нет:
 
 | Предложено | Фактически |
 | --- | --- |
@@ -622,5 +622,5 @@ nullable, PK, UNIQUE, FK и индексы в моделях и в миграц�
 | `violation.rule_code` — `varchar(50) NOT NULL` | колонки нет |
 | `rule_type.default_scope` — `varchar(50)` | колонки нет; область по умолчанию живёт в `backend/app/rule_types.py` |
 
-Поэтому `docs/ERD_PROPOSAL.md` нельзя использовать как описание БД: это проект
+Поэтому `docs/ERD_APPENDIX.md` нельзя использовать как описание БД: это проект
 изменений, а не текущее состояние.
