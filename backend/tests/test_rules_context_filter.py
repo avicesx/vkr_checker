@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 import pytest
-from conftest import DocxPackageBuilder
+from conftest import DocxPackageBuilder, load_legacy_default_ruleset
 from parser.core.schema import ParsedDocxDocument
 from parser.docx.pipeline import DocxParserPipeline
 from pydantic import ValidationError
@@ -303,7 +303,7 @@ def test_structure_rules_still_see_service_zones(
         TITLE_PAGE_PARAGRAPH + CODE_LISTING_PARAGRAPH + PLAIN_PARAGRAPH,
     )
 
-    report = RuleEngine(load_ruleset(DEFAULT_RULESET_PATH)).check(document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(document)
 
     assert report.summary.by_code == {"required_sections": 4, "toc": 1}
     assert "font_body_text" not in report.summary.by_rule

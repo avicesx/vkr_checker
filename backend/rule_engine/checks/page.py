@@ -1,6 +1,8 @@
 """Семейство страницы: поля, формат листа, номер страницы, интервал."""
 from __future__ import annotations
 
+import re
+
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..findings import (
@@ -160,7 +162,7 @@ def _check_margin_rule(
     return violations, len(sections), assessment
 
 
-def _check_page_number_position_rule(
+def _page_number_position_basics(
     rule: PageNumberPositionRule,
     document: ParsedDocxDocument,
     contexts: Dict[str, str],
@@ -604,6 +606,384 @@ def _check_line_spacing_rule(
             expected_text=expected_text,
             observed_text=observed_text,
             confidence=confidence,
+            details=details,
+        ),
+    )
+
+RE_ARABIC_PAGE_NUMBER = re.compile(r"^\d+[.)]?$")
+"""Номер страницы арабскими цифрами, допускается завершающая точка или скобка."""
+
+PAGE_NUMBER_PROPERTY_LABELS = {
+    "skip_first_page": "первая страница без номера",
+    "require_arabic_digits": "номер страницы арабскими цифрами",
+    "forbid_trailing_dot": "без точки после номера страницы",
+    "require_continuous": "сквозная нумерация без перезапуска",
+    "include_appendices": "нумерация страниц в приложениях",
+}
+"""Подписи дополнительных требований к номеру страницы."""
+
+
+def _appendix_page_ranges(document: ParsedDocxDocument) -> List[Tuple[int, int]]:
+    """Возвращает диапазоны страниц разделов с ролью «appendix»."""
+    ranges: List[Tuple[int, int]] = []
+    tree = document.document_tree
+    roots = tree if isinstance(tree, list) else [tree]
+    stack = [node for node in roots if node is not None]
+    while stack:
+        node = stack.pop()
+        if node.semantic_role == "appendix":
+            if node.page_start_est is not None:
+                ranges.append(
+                    (node.page_start_est, node.page_end_est or node.page_start_est)
+                )
+        stack.extend(node.children)
+    return ranges
+
+
+def _pdf_page_number_property_violations(
+    rule: PageNumberPositionRule,
+    document: ParsedDocxDocument,
+) -> Tuple[List[Violation], int, Dict[str, Any]]:
+    """Проверяет дополнительные требования к номеру страницы по данным PDF.
+
+    Все проверки идут по ``pdf_pages_audit``: номер страницы виден только в
+    отрендеренном документе. Каждая находка адресуется конкретной странице.
+    """
+    params = rule.params
+    pages = document.pdf_pages_audit
+    numbered = [page for page in pages if page.has_rendered_page_number]
+    violations: List[Violation] = []
+    checks = 0
+    details: Dict[str, Any] = {
+        "source": "pdf_pages_audit",
+        "pages_total": len(pages),
+        "numbered_pages": len(numbered),
+    }
+
+    def _add(
+        page: Any,
+        property_key: str,
+        values_expected: Dict[str, Any],
+        values_found: Dict[str, Any],
+        expected_text: str,
+        found_text: str,
+    ) -> None:
+        violations.append(
+            _build_violation(
+                rule,
+                address=f"page:{page.page_num}:{property_key}",
+                location=ViolationLocation(
+                    page_start_est=page.page_num,
+                    snippet=f"страница {page.page_num}",
+                ),
+                expected=values_expected,
+                found=values_found,
+                expected_text=expected_text,
+                found_text=found_text,
+                confidence="medium",
+            )
+        )
+
+    if params.skip_first_page:
+        checks += 1
+        first = pages[0]
+        if first.has_rendered_page_number:
+            _add(
+                first,
+                "skip_first_page",
+                {"skip_first_page": True},
+                {
+                    "page": first.page_num,
+                    "rendered_number": first.rendered_page_number_raw,
+                },
+                PAGE_NUMBER_PROPERTY_LABELS["skip_first_page"],
+                f"первая страница пронумерована: {first.rendered_page_number_raw}",
+            )
+
+    if params.require_arabic_digits:
+        checks += 1
+        for page in numbered:
+            raw = (page.rendered_page_number_raw or "").strip()
+            if not raw:
+                continue
+            if RE_ARABIC_PAGE_NUMBER.match(raw) is None:
+                _add(
+                    page,
+                    "require_arabic_digits",
+                    {"require_arabic_digits": True},
+                    {"page": page.page_num, "rendered_number": page.rendered_page_number_raw},
+                    PAGE_NUMBER_PROPERTY_LABELS["require_arabic_digits"],
+                    f"номер страницы не арабскими цифрами: {page.rendered_page_number_raw}",
+                )
+
+    if params.forbid_trailing_dot:
+        checks += 1
+        for page in numbered:
+            raw = (page.rendered_page_number_raw or "").rstrip()
+            if raw.endswith("."):
+                _add(
+                    page,
+                    "forbid_trailing_dot",
+                    {"forbid_trailing_dot": True},
+                    {"page": page.page_num, "rendered_number": page.rendered_page_number_raw},
+                    PAGE_NUMBER_PROPERTY_LABELS["forbid_trailing_dot"],
+                    f"после номера страницы стоит точка: {page.rendered_page_number_raw}",
+                )
+
+    if params.require_continuous:
+        checks += 1
+        for page in numbered:
+            if page.matches_physical_page_num is False:
+                _add(
+                    page,
+                    "require_continuous",
+                    {"require_continuous": True},
+                    {
+                        "page": page.page_num,
+                        "rendered_number": page.rendered_page_number_raw,
+                    },
+                    PAGE_NUMBER_PROPERTY_LABELS["require_continuous"],
+                    (
+                        f"номер {page.rendered_page_number_raw} не совпадает с физической "
+                        f"страницей {page.page_num}"
+                    ),
+                )
+
+    if params.include_appendices:
+        ranges = _appendix_page_ranges(document)
+        if not ranges:
+            details["include_appendices_note"] = (
+                "приложений в документе нет: проверять нумерацию в них нечего"
+            )
+        else:
+            checks += 1
+            for page in pages:
+                if not any(start <= page.page_num <= end for start, end in ranges):
+                    continue
+                if not page.has_rendered_page_number:
+                    _add(
+                        page,
+                        "include_appendices",
+                        {"include_appendices": True},
+                        {"page": page.page_num, "numbered": False},
+                        PAGE_NUMBER_PROPERTY_LABELS["include_appendices"],
+                        f"страница приложения {page.page_num} без номера",
+                    )
+    return violations, checks, details
+
+
+def _docx_page_number_property_violations(
+    rule: PageNumberPositionRule,
+    document: ParsedDocxDocument,
+) -> Tuple[List[Violation], int, Dict[str, Any]]:
+    """Проверяет дополнительные требования к номеру страницы по DOCX.
+
+    В DOCX номер хранится полем колонтитула, поэтому проверяются только
+    свойства, видимые в разметке: исключение первой страницы, формат номера и
+    перезапуск нумерации в секциях. Точка и арабские цифры в отрисованном виде
+    требуют PDF-режима и здесь не оцениваются.
+    """
+    params = rule.params
+    sections = document.sections
+    violations: List[Violation] = []
+    checks = 0
+    details: Dict[str, Any] = {"source": "docx_headers_footers", "sections": len(sections)}
+    skipped: List[str] = []
+
+    def _add(
+        section: Any,
+        property_key: str,
+        values_expected: Dict[str, Any],
+        values_found: Dict[str, Any],
+        expected_text: str,
+        found_text: str,
+    ) -> None:
+        violations.append(
+            _build_violation(
+                rule,
+                address=f"section:{section.section_idx}:{property_key}",
+                location=ViolationLocation(
+                    section_idx=section.section_idx,
+                    page_start_est=section.page_start_est,
+                    page_end_est=section.page_end_est,
+                    snippet=f"секция {section.section_idx + 1}",
+                ),
+                expected=values_expected,
+                found=values_found,
+                expected_text=expected_text,
+                found_text=found_text,
+                confidence="medium",
+            )
+        )
+
+    if params.skip_first_page and sections:
+        checks += 1
+        first = sections[0]
+        containers = list(first.headers.values()) + list(first.footers.values())
+        numbered = [
+            content
+            for content in containers
+            if content.has_page_field or content.has_hardcoded_number
+        ]
+        if numbered and not first.different_first_page:
+            _add(
+                first,
+                "skip_first_page",
+                {"skip_first_page": True},
+                {"different_first_page": False, "number_in_footer": True},
+                PAGE_NUMBER_PROPERTY_LABELS["skip_first_page"],
+                "первая страница не исключена из нумерации: в колонтитуле есть номер",
+            )
+
+    if params.require_arabic_digits:
+        checks += 1
+        for section in sections:
+            page_format = (section.page_num_fmt or "decimal").strip()
+            if page_format != "decimal":
+                _add(
+                    section,
+                    "require_arabic_digits",
+                    {"require_arabic_digits": True},
+                    {"page_num_fmt": page_format},
+                    PAGE_NUMBER_PROPERTY_LABELS["require_arabic_digits"],
+                    f"формат номера страницы: {page_format}",
+                )
+
+    if params.forbid_trailing_dot:
+        skipped.append("forbid_trailing_dot")
+
+    if params.require_continuous:
+        checks += 1
+        for section in sections:
+            if section.section_idx == 0:
+                continue
+            if section.page_num_start_override is not None:
+                _add(
+                    section,
+                    "require_continuous",
+                    {"require_continuous": True},
+                    {
+                        "page_num_start_override": section.page_num_start_override,
+                    },
+                    PAGE_NUMBER_PROPERTY_LABELS["require_continuous"],
+                    (
+                        "нумерация начинается заново с "
+                        f"{section.page_num_start_override}"
+                    ),
+                )
+
+    if params.include_appendices:
+        skipped.append("include_appendices")
+
+    if skipped:
+        details["skipped_docx"] = skipped
+        details["skipped_note"] = (
+            "в DOCX эти требования видны только в отрисованном документе: нужен PDF-режим"
+        )
+    return violations, checks, details
+
+
+def _page_number_property_result(
+    rule: PageNumberPositionRule,
+    document: ParsedDocxDocument,
+) -> Tuple[List[Violation], int, Dict[str, Any]]:
+    """Выбирает источник данных для дополнительных требований к номеру."""
+    if document.pdf_pages_audit:
+        return _pdf_page_number_property_violations(rule, document)
+    return _docx_page_number_property_violations(rule, document)
+
+
+def _check_page_number_position_rule(
+    rule: PageNumberPositionRule,
+    document: ParsedDocxDocument,
+    contexts: Dict[str, str],
+) -> Tuple[List[Violation], int, RuleAssessment]:
+    """Проверяет положение номера страницы и дополнительные требования к нему.
+
+    Без дополнительных параметров поведение прежнее: сверяется преобладающее
+    положение номера. Если заданы ``skip_first_page``, ``require_arabic_digits``,
+    ``forbid_trailing_dot``, ``require_continuous`` или ``include_appendices``,
+    к оценке добавляются проверки свойств номера, а находки адресуются странице
+    или секции. Свойства, видимые только в PDF, в DOCX не оцениваются и
+    перечисляются в ``details``.
+    """
+    violations, number_count, assessment = _page_number_position_basics(
+        rule, document, contexts
+    )
+    params = rule.params
+    property_flags = (
+        params.skip_first_page
+        or params.require_arabic_digits
+        or params.forbid_trailing_dot
+        or params.require_continuous
+        or params.include_appendices
+    )
+    if not property_flags:
+        return violations, number_count, assessment
+
+    property_violations, property_checks, property_details = (
+        _page_number_property_result(rule, document)
+    )
+    details: Dict[str, Any] = {
+        **(assessment.details or {}),
+        **property_details,
+        "property_checks": property_checks,
+    }
+    labels = [PAGE_NUMBER_PROPERTY_LABELS[name] for name in PAGE_NUMBER_PROPERTY_LABELS if getattr(params, name)]
+    expected_text = assessment.expected_text or rule.message
+    if property_violations:
+        return (
+            [*violations, *property_violations],
+            max(number_count, property_checks),
+            _build_assessment(
+                rule,
+                "fail",
+                expected_text=expected_text,
+                observed_text=(
+                    f"{assessment.observed_text or ''}; не выполнено: "
+                    + ", ".join(labels)
+                ).strip("; "),
+                confidence="medium",
+                details=details,
+            ),
+        )
+    if property_checks == 0:
+        # В DOCX часть требований к отрисованному номеру не видна: честно
+        # сообщаем, что нужен PDF-режим, вместо оценки «нарушений нет».
+        skipped_docx = property_details.get("skipped_docx") or []
+        if skipped_docx and assessment.status != "fail":
+            return (
+                violations,
+                number_count,
+                _build_assessment(
+                    rule,
+                    "not_assessed",
+                    expected_text=expected_text,
+                    observed_text=(
+                        "нужен PDF-режим: в DOCX не видно отрисованного номера "
+                        "страницы и его оформления"
+                    ),
+                    confidence="low",
+                    details=details,
+                ),
+            )
+        return violations, number_count, assessment
+    if assessment.status in ("fail", "not_assessed"):
+        # Мало распознанных номеров — оценка положения остаётся неполной,
+        # даже если проверки свойств номера прошли.
+        return violations, number_count, assessment.model_copy(update={"details": details})
+    return (
+        violations,
+        number_count,
+        _build_assessment(
+            rule,
+            "pass",
+            expected_text=expected_text,
+            observed_text=(
+                f"{assessment.observed_text or ''}; проверены свойства номера: "
+                + ", ".join(labels)
+            ).strip("; "),
+            confidence="medium",
             details=details,
         ),
     )

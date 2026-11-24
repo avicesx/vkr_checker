@@ -161,6 +161,21 @@ def test_appendix_caption_is_extracted() -> None:
     assert caption.numbering_scheme == "appendix_based"
 
 
+def test_appendix_kind_marker_is_not_part_of_title() -> None:
+    """«(обязательное)» — статус приложения, а не первая буква названия."""
+    document = _document(
+        [_paragraph("p_0001", "ПРИЛОЖЕНИЕ А (обязательное) Процесс экспорта", page=7)]
+    )
+
+    captions = extract_captions(document)
+
+    assert len(captions) == 1
+    caption = captions[0]
+    assert caption.entity_type == "appendix"
+    assert caption.number_str == "А"
+    assert caption.title_text == "Процесс экспорта"
+
+
 def test_strings_without_number_are_not_captions() -> None:
     """Строки без номера и предложение основного текста подписями не считаются."""
     document = _document(

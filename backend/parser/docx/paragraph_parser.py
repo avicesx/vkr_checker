@@ -273,15 +273,22 @@ class NumberingStateTracker:
 
     @staticmethod
     def _normalize_bullet_char(raw_text: str, marker_font: Optional[str]) -> str:
-        """Подбирает символ маркера для bullet-уровня."""
+        """Подбирает печатный символ маркера для bullet-уровня.
+
+        Word рисует дефис и кружок символами частной области Unicode
+        (0xE000–0xF8FF), например 0xF02D в Wingdings. Это не текст: если
+        оставить такой символ в ``rendered_marker``, правило перечисления
+        видит «другой маркер», а проверка шрифта сравнивает символ со шрифтом
+        абзаца. Символы частной области заменяются печатным дефисом или
+        кружком, обычные символы остаются как есть.
+        """
         if not raw_text:
             return "•"
-        ch = raw_text[0]
-        code = ord(ch)
-        if code == 0xF02D or ch in ("-", "–", "—", "\u2212"):
-            return raw_text
+        code = ord(raw_text[0])
         if code in (0xF0B7, 0xF0A7, 0xF076, 0xF0D8, 0xF0FC):
             return "•"
+        if 0xE000 <= code <= 0xF8FF:
+            return "-"
         return raw_text
 
 

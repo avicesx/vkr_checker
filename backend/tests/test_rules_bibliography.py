@@ -403,8 +403,8 @@ def test_bibliography_format_reports_each_missing_field() -> None:
                 "bib_001",
                 "p_0002",
                 1,
-                raw_text="Электронный ресурс. — URL: отсутствует.",
-                category="electronic_resource",
+                raw_text="Иванов И. И. Теория алгоритмов. — М. : Наука, 2018.",
+                category="book_monograph",
                 urls=[],
                 access_date_raw=None,
                 year_extracted=None,
@@ -442,6 +442,106 @@ def test_bibliography_format_reports_each_missing_field() -> None:
     assert "отсутствует" in by_field["urls"].found_text
     assert report.summary.objects_checked == 1
     assert report.assessments[0].status == "fail"
+
+
+def test_bibliography_format_skips_pages_and_year_for_exempt_categories() -> None:
+    """У электронных ресурсов и нормативных актов страницы и год не требуются.
+
+    У сайта не бывает страниц, у нормативного акта тоже: требование года и
+    страниц к таким записям давало ложные находки на реальных ВКР.
+    """
+    document = _document(
+        entries=[
+            _entry(
+                "bib_001",
+                "p_0002",
+                1,
+                raw_text="Электронный ресурс. — URL: https://example.org.",
+                category="electronic_resource",
+                year_extracted=None,
+                pages_extracted=None,
+            ),
+            _entry(
+                "bib_002",
+                "p_0003",
+                2,
+                raw_text="Закон РФ от 07.02.1992 № 2300-I «О защите прав потребителей».",
+                category="normative_act_law",
+                year_extracted=None,
+                pages_extracted=None,
+            ),
+        ],
+        blocks=[
+            _paragraph("p_0002", "Электронный ресурс.", page=4),
+            _paragraph("p_0003", "Закон РФ.", page=4),
+        ],
+    )
+    rule = _format_rule({"require_year": True, "require_pages": True})
+
+    report = _engine(rule).check(document)
+
+    assert report.summary.violations_total == 0
+    assert report.assessments[0].status == "pass"
+    assert report.assessments[0].details["exempt_entries"] == 2
+
+
+def test_bibliography_format_exempts_standards() -> None:
+    """ГОСТ и СанПиН — не печатное издание: год и страницы у них не требуются.
+
+    Методичка описывает стандарт номером и названием, а год входит в
+    обозначение (ГОСТ 7.32-2017), поэтому проверка года и страниц к категории
+    ``standard_gost`` не применяется.
+    """
+    document = _document(
+        entries=[
+            _entry(
+                "bib_001",
+                "p_0002",
+                1,
+                raw_text="ГОСТ 7.32-2017. Отчет о научно-исследовательской работе.",
+                category="standard_gost",
+                year_extracted=None,
+                pages_extracted=None,
+            )
+        ],
+        blocks=[_paragraph("p_0002", "ГОСТ 7.32-2017.", page=4)],
+    )
+    rule = _format_rule({"require_year": True, "require_pages": True})
+
+    report = _engine(rule).check(document)
+
+    assert report.violations == []
+    assert report.assessments[0].status == "pass"
+    assert report.assessments[0].details["exempt_entries"] == 1
+
+
+def test_bibliography_format_recognises_unlabelled_normative_act() -> None:
+    """Нормативный акт, не распознанный парсером, тоже не требует страниц.
+
+    Записи «Закон РФ», «Письмо комитета», «Типовая инструкция» попадают в
+    категорию unknown; страниц у них не бывает, поэтому проверка года и
+    страниц к ним не применяется.
+    """
+    document = _document(
+        entries=[
+            _entry(
+                "bib_001",
+                "p_0002",
+                1,
+                raw_text="Письмо Комитета РФ по торговле от 11 июля 1995 г. № 1-955/32.",
+                category="unknown",
+                year_extracted=None,
+                pages_extracted=None,
+            )
+        ],
+        blocks=[_paragraph("p_0002", "Письмо Комитета.", page=4)],
+    )
+    rule = _format_rule({"require_year": True, "require_pages": True})
+
+    report = _engine(rule).check(document)
+
+    assert report.summary.violations_total == 0
+    assert report.assessments[0].details["exempt_entries"] == 1
 
 
 def test_bibliography_format_compliant_entry_passes() -> None:

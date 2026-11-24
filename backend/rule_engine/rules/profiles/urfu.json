@@ -1,14 +1,15 @@
 {
-  "ruleset_id": "urgpu-vkr-profile",
+  "ruleset_id": "urfu-vkr-profile",
   "ruleset_version": "2.0.0",
-  "description": "Профиль УрГПУ: Times New Roman 14 pt, отступ 12,5 мм, полуторный интервал, поля 30/20/25/25 мм, номер страницы снизу по центру",
+  "extends": "vkr-rule-engine-test",
+  "description": "Профиль УрФУ: Times New Roman 14 pt, отступ 12,5 мм, полуторный интервал, поля 30/15/20/20 мм, лист A4, номер страницы снизу по центру",
   "rules": [
     {
       "rule_id": "font_body_text",
       "code": "font",
       "strictness": "error",
       "message": "Основной текст набирается гарнитурой Times New Roman, 14 pt",
-      "quote": "Методические указания УрГПУ, требования к оформлению текста",
+      "quote": "Методические указания УрФУ, требования к оформлению текста",
       "target": {
         "scope": "body_text"
       },
@@ -23,7 +24,7 @@
       "code": "indent",
       "strictness": "error",
       "message": "Абзац основного текста начинается с отступа 12,5 мм",
-      "quote": "Методические указания УрГПУ, требования к абзацам",
+      "quote": "Методические указания УрФУ, требования к абзацам",
       "target": {
         "scope": "body_text"
       },
@@ -37,7 +38,7 @@
       "code": "line_spacing",
       "strictness": "error",
       "message": "Основной текст набирается с полуторным межстрочным интервалом (1,5)",
-      "quote": "Методические указания УрГПУ, требования к интервалам",
+      "quote": "Методические указания УрФУ, требования к интервалам",
       "target": {
         "scope": "body_text"
       },
@@ -50,17 +51,33 @@
       "rule_id": "page_margins",
       "code": "margin",
       "strictness": "error",
-      "message": "Поля страницы: левое 30, правое 20, верхнее и нижнее 25 мм",
-      "quote": "Методические указания УрГПУ, требования к полям страницы",
+      "message": "Поля страницы: левое 30, правое 15, верхнее и нижнее 20 мм",
+      "quote": "Методические указания УрФУ, требования к полям страницы",
       "target": {
         "scope": "sections"
       },
       "params": {
         "left_mm": 30.0,
-        "right_mm": 20.0,
-        "top_mm": 25.0,
-        "bottom_mm": 25.0,
+        "right_mm": 15.0,
+        "top_mm": 20.0,
+        "bottom_mm": 20.0,
         "tolerance_mm": 3.0
+      }
+    },
+    {
+      "rule_id": "page_format",
+      "code": "page_format",
+      "strictness": "error",
+      "message": "Лист формата A4 (210 × 297 мм), допуск ±1 мм, книжная ориентация",
+      "quote": "Методические указания УрФУ, требования к формату листа",
+      "target": {
+        "scope": "sections"
+      },
+      "params": {
+        "width_mm": 210.0,
+        "height_mm": 297.0,
+        "tolerance_mm": 1.0,
+        "orientation": "portrait"
       }
     },
     {
@@ -68,7 +85,7 @@
       "code": "page_number_position",
       "strictness": "warning",
       "message": "Номер страницы печатается в нижнем колонтитуле по центру",
-      "quote": "Методические указания УрГПУ, требования к нумерации страниц",
+      "quote": "Методические указания УрФУ, требования к нумерации страниц",
       "target": {
         "scope": "headers_footers"
       },

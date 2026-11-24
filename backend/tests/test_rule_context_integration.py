@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape
 
 import pytest
-from conftest import DocxPackageBuilder
+from conftest import DocxPackageBuilder, load_legacy_default_ruleset
 from parser.core.schema import ParsedDocxDocument, ParagraphBlock, TocContainerBlock
 from parser.docx.pipeline import DocxParserPipeline
 from rule_engine import (
@@ -372,7 +372,7 @@ def test_default_ruleset_reports_no_violations_from_service_zones(
     vkr_document: ParsedDocxDocument,
 ) -> None:
     """Штатный набор не находит нарушений шрифта и отступа на титуле и листинге."""
-    report = RuleEngine(load_default_ruleset()).check(vkr_document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(vkr_document)
     contexts = classify_document_contexts(vkr_document.blocks)
     service_ids = set(_title_block_ids(vkr_document)) | set(
         _listing_block_ids(vkr_document)
@@ -394,7 +394,7 @@ def test_bad_body_paragraph_gives_exactly_font_and_indent(
     vkr_document: ParsedDocxDocument,
 ) -> None:
     """Кривой абзац основного текста ловится ровно двумя нарушениями."""
-    report = RuleEngine(load_default_ruleset()).check(vkr_document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(vkr_document)
     bad_block_id = _block_id(vkr_document, BAD_BODY_TEXT[:20])
     by_rule = {violation.rule_id: violation for violation in report.violations}
 
@@ -467,7 +467,7 @@ def test_heading_and_toc_rules_are_not_regressed(
     vkr_document: ParsedDocxDocument,
 ) -> None:
     """Правила заголовков, оглавления и разделов отрабатывают без нарушений."""
-    report = RuleEngine(load_default_ruleset()).check(vkr_document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(vkr_document)
 
     assert report.summary.rules_applied == 37
     for rule_id in (
@@ -503,7 +503,7 @@ def test_heading_rule_still_flags_misaligned_heading(
         _fixture_body(misaligned_heading="ЗАКЛЮЧЕНИЕ"),
     )
 
-    report = RuleEngine(load_ruleset(DEFAULT_RULESET_PATH)).check(document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(document)
 
     assert report.summary.by_rule.get("heading_alignment") == 1
     heading_violation = next(
@@ -525,7 +525,7 @@ def test_toc_rule_still_flags_missing_entry(
         _fixture_body(toc_entry_omitted="ЗАКЛЮЧЕНИЕ"),
     )
 
-    report = RuleEngine(load_default_ruleset()).check(document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(document)
 
     assert report.summary.by_rule.get("toc") == 1
     toc_violation = next(
@@ -539,7 +539,7 @@ def test_toc_rule_still_flags_missing_entry(
 
 def test_fixture_report_is_deterministic(vkr_document: ParsedDocxDocument) -> None:
     """Три прогона фикстуры дают побайтово одинаковый JSON отчета."""
-    engine = RuleEngine(load_default_ruleset())
+    engine = RuleEngine(load_legacy_default_ruleset())
 
     first = engine.check(vkr_document)
     second = engine.check(vkr_document)

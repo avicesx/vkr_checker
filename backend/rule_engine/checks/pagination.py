@@ -200,10 +200,16 @@ def _check_heading_page_break_rule(
     нарушением. В PDF границы страниц точные, в DOCX — оценка по разрывам.
     """
     roles = set(rule.params.roles)
+    forbidden_roles = set(rule.params.forbid_new_page_roles)
+    all_records = _heading_records(document, rule.target)
     records = [
+        record for record in all_records if record.node.semantic_role in roles
+    ]
+    forbidden_records = [
         record
-        for record in _heading_records(document, rule.target)
-        if record.node.semantic_role in roles
+        for record in all_records
+        if record.node.semantic_role in forbidden_roles
+        and record.node.semantic_role not in roles
     ]
     violations: List[Violation] = []
     confidence = "high" if _is_pdf_only(document) else "medium"
@@ -235,13 +241,47 @@ def _check_heading_page_break_rule(
             )
         )
 
+    # Разделы из forbid_new_page_roles, наоборот, обязаны продолжаться на
+    # той же странице: перенос такого заголовка на новую страницу — нарушение.
+    for record in forbidden_records:
+        paragraph = record.paragraph
+        previous_page = _previous_text_page(document, paragraph.block_id)
+        if previous_page is None:
+            continue
+        start_page = _heading_start_page(paragraph)
+        if start_page <= previous_page:
+            continue
+        violations.append(
+            _build_violation(
+                rule,
+                address=paragraph.block_id,
+                location=_paragraph_location(paragraph),
+                expected={"start": "same_page"},
+                found={
+                    "start_page": start_page,
+                    "previous_text_page": previous_page,
+                },
+                expected_text="раздел продолжается на текущей странице",
+                found_text=(
+                    f"раздел начинается на странице {start_page}, "
+                    f"предыдущий текст заканчивается на странице {previous_page}"
+                ),
+                confidence=confidence,
+            )
+        )
+
+    checked = len(records) + len(forbidden_records)
     assessment = _counted_assessment(
         rule,
         violations,
-        len(records),
+        checked,
         expected_text=rule.message,
         confidence=confidence,
         empty_observed="структурные заголовки не найдены",
-        details={"headings": len(records), "roles": sorted(roles)},
+        details={
+            "headings": checked,
+            "roles": sorted(roles),
+            "forbid_new_page_roles": sorted(forbidden_roles),
+        },
     )
-    return violations, len(records), assessment
+    return violations, checked, assessment

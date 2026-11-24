@@ -49,6 +49,7 @@ BIBLIOGRAPHY_FORMAT_LABELS: Dict[str, str] = {
     "isbn_or_issn": "ISBN или ISSN",
     "has_double_slash_source": "разделитель «//» перед источником",
     "has_text_type_designation": "обозначение вида издания",
+    "dot_dash_count": "тире между элементами описания",
 }
 
 CAPTION_ENTITY_LABELS: Dict[str, str] = {
@@ -62,6 +63,13 @@ CAPTION_NUMBERING_ISSUE_LABELS: Dict[str, str] = {
     "duplicate": "повтор номера",
     "gap": "пропуск номера",
     "out_of_order": "нарушение порядка номеров",
+}
+
+CAPTION_SCHEME_LABELS: Dict[str, str] = {
+    "continuous_arabic": "сквозная арабская нумерация",
+    "section_based": "нумерация по разделам",
+    "appendix_based": "нумерация буквами приложений",
+    "invalid": "номер не распознан",
 }
 
 CAPTION_SEPARATOR_LABELS: Dict[str, str] = {

@@ -142,14 +142,15 @@ def test_real_vkr_pdf_is_checked_with_profile_ruleset(
 
 
 def test_profile_rulesets_configure_different_new_checks() -> None:
-    """Профили различаются набором новых проверок: формат листа задан только у УрФУ."""
+    """Профили — надстройки над базовым набором и наследуют его проверки."""
     urfu_ids = _profiled_check_ids("urfu")
     mpgu_ids = _profiled_check_ids("mpgu")
     urgpu_ids = _profiled_check_ids("urgpu")
 
+    # Формат листа задан в базовом наборе 4.0.0 и наследуется всеми профилями.
     assert "page_format" in urfu_ids
-    assert "page_format" not in mpgu_ids
-    assert "page_format" not in urgpu_ids
+    assert "page_format" in mpgu_ids
+    assert "page_format" in urgpu_ids
     common = {"page_number_position", "line_spacing_body"}
     assert common <= urfu_ids
     assert common <= mpgu_ids

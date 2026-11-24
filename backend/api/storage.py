@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.migrations import apply_migrations
 from app.models import UploadedCheck
+from app.rule_types import seed_rule_types
 
 from .models import CheckResponse, CheckStatus
 
@@ -37,6 +38,7 @@ class CheckStore:
         os.chmod(self.storage_dir, 0o700)
         os.chmod(self.files_dir, 0o700)
         apply_migrations(self.engine)
+        seed_rule_types(self.engine)
 
     def check_database_connection(self) -> None:
         """Проверяет доступность базы данных коротким запросом."""

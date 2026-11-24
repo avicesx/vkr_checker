@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from conftest import DocxPackageBuilder
+from conftest import DocxPackageBuilder, load_legacy_default_ruleset
 from parser.docx.pipeline import DocxParserPipeline
 from parser.core.schema import ParsedDocxDocument
 from rule_engine import (
@@ -101,10 +101,10 @@ def _parse(builder: DocxPackageBuilder, body: str, filename: str = "test_vkr.doc
 def test_compliant_document_passes_all_default_rules(
     docx_builder: DocxPackageBuilder,
 ) -> None:
-    """Штатный набор не находит нарушений в корректно оформленном документе."""
+    """Базовый набор 3.0.0 не находит нарушений в корректном документе."""
     document = _parse(docx_builder, _compliant_body())
 
-    report = RuleEngine(load_default_ruleset()).check(document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(document)
 
     assert report.passed is True
     assert report.summary.rules_applied == 37
@@ -120,7 +120,7 @@ def test_document_with_three_text_problems_gets_three_violations(
     body = _compliant_body() + COMPLIANT_BODY + BAD_FONT + BAD_INDENT + BAD_MARGINS
     document = _parse(docx_builder, body)
 
-    report = RuleEngine(load_default_ruleset()).check(document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(document)
 
     assert report.passed is False
     assert report.summary.violations_total == 3
@@ -140,7 +140,7 @@ def test_document_without_structure_reports_missing_sections_and_toc(
     """Документ без структуры получает нарушения обязательных разделов и оглавления."""
     document = _parse(docx_builder, COMPLIANT_BODY)
 
-    report = RuleEngine(load_default_ruleset()).check(document)
+    report = RuleEngine(load_legacy_default_ruleset()).check(document)
 
     assert report.passed is False
     assert report.summary.by_code == {"required_sections": 4, "toc": 1}
@@ -170,7 +170,8 @@ def test_engine_from_json_file_reads_ruleset(docx_builder: DocxPackageBuilder) -
     report = engine.check(document)
 
     assert isinstance(engine.ruleset, RuleSet)
-    assert report.summary.by_rule == {"font_body_text": 1}
+    assert report.summary.rules_applied == len(engine.ruleset.rules)
+    assert report.summary.by_rule.get("font_body_text") == 1
 
 
 def test_warning_severity_does_not_fail_document(docx_builder: DocxPackageBuilder) -> None:

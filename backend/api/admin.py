@@ -16,6 +16,7 @@ from app.models import (
     UploadedCheck,
     Violation,
 )
+from app.rule_types import RULE_TYPE_CATALOGUE
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, ValidationError
@@ -27,33 +28,7 @@ from sqlalchemy.orm import Session
 ORG_KIND_LEVELS = {"university": 0, "institute": 1, "department": 2}
 MAX_PAGE_SIZE = 100
 DEFAULT_RULE_SCOPES = {
-    "font": "body_text",
-    "indent": "body_text",
-    "margin": "sections",
-    "heading_levels": "headings",
-    "heading_numbering": "headings",
-    "heading_format": "headings",
-    "required_sections": "document_structure",
-    "toc": "toc",
-    "page_number_position": "headers_footers",
-    "page_format": "sections",
-    "line_spacing": "body_text",
-    "bibliography_link": "bibliography",
-    "bibliography_cited": "bibliography",
-    "bibliography_format": "bibliography",
-    "caption_numbering": "captions",
-    "caption_format": "captions",
-    "caption_reference": "captions",
-    "alignment": "captions",
-    "widow_control": "body_text",
-    "keep_next": "headings",
-    "heading_page_break": "headings",
-    "document_volume": "document",
-    "microtypography": "body_paragraphs",
-    "equation_numbering": "document",
-    "bibliography_count": "bibliography",
-    "bibliography_order": "bibliography",
-    "bibliography_recency": "bibliography",
+    spec.code: spec.default_scope for spec in RULE_TYPE_CATALOGUE
 }
 
 

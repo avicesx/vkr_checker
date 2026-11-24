@@ -25,10 +25,12 @@ from .common import (
     _heading_section_number,
     _is_pdf_only,
     _normalize_heading_text,
+    _paragraph_index,
     _parse_section_number,
     _section_matches,
 )
 from .constants import (
+    ALIGNMENT_LABELS,
     APPENDIX_LETTERS,
     RE_APPENDIX_CAPTION,
     RE_APPENDIX_KIND_MARKER,
@@ -364,7 +366,9 @@ def _check_toc_rule(
             text_matched_entries.add(entry.block_id)
             matched_ids.add(heading_block_id)
 
+    paragraph_index = _paragraph_index(document)
     entries_checked = 0
+    alignment_not_set = 0
     for toc in tocs:
         checked += len(toc.entries)
         entries_checked += len(toc.entries)
@@ -445,6 +449,92 @@ def _check_toc_rule(
                 expected_parts.append("отточие до номера страницы")
                 found_parts.append("без отточия")
 
+            if expected.forbid_dot_leader and entry.has_dot_leader:
+                expected_values["dot_leader"] = False
+                found_values["dot_leader"] = True
+                expected_parts.append("без отточия")
+                found_parts.append("отточие в строке содержания")
+
+            entry_paragraph = paragraph_index.get(entry.block_id)
+            if expected.entry_alignment is not None:
+                actual_entry_alignment = (
+                    entry_paragraph.effective_props.alignment
+                    if entry_paragraph is not None
+                    else None
+                )
+                if actual_entry_alignment is None:
+                    # Выравнивание не задано явно: Word подставляет стиль, и
+                    # находка была бы догадкой, поэтому строку не оцениваем.
+                    alignment_not_set += 1
+                elif actual_entry_alignment != expected.entry_alignment:
+                    expected_values["entry_alignment"] = expected.entry_alignment
+                    found_values["entry_alignment"] = actual_entry_alignment
+                    expected_parts.append(
+                        ALIGNMENT_LABELS[expected.entry_alignment]
+                    )
+                    found_parts.append(
+                        ALIGNMENT_LABELS.get(actual_entry_alignment, "не задано")
+                    )
+
+            if expected.entry_bold is not None:
+                entry_runs = (
+                    [
+                        run
+                        for run in entry_paragraph.runs
+                        if run.visible_text.strip() and not run.in_field
+                    ]
+                    if entry_paragraph is not None
+                    else []
+                )
+                if entry_runs:
+                    entry_is_bold = all(
+                        run.effective_props.bold for run in entry_runs
+                    )
+                    if entry_is_bold != expected.entry_bold:
+                        expected_values["entry_bold"] = expected.entry_bold
+                        found_values["entry_bold"] = entry_is_bold
+                        expected_parts.append(
+                            "полужирное начертание"
+                            if expected.entry_bold
+                            else "обычное начертание"
+                        )
+                        found_parts.append(
+                            "полужирное начертание"
+                            if entry_is_bold
+                            else "обычное начертание"
+                        )
+
+            if expected.capitalize_entry:
+                title_letters = [
+                    char for char in (entry.extracted_title or "") if char.isalpha()
+                ]
+                if title_letters and not title_letters[0].isupper():
+                    expected_values["entry_case"] = "capitalized"
+                    found_values["entry_case"] = "lowercase_start"
+                    expected_parts.append("название с заглавной буквы")
+                    found_parts.append("название со строчной буквы")
+
+            entry_record = headings_by_block.get(entry.matched_heading_block_id)
+            if entry_record is not None:
+                for spec in expected.required_entries:
+                    if spec.require_number is None:
+                        continue
+                    if not _section_matches(spec, entry_record):
+                        continue
+                    has_entry_number = bool(entry.extracted_number)
+                    if spec.require_number and not has_entry_number:
+                        expected_values["entry_number"] = True
+                        found_values["entry_number"] = False
+                        expected_parts.append(f"номер раздела у «{spec.label}»")
+                        found_parts.append(f"без номера у «{spec.label}»")
+                    elif spec.require_number is False and has_entry_number:
+                        expected_values["entry_number"] = False
+                        found_values["entry_number"] = entry.extracted_number
+                        expected_parts.append(f"без номера у «{spec.label}»")
+                        found_parts.append(
+                            f"номер «{entry.extracted_number}» у «{spec.label}»"
+                        )
+
             if not expected_values:
                 continue
             violations.append(
@@ -506,6 +596,7 @@ def _check_toc_rule(
         details={
             "toc_blocks": len(tocs),
             "entries_checked": entries_checked,
+            "alignment_not_set": alignment_not_set,
             "headings_compared": len(headings) if expected.check_completeness else 0,
         },
     )

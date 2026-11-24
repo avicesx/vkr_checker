@@ -380,6 +380,32 @@ def _check_bibliography_cited_rule(
     )
 
 
+RE_NORMATIVE_ACT = re.compile(
+    r"^\s*(?:"
+    r"закон|постановлени|распоряжени|письмо|приказ|указ|решение|"
+    r"инструкци|типов\w*\s+инструкци|форма\s|санпин|"
+    r"гост|ост\b|снип|правила|конвенци"
+    r")",
+    re.IGNORECASE,
+)
+"""Начало описания нормативного акта или стандарта.
+
+Парсер не всегда узнает такие записи: «Закон РФ», «Письмо комитета»,
+«Типовая инструкция» попадают в категорию ``unknown``. Страниц у них не
+бывает, поэтому для требований страниц и года они приравниваются к
+нормативным актам.
+"""
+
+
+def _is_normative_entry(entry: BibliographyEntry) -> bool:
+    """True, если запись описывает нормативный акт или стандарт.
+
+    Категория парсера остается основным признаком; текстовый признак нужен
+    для актов, которые разбор не распознал и пометил как ``unknown``.
+    """
+    return bool(RE_NORMATIVE_ACT.match(entry.raw_text or ""))
+
+
 def _check_bibliography_format_rule(
     rule: BibliographyFormatRule,
     document: ParsedDocxDocument,
@@ -391,7 +417,8 @@ def _check_bibliography_format_rule(
     года дает два нарушения, чтобы нормоконтролер видел оба пропуска.
     Фильтр ``categories`` ограничивает выборку категориями источников:
     URL и дата обращения обычно обязательны для электронного ресурса, но
-    не для книги.
+    не для книги. Категории из ``exempt_categories`` не проверяются на год
+    и страницы: у сайта страниц не бывает, у нормативного акта тоже.
 
     Два поля восстанавливаются из того, что парсер уже сохранил, если
     обогащение их не увидело: URL гиперссылки (``TextRun.hyperlink_target``)
@@ -437,20 +464,31 @@ def _check_bibliography_format_rule(
 
     violations: List[Violation] = []
     blocks = _paragraph_index(document)
+    exempt_entries = 0
     for entry in entries:
         block = blocks.get(entry.block_id)
         urls_value = entry.urls or _hyperlink_urls(block)
         access_value = entry.access_date_raw or _access_date_from_raw_text(
             entry.raw_text
         )
+        # У электронных ресурсов и нормативных актов нет страниц, а год
+        # выпуска сайта часто не указан: эти категории исключены из
+        # требований страниц и года, как и из запрета точки-тире.
+        category_exempt = entry.detected_category in expected.exempt_categories or (
+            entry.detected_category == "unknown"
+            and "normative_act_law" in expected.exempt_categories
+            and _is_normative_entry(entry)
+        )
+        if category_exempt:
+            exempt_entries += 1
         checks: List[Tuple[str, Any]] = []
         if expected.require_url:
             checks.append(("urls", urls_value))
         if expected.require_access_date:
             checks.append(("access_date_raw", access_value))
-        if expected.require_year:
+        if expected.require_year and not category_exempt:
             checks.append(("year_extracted", entry.year_extracted))
-        if expected.require_pages:
+        if expected.require_pages and not category_exempt:
             checks.append(("pages_extracted", entry.pages_extracted))
         if expected.require_isbn_or_issn:
             checks.append(("isbn_or_issn", entry.isbn_or_issn))
@@ -459,6 +497,28 @@ def _check_bibliography_format_rule(
         if expected.require_text_type_designation:
             checks.append(
                 ("has_text_type_designation", entry.has_text_type_designation)
+            )
+
+        if (
+            expected.forbid_dot_dash
+            and entry.dot_dash_count
+            and entry.detected_category not in expected.exempt_categories
+        ):
+            label = BIBLIOGRAPHY_FORMAT_LABELS["dot_dash_count"]
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:dot_dash_count",
+                    location=_bibliography_location(entry, blocks),
+                    expected={"dot_dash_count": 0},
+                    found={
+                        "dot_dash_count": entry.dot_dash_count,
+                        "bib_id": entry.bib_id,
+                        "category": entry.detected_category,
+                    },
+                    expected_text=f"{label}: не допускается",
+                    found_text=f"{label}: {entry.dot_dash_count}",
+                )
             )
 
         for field, actual in checks:
@@ -499,6 +559,7 @@ def _check_bibliography_format_rule(
             details={
                 "entries_considered": len(entries),
                 "mismatches_total": len(violations),
+                "exempt_entries": exempt_entries,
                 "categories": (
                     list(expected.categories)
                     if expected.categories is not None
@@ -509,11 +570,26 @@ def _check_bibliography_format_rule(
     )
 
 
-def _bibliography_summary_location(entries: List[BibliographyEntry]) -> ViolationLocation:
-    """Строит локацию нарушения, относящегося ко всему списку литературы."""
+def _bibliography_summary_location(
+    entries: List[BibliographyEntry],
+    blocks: Dict[str, ParagraphBlock],
+) -> ViolationLocation:
+    """Строит локацию нарушения, относящегося ко всему списку литературы.
+
+    Кроме первой записи заполняется диапазон страниц: без него замечание о
+    количестве или свежести источников нельзя найти в документе.
+    """
     first = entries[0] if entries else None
+    pages = [
+        block.page_start_est
+        for entry in entries
+        if (block := blocks.get(entry.block_id)) is not None
+        and block.page_start_est is not None
+    ]
     return ViolationLocation(
         block_id=first.block_id if first is not None else None,
+        page_start_est=min(pages) if pages else None,
+        page_end_est=max(pages) if pages else None,
         snippet=f"список литературы: {len(entries)} записей",
     )
 
@@ -549,13 +625,14 @@ def _check_bibliography_count_rule(
         ))
 
     count = len(entries)
+    blocks = _paragraph_index(document)
     violations: List[Violation] = []
     if expected.min_sources is not None and count < expected.min_sources:
         violations.append(
             _build_violation(
                 rule,
                 address="bibliography",
-                location=_bibliography_summary_location(entries),
+                location=_bibliography_summary_location(entries, blocks),
                 expected={"min_sources": expected.min_sources},
                 found={"sources": count},
                 expected_text=expected_text,
@@ -569,7 +646,7 @@ def _check_bibliography_count_rule(
             _build_violation(
                 rule,
                 address="bibliography",
-                location=_bibliography_summary_location(entries),
+                location=_bibliography_summary_location(entries, blocks),
                 expected={"max_sources": expected.max_sources},
                 found={"sources": count},
                 expected_text=expected_text,
@@ -593,6 +670,52 @@ def _check_bibliography_count_rule(
         },
     )
     return violations, count, assessment
+
+
+#: Заголовок группы внутри списка литературы: «Нормативные акты:».
+RE_GROUP_HEADER = re.compile(r"^\s*[А-ЯЁ][А-ЯЁа-яё\s,\-]{2,60}:\s*$")
+
+#: Слова-маркеры, по которым распознаётся тема группы.
+GROUP_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "normative_act_law": ("норматив", "закон", "кодекс"),
+    "book_monograph": ("книг", "монограф", "учебник", "пособ"),
+    "journal_article": ("стать", "журнал"),
+    "conference_paper": ("конференц", "сборник"),
+    "electronic_resource": ("электрон", "интернет", "ресурс"),
+    "dissertation_autoref": ("диссертац", "автореф"),
+    "standard_gost": ("гост", "стандарт"),
+    "patent": ("патент",),
+}
+
+
+def _is_group_header(entry: BibliographyEntry) -> bool:
+    """Определяет запись-заголовок группы, а не источник.
+
+    Заголовок группы не имеет номера и библиографических признаков (год,
+    URL, ISBN), а его текст заканчивается двоеточием.
+    """
+    if entry.raw_number_prefix:
+        return False
+    if entry.urls or entry.isbn_or_issn or entry.year_extracted is not None:
+        return False
+    return bool(RE_GROUP_HEADER.match(entry.raw_text.strip()))
+
+
+def _group_category(entry: BibliographyEntry) -> str:
+    """Определяет тему группы по словам в заголовке."""
+    text = entry.raw_text.casefold()
+    for category, words in GROUP_KEYWORDS.items():
+        if any(word in text for word in words):
+            return category
+    return "unknown"
+
+
+def _first_letter(text: str) -> str:
+    """Возвращает первую букву текста в нижнем регистре."""
+    for char in text:
+        if char.isalpha():
+            return char.casefold()
+    return ""
 
 
 def _check_bibliography_order_rule(
@@ -651,6 +774,104 @@ def _check_bibliography_order_rule(
         seen.add(actual)
         expected_number += 1
 
+    # Деление списка на группы: запись-заголовок группы («Нормативные акты:»).
+    group_headers = [entry for entry in entries if _is_group_header(entry)]
+    if not expected.allow_groups:
+        for entry in group_headers:
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:group",
+                    location=_bibliography_location(entry, blocks),
+                    expected={"group": False},
+                    found={"group": True},
+                    expected_text="список без деления на группы",
+                    found_text=f"запись-заголовок группы: «{entry.raw_text.strip()}»",
+                    confidence="high",
+                )
+            )
+
+    if expected.group_order is not None and group_headers:
+        allowed_groups = [
+            frozenset(part.strip() for part in group.split("|"))
+            for group in expected.group_order
+        ]
+        for position, entry in enumerate(group_headers):
+            actual_category = _group_category(entry)
+            if position < len(allowed_groups) and actual_category in allowed_groups[position]:
+                continue
+            if position < len(allowed_groups):
+                expected_label = " или ".join(sorted(allowed_groups[position]))
+            else:
+                expected_label = f"групп не больше {len(allowed_groups)}"
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:group_order",
+                    location=_bibliography_location(entry, blocks),
+                    expected={"group": expected_label},
+                    found={"group": actual_category},
+                    expected_text=f"группа: {expected_label}",
+                    found_text=f"группа: {actual_category}",
+                    confidence="high",
+                )
+            )
+        if len(group_headers) < len(allowed_groups):
+            missing = [
+                " или ".join(sorted(group))
+                for group in allowed_groups[len(group_headers):]
+            ]
+            violations.append(
+                _build_violation(
+                    rule,
+                    address="bibliography:group_order",
+                    location=_bibliography_summary_location(entries, blocks),
+                    expected={"groups": missing},
+                    found={"groups": len(group_headers)},
+                    expected_text="группы: " + ", ".join(missing),
+                    found_text=f"групп в списке: {len(group_headers)}",
+                    confidence="high",
+                )
+            )
+
+    if expected.sort == "alphabetical":
+        previous_letter = ""
+        previous_entry: Optional[BibliographyEntry] = None
+        for entry in entries:
+            if _is_group_header(entry):
+                previous_letter = ""
+                previous_entry = None
+                continue
+            letter = _first_letter(entry.raw_text)
+            if not letter:
+                continue
+            if previous_letter and letter < previous_letter:
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{entry.bib_id}:sort",
+                        location=_bibliography_location(entry, blocks),
+                        expected={"sort": "alphabetical"},
+                        found={
+                            "previous": previous_letter,
+                            "current": letter,
+                            "previous_bib_id": (
+                                previous_entry.bib_id
+                                if previous_entry is not None
+                                else None
+                            ),
+                        },
+                        expected_text="записи упорядочены по алфавиту",
+                        found_text=(
+                            f"порядок нарушен: «{previous_letter}», затем «{letter}»"
+                        ),
+                        confidence="high",
+                    )
+                )
+                continue
+            previous_letter = letter
+            previous_entry = entry
+
     assessment = _counted_assessment(
         rule,
         violations,
@@ -658,7 +879,16 @@ def _check_bibliography_order_rule(
         expected_text=expected_text,
         confidence="high",
         empty_observed="список литературы не найден",
-        details={"sources": len(entries), "start_at": expected.start_at},
+        details={
+            "sources": len(entries),
+            "start_at": expected.start_at,
+            "groups": (
+                len(group_headers)
+                if not expected.allow_groups or expected.group_order is not None
+                else None
+            ),
+            "sorted": expected.sort,
+        },
     )
     return violations, len(entries), assessment
 
@@ -718,13 +948,14 @@ def _check_bibliography_recency_rule(
 
     recent = [year for year in years if year >= threshold_year]
     share = len(recent) / len(years)
+    blocks = _paragraph_index(document)
     violations: List[Violation] = []
     if share < expected.min_recent_share:
         violations.append(
             _build_violation(
                 rule,
                 address="bibliography",
-                location=_bibliography_summary_location(entries),
+                location=_bibliography_summary_location(entries, blocks),
                 expected={
                     "min_recent_share": expected.min_recent_share,
                     "recent_years": expected.recent_years,

@@ -401,6 +401,16 @@ def _compare_font(
             expected_parts.append(_format_measure(expected.size_pt, "pt"))
             found_parts.append(_format_measure(props.size_pt, "pt"))
 
+    if expected.min_size_pt is not None:
+        # Нижняя граница кегля: мелкий шрифт ловится, крупный допустим.
+        if props.size_pt < expected.min_size_pt - expected.size_tolerance_pt - EPSILON:
+            expected_values["min_size_pt"] = float(expected.min_size_pt)
+            found_values["size_pt"] = props.size_pt
+            expected_parts.append(
+                f"кегль не меньше {_format_measure(expected.min_size_pt, 'pt')}"
+            )
+            found_parts.append(_format_measure(props.size_pt, "pt"))
+
     if expected.bold is not None and props.bold != expected.bold:
         expected_values["bold"] = expected.bold
         found_values["bold"] = props.bold
@@ -582,12 +592,18 @@ def _document_violation(
     expected_text: str,
     found_text: str,
     confidence: Optional[str] = None,
+    location: Optional[ViolationLocation] = None,
 ) -> Violation:
-    """Формирует нарушение уровня документа без привязки к абзацу."""
+    """Формирует нарушение уровня документа без привязки к абзацу.
+
+    ``location`` позволяет правилу объёма и другим проверкам документа задать
+    страницы и сниппет: адрес «структура документа» без страницы не даёт
+    перейти к месту нарушения.
+    """
     return _build_violation(
         rule,
         address=address,
-        location=ViolationLocation(snippet="структура документа"),
+        location=location or ViolationLocation(snippet="структура документа"),
         expected=expected_values,
         found=found_values,
         expected_text=expected_text,

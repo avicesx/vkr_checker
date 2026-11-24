@@ -113,6 +113,45 @@ def test_numbering_cascade_style_based_shared_abstract_and_numid_zero_cancel(
     assert third.list_info is None
 
 
+def test_symbol_bullet_marker_is_normalised_to_printed_hyphen(
+    docx_builder: DocxPackageBuilder,
+) -> None:
+    """Символ частной области (Wingdings 0xF02D) — шрифтовой дефис, а не текст.
+
+    Word рисует такой маркер символом U+F02D; если оставить его в
+    ``rendered_marker``, правило перечисления видит «другой маркер», а проверка
+    шрифта сравнивает символ маркера со шрифтом абзаца.
+    """
+    docx_builder.set_xml(
+        "word/numbering.xml",
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+        <w:numbering {COMMON_XMLNS}>
+          <w:abstractNum w:abstractNumId="1">
+            <w:lvl w:ilvl="0">
+              <w:start w:val="1"/>
+              <w:numFmt w:val="bullet"/>
+              <w:lvlText w:val="\uF02D"/>
+              <w:rPr><w:rFonts w:ascii="Wingdings" w:hAnsi="Wingdings"/></w:rPr>
+              <w:suff w:val="space"/>
+            </w:lvl>
+          </w:abstractNum>
+          <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+        </w:numbering>""",
+    )
+    body_xml = """
+    <w:p>
+      <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>
+      <w:r><w:t>Пункт списка со шрифтовым маркером.</w:t></w:r>
+    </w:p>
+    """
+    docx_path = docx_builder.set_body(body_xml).build("symbol_bullet.docx")
+    doc = DocxParserPipeline(docx_path).parse()
+
+    paragraph = next(b for b in doc.blocks if isinstance(b, ParagraphBlock))
+    assert paragraph.list_info is not None
+    assert paragraph.list_info.rendered_marker == "-"
+
+
 
 def test_inline_omml_formula_does_not_produce_false_double_space(
     docx_builder: DocxPackageBuilder,

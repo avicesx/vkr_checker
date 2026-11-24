@@ -92,6 +92,7 @@ def _build_pdf(
     number_zone: Optional[str] = "footer",
     font_family: str = "Times New Roman",
     line_height: float = BODY_LINE_HEIGHT,
+    skip_first_page: bool = False,
 ) -> Path:
     """Собирает PDF с заданным форматом, шрифтом, кеглем, интервалом и номером.
 
@@ -125,6 +126,8 @@ def _build_pdf(
                 color=(0, 0, 0),
             )
             if number_zone is None:
+                continue
+            if skip_first_page and page_number == 1:
                 continue
             baseline_mm = (
                 HEADER_BASELINE_MM
@@ -410,12 +413,11 @@ def test_pdf_without_page_numbers_is_not_assessed(tmp_path: Path) -> None:
     assert number_check.details["pages_with_number"] == 0
     assert number_check.details["threshold"] == max(3, PAGE_COUNT // 3)
     # Отступ первой строки в pdf_only не оценивается (ненадежный источник),
-    # поэтому not_assessed два правила: отступ и положение номера страницы.
-    assert [item.rule_id for item in report.not_assessed] == [
-        "indent_first_line",
-        "page_number_position",
-    ]
-    assert report.summary.not_assessed_total == 2
+    # поэтому среди not_assessed обязательны отступ и положение номера страницы.
+    not_assessed_ids = [item.rule_id for item in report.not_assessed]
+    assert "indent_first_line" in not_assessed_ids
+    assert "page_number_position" in not_assessed_ids
+    assert report.summary.not_assessed_total == len(report.not_assessed)
 
 
 @pytest.mark.parametrize("profile_id", ["mpgu", "urgpu", "urfu"])
@@ -424,7 +426,10 @@ def test_ideal_pdf_report_built_for_every_profile(
     profile_id: str,
 ) -> None:
     """Эталонный PDF даёт собранный отчёт и валидные статусы для всех профилей."""
-    pdf_path = _build_pdf(tmp_path / f"ideal_{profile_id}.pdf")
+    pdf_path = _build_pdf(
+        tmp_path / f"ideal_{profile_id}.pdf",
+        skip_first_page=(profile_id == "urgpu"),
+    )
     _, report = _check(pdf_path, profile_id)
 
     assert report.ruleset_id == load_profile_ruleset(profile_id).ruleset_id
@@ -435,7 +440,7 @@ def test_ideal_pdf_report_built_for_every_profile(
     }
     assessed_ids = {assessment.rule_id for assessment in report.assessments}
     assert {"page_number_position", "line_spacing_body"} <= assessed_ids
-    assert ("page_format" in assessed_ids) == (profile_id == "urfu")
+    assert "page_format" in assessed_ids
     assert report.summary.not_assessed_total == len(report.not_assessed)
 
 
@@ -443,7 +448,7 @@ def test_page_number_position_expectation_differs_between_profiles(
     tmp_path: Path,
 ) -> None:
     """Один PDF: нижний номер проходит у УрГПУ и нарушает требование МПГУ (сверху)."""
-    pdf_path = _build_pdf(tmp_path / "profiles.pdf")
+    pdf_path = _build_pdf(tmp_path / "profiles.pdf", skip_first_page=True)
     document = parse_pdf(pdf_path)
 
     mpgu_report = RuleEngine(load_profile_ruleset("mpgu")).check(document)

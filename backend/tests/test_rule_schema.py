@@ -42,9 +42,18 @@ from rule_engine import (
 )
 from rule_engine.rules import (
     PROFILE_RULESET_PATHS,
+    AppendixOrderRule,
+    CaptionPlacementRule,
+    HeadingHyphenationRule,
+    InlineReferenceFormatRule,
     LineSpacingRule,
+    ListFormatRule,
     PageFormatRule,
     PageNumberPositionRule,
+    TableContinuationRule,
+    TableHeaderFormatRule,
+    TableLayoutRule,
+    TitlePageContentRule,
     available_profiles,
     load_profile_ruleset,
 )
@@ -153,8 +162,8 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "3.0.0"
-    assert [rule.rule_id for rule in ruleset.rules] == [
+    assert ruleset.ruleset_version == "4.3.0"
+    expected_rule_ids = [
         "font_body_text",
         "indent_first_line",
         "alignment_body_text",
@@ -172,8 +181,11 @@ def test_default_ruleset_describes_all_checks() -> None:
         "heading_alignment",
         "heading_page_break",
         "heading_keep_next",
+        "heading_hyphenation_default",
         "required_sections",
+        "required_sections_chapters",
         "toc",
+        "toc_format_default",
         "document_volume",
         "equation_numbering",
         "bibliography_links_resolved",
@@ -183,16 +195,29 @@ def test_default_ruleset_describes_all_checks() -> None:
         "bibliography_recency",
         "bibliography_format_electronic",
         "bibliography_format_article",
+        "bibliography_format_dot_dash",
         "caption_numbering_figures",
         "caption_numbering_tables",
         "caption_format_figures",
         "caption_format_tables",
         "caption_reference_figures",
         "caption_reference_tables",
+        "caption_reference_appendix",
+        "caption_placement_table",
+        "caption_placement_figure",
+        "caption_placement_appendix",
         "alignment_captions",
         "alignment_table_cells",
         "font_table_cells",
+        "inline_reference_format_body",
+        "table_layout_borders",
+        "table_continuation_default",
+        "table_header_format_default",
+        "list_format_default",
+        "appendix_order_default",
+        "title_page_content_default",
     ]
+    assert [rule.rule_id for rule in ruleset.rules] == expected_rule_ids
     expected_types = [
         FontRule,
         IndentRule,
@@ -211,7 +236,10 @@ def test_default_ruleset_describes_all_checks() -> None:
         HeadingFormatRule,
         HeadingPageBreakRule,
         KeepNextRule,
+        HeadingHyphenationRule,
         RequiredSectionsRule,
+        RequiredSectionsRule,
+        TocRule,
         TocRule,
         DocumentVolumeRule,
         EquationNumberingRule,
@@ -222,17 +250,29 @@ def test_default_ruleset_describes_all_checks() -> None:
         BibliographyRecencyRule,
         BibliographyFormatRule,
         BibliographyFormatRule,
+        BibliographyFormatRule,
         CaptionNumberingRule,
         CaptionNumberingRule,
         CaptionFormatRule,
         CaptionFormatRule,
         CaptionReferenceRule,
         CaptionReferenceRule,
+        CaptionReferenceRule,
+        CaptionPlacementRule,
+        CaptionPlacementRule,
+        CaptionPlacementRule,
         AlignmentRule,
         AlignmentRule,
         FontRule,
+        InlineReferenceFormatRule,
+        TableLayoutRule,
+        TableContinuationRule,
+        TableHeaderFormatRule,
+        ListFormatRule,
+        AppendixOrderRule,
+        TitlePageContentRule,
     ]
-    assert len(expected_types) == len(ruleset.rules)
+    assert len(expected_types) == len(expected_rule_ids)
     for rule, expected_type in zip(ruleset.rules, expected_types):
         assert isinstance(rule, expected_type), rule.rule_id
     assert ruleset.get_rule("alignment_body_text").params.alignment == "justify"
@@ -749,15 +789,16 @@ def test_profile_common_thresholds_match_methodical_guides() -> None:
         assert spacing_expectation.tolerance == 0.25
 
 
-def test_only_urfu_profile_requires_a4() -> None:
-    """Формат листа обязателен только в профиле УрФУ."""
+def test_a4_requirement_comes_from_base_or_profile() -> None:
+    """Формат A4 задаёт либо сам профиль, либо унаследованный базовый набор."""
     format_rule = load_profile_ruleset("urfu").get_rule("page_format")
     assert isinstance(format_rule, PageFormatRule)
     assert format_rule.params.height_mm == 297.0
 
+    # Все профили наследуют page_format из базового набора.
     for profile_id in ("mpgu", "urgpu"):
-        with pytest.raises(KeyError):
-            load_profile_ruleset(profile_id).get_rule("page_format")
+        inherited = load_profile_ruleset(profile_id).get_rule("page_format")
+        assert inherited.params.width_mm == 210.0
 
 
 def test_available_profiles_point_to_existing_files() -> None:
@@ -767,7 +808,7 @@ def test_available_profiles_point_to_existing_files() -> None:
         path = PROFILE_RULESET_PATHS[profile_id]
         assert path.is_file()
         assert path.name == f"{profile_id}.json"
-        assert path.parent.name == "rules"
+        assert path.parent.name in {"rules", "profiles"}
 
 
 def test_profile_id_is_normalized() -> None:
@@ -802,5 +843,5 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "bibliography_recency",
     } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "3.0.0"
+    assert default_ruleset.ruleset_version == "4.3.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id
