@@ -1,6 +1,6 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "5.0.0",
+  "ruleset_version": "5.1.0",
   "description": "Штатный набор нормоконтроля ВКР: общие требования к тексту, структуре, таблицам, подписям и списку литературы",
   "rules": [
     {
@@ -489,19 +489,6 @@
       },
       "params": {
         "require_all_cited": true
-      }
-    },
-    {
-      "rule_id": "bibliography_count",
-      "code": "bibliography_count",
-      "strictness": "warning",
-      "message": "Список литературы содержит не менее 20 источников",
-      "quote": "Список литературы должен включать не менее 15-17 источников в полном библиографическом описании.",
-      "target": {
-        "scope": "bibliography"
-      },
-      "params": {
-        "min_sources": 20
       }
     },
     {

@@ -14,7 +14,6 @@ from rule_engine import (
     DEFAULT_RULESET_PATH,
     AlignmentRule,
     BibliographyCitedRule,
-    BibliographyCountRule,
     BibliographyFormatRule,
     BibliographyLinkRule,
     BibliographyOrderRule,
@@ -168,7 +167,7 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "5.0.0"
+    assert ruleset.ruleset_version == "5.1.0"
     expected_rule_ids = [
         "font_body_text",
         "indent_first_line",
@@ -196,7 +195,6 @@ def test_default_ruleset_describes_all_checks() -> None:
         "equation_numbering",
         "bibliography_links_resolved",
         "bibliography_all_cited",
-        "bibliography_count",
         "bibliography_order",
         "bibliography_recency",
         "bibliography_format_electronic",
@@ -258,7 +256,6 @@ def test_default_ruleset_describes_all_checks() -> None:
         EquationNumberingRule,
         BibliographyLinkRule,
         BibliographyCitedRule,
-        BibliographyCountRule,
         BibliographyOrderRule,
         BibliographyRecencyRule,
         BibliographyFormatRule,
@@ -325,7 +322,6 @@ def test_default_ruleset_describes_all_checks() -> None:
     ]
     assert ruleset.get_rule("microtypography_nbsp").params.checks == ["missing_nbsp"]
     assert ruleset.get_rule("equation_numbering").params.require_numbering is True
-    assert ruleset.get_rule("bibliography_count").params.min_sources == 20
     order = ruleset.get_rule("bibliography_order").params
     assert (order.start_at, order.allow_gaps, order.allow_duplicates) == (1, False, False)
     recency = ruleset.get_rule("bibliography_recency").params
@@ -858,10 +854,9 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "document_volume",
         "microtypography",
         "equation_numbering",
-        "bibliography_count",
         "bibliography_order",
         "bibliography_recency",
     } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "5.0.0"
+    assert default_ruleset.ruleset_version == "5.1.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

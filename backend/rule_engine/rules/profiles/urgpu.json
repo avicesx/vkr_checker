@@ -1,6 +1,6 @@
 {
   "ruleset_id": "urgpu-vkr-profile",
-  "ruleset_version": "2.3.0",
+  "ruleset_version": "2.4.0",
   "extends": "vkr-rule-engine-test",
   "description": "Профиль УрГПУ: переопределения требований к оформлению ВКР поверх штатного набора",
   "rules": [

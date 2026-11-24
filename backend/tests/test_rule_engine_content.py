@@ -25,7 +25,12 @@ from parser.core.schema import (
     TextRun,
     ThemeData,
 )
-from rule_engine import RuleEngine, RuleSet, load_default_ruleset
+from rule_engine import (
+    RuleEngine,
+    RuleSet,
+    load_default_ruleset,
+    load_profile_ruleset,
+)
 from rule_engine.findings import RuleAssessment, RuleCheckReport
 from rule_engine.rules import Rule
 
@@ -153,7 +158,12 @@ def _make_document(
 
 def _engine(rule_id: str, params: Optional[Dict[str, object]] = None) -> tuple[RuleEngine, Rule]:
     """Создает движок с одним правилом набора, при необходимости с новыми ожиданиями."""
-    rule = load_default_ruleset().get_rule(rule_id)
+    try:
+        rule = load_default_ruleset().get_rule(rule_id)
+    except KeyError:
+        # Число источников задаёт только методичка УрГПУ, правило живёт
+        # в профиле вуза, а не в базовом наборе.
+        rule = load_profile_ruleset("urgpu").get_rule(rule_id)
     payload = rule.model_dump(mode="json")
     if params is not None:
         payload["params"] = params
