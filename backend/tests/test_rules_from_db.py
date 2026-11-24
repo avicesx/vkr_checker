@@ -148,7 +148,7 @@ def test_catalogue_matches_engine_codes() -> None:
     """Каталог справочника совпадает с кодами движка один в один."""
     catalogue_codes = {spec.code for spec in RULE_TYPE_CATALOGUE}
     assert catalogue_codes == set(CODE_ALLOWED_SCOPES)
-    assert len(RULE_TYPE_CATALOGUE) == len(catalogue_codes) == 36
+    assert len(RULE_TYPE_CATALOGUE) == len(catalogue_codes) == 49
     for spec in RULE_TYPE_CATALOGUE:
         assert spec.name.strip(), f"у кода {spec.code} нет названия"
         assert spec.description.strip(), f"у кода {spec.code} нет описания"

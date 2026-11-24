@@ -45,6 +45,10 @@ from rule_engine.rules import (
     AppendixOrderRule,
     CaptionPlacementRule,
     HeadingHyphenationRule,
+    FormulaLineBreakRule,
+    FormulaPlacementRule,
+    FootnoteNumberingRule,
+    FigureAfterReferenceRule,
     InlineReferenceFormatRule,
     LineSpacingRule,
     ListFormatRule,
@@ -53,6 +57,8 @@ from rule_engine.rules import (
     TableContinuationRule,
     TableHeaderFormatRule,
     TableLayoutRule,
+    SourceLabelRule,
+    TableAfterReferenceRule,
     TitlePageContentRule,
     available_profiles,
     load_profile_ruleset,
@@ -162,7 +168,7 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "4.3.0"
+    assert ruleset.ruleset_version == "5.0.0"
     expected_rule_ids = [
         "font_body_text",
         "indent_first_line",
@@ -216,6 +222,13 @@ def test_default_ruleset_describes_all_checks() -> None:
         "list_format_default",
         "appendix_order_default",
         "title_page_content_default",
+        "figure_after_reference",
+        "table_after_reference",
+        "formula_placement",
+        "footnote_numbering",
+        "formula_line_break",
+        "source_label",
+        "microtypography_footnotes",
     ]
     assert [rule.rule_id for rule in ruleset.rules] == expected_rule_ids
     expected_types = [
@@ -271,6 +284,13 @@ def test_default_ruleset_describes_all_checks() -> None:
         ListFormatRule,
         AppendixOrderRule,
         TitlePageContentRule,
+        FigureAfterReferenceRule,
+        TableAfterReferenceRule,
+        FormulaPlacementRule,
+        FootnoteNumberingRule,
+        FormulaLineBreakRule,
+        SourceLabelRule,
+        MicroTypographyRule,
     ]
     assert len(expected_types) == len(expected_rule_ids)
     for rule, expected_type in zip(ruleset.rules, expected_types):
@@ -843,5 +863,5 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "bibliography_recency",
     } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "4.3.0"
+    assert default_ruleset.ruleset_version == "5.0.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

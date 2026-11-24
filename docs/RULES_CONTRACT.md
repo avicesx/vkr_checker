@@ -1,6 +1,6 @@
 # Контракт формата правил нормоконтроля
 
-Версия формата: **1.0.0**. Наборы правил по умолчанию: `vkr-rule-engine-test` 4.3.0, профиль УрГПУ 2.2.0.
+Версия формата: **1.0.0**. Наборы правил по умолчанию: `vkr-rule-engine-test` 5.0.0, профиль УрГПУ 2.2.0.
 
 Документ адресован двум сторонам: ИИ-команде, которая извлекает требования из методических указаний и отдаёт JSON, и разработчикам движка, которые этот JSON исполняют. Всё, что описано ниже, проверяется машинно: `backend/tests/test_contract_doc.py` сверяет таблицы этого файла с реестром кодов, моделями pydantic и схемой БД.
 
@@ -59,7 +59,7 @@
 
 Таблица 2.2 — реестр кодов: по одной строке на код, с русским названием, областью по умолчанию, полным списком допустимых областей и `strictness` по умолчанию. Таблицы 2.3 — параметры каждого кода: по одной строке на ключ `params`, с типом, обязательностью, значением по умолчанию, допустимыми значениями и единицами измерения, назначением и примером. Тип `number` — число с плавающей точкой, `integer` — целое, `boolean` — `true`/`false`, `string` — строка, `X[]` — массив элементов `X`, «или `null`» — значение можно не передавать или передать `null`. Вложенные объекты описаны в §2.4.
 
-Реестр закрытый: код вне таблицы 2.2 не существует, даже если требование методички кажется очевидным. Всего в реестре 36 кодов.
+Реестр закрытый: код вне таблицы 2.2 не существует, даже если требование методички кажется очевидным. Всего в реестре 49 кодов.
 
 ### 2.2. Реестр кодов
 
@@ -77,9 +77,15 @@
 | `caption_numbering` | Нумерация подписей | `captions` | `captions` | `error` |
 | `caption_placement` | Положение подписи объекта | `captions` | `captions` | `error` |
 | `caption_reference` | Ссылка на объект в тексте | `captions` | `captions` | `error` |
+| `citation_required` | Ссылка при цитировании | `body_paragraphs` | `all_paragraphs`, `body_paragraphs`, `body_text` | `error` |
 | `document_volume` | Объём работы | `document` | `document` | `error` |
 | `equation_numbering` | Нумерация формул | `document` | `document` | `error` |
+| `figure_after_reference` | Рисунок после ссылки | `captions` | `captions` | `error` |
+| `figure_spacing` | Отбивка иллюстраций | `document` | `document` | `error` |
 | `font` | Шрифтовое оформление текста | `body_text` | `all_paragraphs`, `body_paragraphs`, `body_text`, `footnotes`, `headers_footers`, `headings`, `table_cells` | `error` |
+| `footnote_numbering` | Нумерация сносок | `footnotes` | `footnotes` | `error` |
+| `formula_line_break` | Перенос формулы | `document` | `document` | `error` |
+| `formula_placement` | Размещение формулы | `document` | `document` | `error` |
 | `heading_format` | Оформление заголовка | `headings` | `headings` | `error` |
 | `heading_hyphenation` | Переносы в заголовках | `headings` | `headings` | `error` |
 | `heading_levels` | Иерархия заголовков | `headings` | `headings` | `error` |
@@ -91,22 +97,28 @@
 | `line_spacing` | Межстрочный интервал | `body_text` | `all_paragraphs`, `body_paragraphs`, `body_text`, `footnotes`, `headers_footers`, `headings`, `table_cells` | `error` |
 | `list_format` | Маркеры перечислений | `body_paragraphs` | `all_paragraphs`, `body_paragraphs`, `body_text` | `error` |
 | `margin` | Поля страницы | `sections` | `sections` | `error` |
-| `microtypography` | Микротипографика | `body_paragraphs` | `all_paragraphs`, `body_paragraphs`, `body_text` | `error` |
+| `microtypography` | Микротипографика | `body_paragraphs` | `all_paragraphs`, `body_paragraphs`, `body_text`, `footnotes` | `error` |
+| `number_format` | Десятичный разделитель | `body_paragraphs` | `all_paragraphs`, `body_paragraphs`, `body_text` | `error` |
 | `page_format` | Формат листа | `sections` | `sections` | `error` |
 | `page_number_position` | Положение номера страницы | `headers_footers` | `headers_footers` | `error` |
+| `paragraph_style` | Стиль абзаца | `body_paragraphs` | `all_paragraphs`, `body_paragraphs`, `body_text` | `error` |
 | `required_sections` | Состав и порядок разделов | `document_structure` | `document_structure` | `error` |
+| `source_label` | Подпись «Источник» | `body_paragraphs` | `all_paragraphs`, `body_paragraphs`, `body_text` | `error` |
+| `source_note_figure` | Источник под рисунком | `captions` | `captions` | `error` |
+| `source_note_table` | Источник под таблицей | `captions` | `captions` | `error` |
+| `table_after_reference` | Таблица после ссылки | `captions` | `captions` | `error` |
 | `table_continuation` | Перенос таблицы | `table_cells` | `table_cells` | `error` |
 | `table_header_format` | Оформление шапки таблицы | `table_cells` | `table_cells` | `error` |
 | `table_layout` | Линии и ширина таблицы | `table_cells` | `table_cells` | `error` |
+| `table_units` | Единицы измерения в таблице | `table_cells` | `table_cells` | `error` |
 | `title_page_content` | Реквизиты титульного листа | `document_structure` | `document_structure` | `error` |
 | `toc` | Оглавление | `toc` | `toc` | `error` |
 | `widow_control` | Контроль висячих строк | `body_text` | `body_paragraphs`, `body_text` | `error` |
 
-`strictness` по умолчанию — `error`: нарушение блокирует работу. `warning` — замечание, `info` — рекомендация; значение переопределяется в конкретном правиле, но не в наборе целиком. Столбец таблицы показывает значение по умолчанию из реестра: в наборе `vkr-rule-engine-test` 4.3.0 часть правил переопределена — `info` — `microtypography`; `warning` — `bibliography_count`, `bibliography_recency`, `document_volume`, `equation_numbering`, `heading_format`, `heading_page_break`, `keep_next`, `microtypography`, `widow_control`.
-
+`strictness` по умолчанию — `error`: нарушение блокирует работу. `warning` — замечание, `info` — рекомендация; значение переопределяется в конкретном правиле, но не в наборе целиком. Столбец таблицы показывает значение по умолчанию из реестра: в наборе `vkr-rule-engine-test` 5.0.0 часть правил переопределена — `info` — `microtypography`; `warning` — `bibliography_count`, `bibliography_recency`, `document_volume`, `equation_numbering`, `heading_format`, `heading_page_break`, `keep_next`, `microtypography`, `widow_control`.
 ### 2.3. Параметры по кодам
 
-Параметры каждого кода — закрытый объект: ключи, которых нет в таблице кода, отвергаются. Обязательные ключи (столбец «Обязательность» = «да») должны присутствовать всегда; остальные можно опускать, тогда действует значение по умолчанию. У кода может быть несколько правил с разными `params` и разными областями — так описываются, например, разные требования к шрифту основного текста и ячеек таблиц. Всего в реестре 181 ключей `params`; обязательных из них — 5.
+Параметры каждого кода — закрытый объект: ключи, которых нет в таблице кода, отвергаются. Обязательные ключи (столбец «Обязательность» = «да») должны присутствовать всегда; остальные можно опускать, тогда действует значение по умолчанию. У кода может быть несколько правил с разными `params` и разными областями — так описываются, например, разные требования к шрифту основного текста и ячеек таблиц. Всего в реестре 212 ключей `params`; обязательных из них — 5.
 
 #### `alignment` — Выравнивание абзаца
 
@@ -116,7 +128,7 @@
 |---|---|---|---|---|---|---|
 | `alignment` | `left` / `center` / `right` / `justify` | да | — | одно из: `left`, `center`, `right`, `justify` | Ожидаемое выравнивание: left, center, right или justify (по ширине) | `"justify"` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: alignment -->
 ```json
@@ -144,7 +156,7 @@
 | `new_page_each` | boolean | нет | `true` | `true` или `false` | Требовать начало каждого приложения с нового листа | `true` |
 | `label_scheme` | `any` / `russian_letters` / `arabic` | нет | `any` | одно из: `any`, `russian_letters`, `arabic` | Схема обозначения приложений: заглавными русскими буквами (А, Б, В) или арабскими цифрами (1, 2, 3); any — не проверять | `any` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: appendix_order -->
 ```json
@@ -171,7 +183,7 @@
 |---|---|---|---|---|---|---|
 | `require_all_cited` | boolean | нет | `true` | `true` или `false` | Требовать ссылку в тексте на каждый источник списка литературы | `true` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: bibliography_cited -->
 ```json
@@ -198,7 +210,7 @@
 | `min_sources` | integer или `null` | нет | `20` | целое число, не меньше 1 или `null` (источники) | Минимальное количество источников в списке литературы | `20` |
 | `max_sources` | integer или `null` | нет | `null` | целое число, не меньше 1 или `null` (источники) | Максимальное количество источников (None — не проверять) | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: bibliography_count -->
 ```json
@@ -240,7 +252,7 @@
 | `description_schema` | (`author` / `title` / `publication` / `edition` / `year` / `pages`)[] или `null` | нет | `null` | одно из: `author`, `title`, `publication`, `edition`, `year`, `pages` | Порядок областей описания: элементы перечисляются в требуемой последовательности (author, title, publication, edition, year, pages); проверяется, что позиции элементов в тексте не убывают | `null` |
 | `exempt_categories` | (`book_monograph` / `journal_article` / `conference_paper` / `electronic_resource` / `normative_act_law` / `standard_gost` / `dissertation_autoref` / `patent` / `unknown`)[] | нет | `["electronic_resource", "normative_act_law", "standard_gost"]` | список, элементы — одно из: `book_monograph`, `journal_article`, `conference_paper`, `electronic_resource`, `normative_act_law`, `standard_gost`, `dissertation_autoref`, `patent`, `unknown` | Категории с особым описанием: не требуются страницы и год, запрет точки-тире не применяется | `["electronic_resource", "normative_act_law", "standard_gost"]` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: bibliography_format -->
 ```json
@@ -276,7 +288,7 @@
 |---|---|---|---|---|---|---|
 | `allow_unresolved` | boolean | нет | `false` | `true` или `false` | Разрешить ссылки на источники, которых нет в списке литературы | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: bibliography_link -->
 ```json
@@ -311,7 +323,7 @@
 | `author_group_sort` | boolean | нет | `false` | `true` или `false` | Записи внутри группы упорядочены по фамилии первого автора: true — алфавитный порядок соблюдается с учётом границ групп | `false` |
 | `legal_force_order` | boolean | нет | `false` | `true` или `false` | Нормативные акты упорядочены по убыванию юридической силы: закон, кодекс, указ, постановление, распоряжение, приказ, письмо, инструкция | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: bibliography_order -->
 ```json
@@ -343,7 +355,7 @@
 | `reference_year` | integer или `null` | нет | `null` | целое число, не меньше 1900, не больше 2100 или `null` (год) | Год отсчёта свежести (None — текущий год) | `null` |
 | `min_year_coverage` | number | нет | `0.5` | число, не меньше 0.0, не больше 1.0 (доля от 0 до 1) | Минимальная доля записей с известным годом для оценки свежести | `0.5` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: bibliography_recency -->
 ```json
@@ -381,7 +393,7 @@
 | `forbid_number_sign` | boolean | нет | `false` | `true` или `false` | Запрещать знак номера «№» перед номером подписи: «Таблица 1», а не «Таблица № 1» | `false` |
 | `sentence_case` | boolean или `null` | нет | `null` | значение или `null` | Требовать запись названия подписи с прописной буквы без заглавных букв в остальных словах (None — не проверять) | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: caption_format -->
 ```json
@@ -416,7 +428,7 @@
 | `allow_duplicates` | boolean | нет | `false` | `true` или `false` | Разрешить повтор номеров | `false` |
 | `allow_out_of_order` | boolean | нет | `false` | `true` или `false` | Разрешить нарушение порядка номеров (номер меньше предыдущего) | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: caption_numbering -->
 ```json
@@ -454,7 +466,7 @@
 | `title_case` | `capitalized` / `uppercase` или `null` | нет | `null` | одно из: `capitalized`, `uppercase` или `null` | Регистр названия подписи | `null` |
 | `require_number` | boolean | нет | `false` | `true` или `false` | Требовать номер объекта в подписи | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: caption_placement -->
 ```json
@@ -486,7 +498,7 @@
 | `entity_type` | `figure` / `table` / `appendix` / `any` | нет | `any` | одно из: `figure`, `table`, `appendix`, `any` | Вид объектов: рисунок, таблица, приложение или все вместе | `"figure"` |
 | `required` | boolean | нет | `true` | `true` или `false` | Требовать упоминание объекта в тексте работы | `true` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: caption_reference -->
 ```json
@@ -505,6 +517,34 @@
 }
 ```
 
+#### `citation_required` — Ссылка при цитировании
+
+После цитаты в кавычках указана ссылка на источник.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `quote_chars` | string[] | нет | `["«", "»", "“", "”"]` | любое значение | Символы кавычек, которыми выделена цитата | `["«", "»", "“", "”"]` |
+| `require_reference` | boolean | нет | `true` | любое значение | После цитаты в кавычках стоит ссылка на источник | `true` |
+| `allow_footnote_reference` | boolean | нет | `true` | любое значение | Ссылка в сноске считается достаточной | `true` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: citation_required -->
+```json
+{
+  "rule_id": "citation_required_example",
+  "code": "citation_required",
+  "strictness": "warning",
+  "message": "За цитатой стоит ссылка на источник",
+  "quote": "После цитаты в кавычках указана ссылка на источник.",
+  "target": {
+    "scope": "body_paragraphs"
+  },
+  "params": {
+    "require_reference": true
+  }
+}
+```
 #### `document_volume` — Объём работы
 
 Объём работы в страницах и словах.
@@ -519,7 +559,7 @@
 | `section_min_pages` | typing.Dict[str, int] | нет | `{}` | объект | Минимум страниц по разделам: ключ — роль узла дерева, значение — минимальный объём раздела | `{}` |
 | `max_appendix_share` | number или `null` | нет | `null` | границы: 0.0, 1.0 | Максимальная доля страниц приложений в общем объёме работы (0.3 — не более 30 % страниц) | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: document_volume -->
 ```json
@@ -551,7 +591,7 @@
 | `number_position` | `left` / `center` / `right` или `null` | нет | `null` | одно из: `left`, `center`, `right` | Положение номера формулы: 'right' — у правого поля, 'center' — по центру, 'left' — у левого поля; None — положение не проверяется | `null` |
 | `number_style` | `arabic` / `roman` или `null` | нет | `null` | одно из: `arabic`, `roman` | Форма записи номера формулы: 'arabic' — арабские цифры, 'roman' — римские; None — форма не проверяется | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: equation_numbering -->
 ```json
@@ -570,6 +610,60 @@
 }
 ```
 
+#### `figure_after_reference` — Рисунок после ссылки
+
+Рисунок размещён после первой ссылки на него в тексте.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `require_before_reference` | boolean | нет | `true` | любое значение | Ссылка на рисунок должна стоять в тексте до самого рисунка | `true` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: figure_after_reference -->
+```json
+{
+  "rule_id": "figure_after_reference_example",
+  "code": "figure_after_reference",
+  "strictness": "warning",
+  "message": "Ссылка на рисунок появляется раньше рисунка",
+  "quote": "Рисунок размещён после первой ссылки на него в тексте.",
+  "target": {
+    "scope": "captions"
+  },
+  "params": {
+    "require_before_reference": true
+  }
+}
+```
+#### `figure_spacing` — Отбивка иллюстраций
+
+Иллюстрации отделены друг от друга и от нижнего края страницы.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `min_gap_between_mm` | number | нет | `10.0` | `0`, `100` | Минимальная отбивка между иллюстрациями | `10.0` |
+| `min_gap_to_page_bottom_mm` | number | нет | `10.0` | `0`, `100` | Минимальная отбивка от иллюстрации до нижнего края страницы | `10.0` |
+| `tolerance_mm` | number | нет | `2.0` | `0`, `20` | Допуск измерения | `2.0` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: figure_spacing -->
+```json
+{
+  "rule_id": "figure_spacing_example",
+  "code": "figure_spacing",
+  "strictness": "warning",
+  "message": "Иллюстрации отделены друг от друга и от края страницы",
+  "quote": "Иллюстрации отделены друг от друга и от нижнего края страницы.",
+  "target": {
+    "scope": "document"
+  },
+  "params": {
+    "min_gap_between_mm": 10.0
+  }
+}
+```
 #### `font` — Шрифтовое оформление текста
 
 Гарнитура, кегль и начертание ранов; сравниваются видимые раны, символические раны (формулы, знаки) пропускаются.
@@ -586,7 +680,7 @@
 | `normalize_family` | boolean | нет | `true` | `true` или `false` | Сравнивать гарнитуру по нормализованному имени: без учета регистра, пробелов, дефисов, subset-префикса 'XXXXXX+' и стилевых маркеров (MT/PS/PSMT/Bold/Italic/Regular/Roman). false — прежнее строгое сравнение | `true` |
 | `smaller_than_body_text` | boolean | нет | `false` | `true` или `false` | Запрещать кегль меньше кегля основного текста: кегль основного текста определяется по самому частому кеглю абзацев тела документа. Взаимоисключающе с size_pt и min_size_pt | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: font -->
 ```json
@@ -608,6 +702,89 @@
 }
 ```
 
+#### `footnote_numbering` — Нумерация сносок
+
+Сноски нумеруются сквозным образом или с единицы на каждой странице.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `scheme` | `continuous` / `per_page` / `any` | нет | `continuous` | `continuous`, `per_page`, `any` | continuous — сквозная нумерация, per_page — с единицы на каждой странице | `continuous` |
+| `start_at` | integer | нет | `1` | `1`, `100` | Первый номер сноски | `1` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: footnote_numbering -->
+```json
+{
+  "rule_id": "footnote_numbering_example",
+  "code": "footnote_numbering",
+  "strictness": "warning",
+  "message": "Нумерация сносок сквозная",
+  "quote": "Сноски нумеруются сквозным образом или с единицы на каждой странице.",
+  "target": {
+    "scope": "footnotes"
+  },
+  "params": {
+    "scheme": "continuous",
+    "start_at": 1
+  }
+}
+```
+#### `formula_line_break` — Перенос формулы
+
+При переносе формулы знак остаётся в начале следующей строки.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `require_operator_repeat` | boolean | нет | `true` | любое значение | При переносе знак операции повторяется в начале следующей строки | `true` |
+| `operators` | string[] | нет | `["=", "+", "−", "-", "×", "·", ":", "/"]` | любое значение | Знаки операций, которые переносятся с повтором | `["=", "+", "−", "-", "×", "·", ":", "/"]` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: formula_line_break -->
+```json
+{
+  "rule_id": "formula_line_break_example",
+  "code": "formula_line_break",
+  "strictness": "warning",
+  "message": "Перенос формулы повторяет знак",
+  "quote": "При переносе формулы знак остаётся в начале следующей строки.",
+  "target": {
+    "scope": "document"
+  },
+  "params": {
+    "require_operator_repeat": true
+  }
+}
+```
+#### `formula_placement` — Размещение формулы
+
+Формула вынесена в отдельную строку и выровнена заданным образом.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `require_standalone_line` | boolean | нет | `true` | любое значение | Формула вынесена в отдельную строку | `true` |
+| `alignment` | `left` / `center` / `right` или `null` | нет | `center` | `left`, `center`, `right` | Выравнивание строки с формулой | `center` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: formula_placement -->
+```json
+{
+  "rule_id": "formula_placement_example",
+  "code": "formula_placement",
+  "strictness": "warning",
+  "message": "Формула вынесена в отдельную строку и центрирована",
+  "quote": "Формула вынесена в отдельную строку и выровнена заданным образом.",
+  "target": {
+    "scope": "document"
+  },
+  "params": {
+    "require_standalone_line": true,
+    "alignment": "center"
+  }
+}
+```
 #### `heading_format` — Оформление заголовка
 
 Точка в конце, регистр, выравнивание, подчеркивание, интервалы до и после, шрифт заголовка.
@@ -626,7 +803,7 @@
 | `space_before_lines` | number или `null` | нет | `null` | число, не меньше 0.0, не больше 10.0 или `null` (межстрочные интервалы) | Интервал перед заголовком в межстрочных интервалах (space_before_pt) | `null` |
 | `tolerance_pt` | number | нет | `3.0` | число, не меньше 0.0, не больше 30.0 (пункты) | Допуск сравнения интервалов before/after в пунктах | `3.0` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: heading_format -->
 ```json
@@ -662,7 +839,7 @@
 | `forbid_hyphenation` | boolean | нет | `true` | `true` или `false` | Запрещать переносы слов в заголовках | `true` |
 | `forbid_abbreviations` | boolean | нет | `false` | `true` или `false` | Запрещать аббревиатуры из прописных букв в заголовках | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: heading_hyphenation -->
 ```json
@@ -691,7 +868,7 @@
 | `allow_skipped_levels` | boolean | нет | `false` | `true` или `false` | Разрешить перескок уровня, например 1 -> 3 (по умолчанию запрещен) | `false` |
 | `max_level` | integer или `null` | нет | `null` | целое число, не меньше 1, не больше 9 или `null` | Максимальная глубина вложенности заголовков (пусто — без ограничения) | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: heading_levels -->
 ```json
@@ -730,7 +907,7 @@
 | `number_style` | `any` / `arabic` / `roman` / `chapter` | нет | `any` | одно из: `any`, `arabic`, `roman`, `chapter` | Стиль записи номера заголовка: 'arabic' — арабские цифры («2», «2.1»), 'roman' — римские («II», «II.1»), 'chapter' — номер со словом «Глава» перед ним («Глава 2», «ГЛАВА II»). 'any' — стиль не проверяется | `any` |
 | `forbid_prefix_words` | string[] | нет | `[]` | массив значений | Слова, которые не должны стоять перед номером заголовка, например «параграф» или «пункт»; сравнение без учета регистра | `[]` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: heading_numbering -->
 ```json
@@ -769,7 +946,7 @@
 | `roles` | (`title_page` / `task_sheet` / `abstract_referat` / `toc` / `abbreviations` / `introduction` / `main_chapter` / `sub_section` / `conclusion` / `bibliography` / `appendix` / `unknown`)[] | нет | `["main_chapter", "introduction", "conclusion", "bibliography", "appendix"]` | список, элементы — одно из: `title_page`, `task_sheet`, `abstract_referat`, `toc`, `abbreviations`, `introduction`, `main_chapter`, `sub_section`, `conclusion`, `bibliography`, `appendix`, `unknown` | Роли заголовков, которые обязаны начинаться с новой страницы | `["introduction", "main_chapter", "conclusion"]` |
 | `forbid_new_page_roles` | (`title_page` / `task_sheet` / `abstract_referat` / `toc` / `abbreviations` / `introduction` / `main_chapter` / `sub_section` / `conclusion` / `bibliography` / `appendix` / `unknown`)[] | нет | `[]` | список, элементы — одно из: `title_page`, `task_sheet`, `abstract_referat`, `toc`, `abbreviations`, `introduction`, `main_chapter`, `sub_section`, `conclusion`, `bibliography`, `appendix`, `unknown` | Роли заголовков, которые не должны начинать новую страницу: параграф продолжает текст на той же странице. Пересечение с roles недопустимо | `[]` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: heading_page_break -->
 ```json
@@ -806,7 +983,7 @@
 | `right_mm` | number или `null` | нет | `null` | число или `null` (мм) | Отступ справа | `null` |
 | `tolerance_mm` | number | нет | `0.5` | число, не меньше 0.0 (мм) | Допуск в миллиметрах | `0.5` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: indent -->
 ```json
@@ -838,7 +1015,7 @@
 | `require_number` | boolean | нет | `false` | `true` или `false` | Требовать номер объекта или источника в ссылке | `false` |
 | `patterns` | string[] или `null` | нет | `null` | список строк или `null` | Регулярные выражения допустимой записи ссылки, если форма не покрывается style: например, '[Цит. по кн.: 6. С. 240]'. Проверяется вхождение хотя бы одного выражения в текст ссылки | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: inline_reference_format -->
 ```json
@@ -868,7 +1045,7 @@
 | `enabled` | boolean | нет | `true` | `true` или `false` | Ожидаемое значение keepNext: true — заголовок не отрывается от текста | `true` |
 | `roles` | (`title_page` / `task_sheet` / `abstract_referat` / `toc` / `abbreviations` / `introduction` / `main_chapter` / `sub_section` / `conclusion` / `bibliography` / `appendix` / `unknown`)[] | нет | `["main_chapter", "sub_section"]` | список, элементы — одно из: `title_page`, `task_sheet`, `abstract_referat`, `toc`, `abbreviations`, `introduction`, `main_chapter`, `sub_section`, `conclusion`, `bibliography`, `appendix`, `unknown` | Роли заголовков, к которым применяется требование | `["main_chapter", "sub_section"]` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: keep_next -->
 ```json
@@ -900,7 +1077,7 @@
 | `ratio` | number | нет | `1.5` | число, больше 0.0, не больше 10.0 (множитель) | Множитель межстрочного интервала: 1.5 — полуторный | `1.5` |
 | `tolerance` | number | нет | `0.25` | число, не меньше 0.0, не больше 5.0 (доля множителя) | Допуск по множителю интервала | `0.25` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: line_spacing -->
 ```json
@@ -928,7 +1105,7 @@
 | `level_markers` | ListLevelMarkerSpec[] | да | — | список объектов ListLevelMarkerSpec (см. §2.4), длина не меньше 1 | Допустимые маркеры по уровням перечисления | `[{"level": 0, "allowed": ["hyphen"]}]` |
 | `forbid_other_markers` | boolean | нет | `true` | `true` или `false` | Запрещать маркеры, не описанные для уровня: без этого уровня с описанием проверяются только на вхождение | `true` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: list_format -->
 ```json
@@ -975,7 +1152,7 @@
 | `gutter_mm` | number или `null` | нет | `null` | число или `null` (мм) | Дополнительный корешковый отступ | `null` |
 | `tolerance_mm` | number | нет | `1.0` | число, не меньше 0.0 (мм) | Допуск в миллиметрах | `1.0` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: margin -->
 ```json
@@ -1005,7 +1182,7 @@
 |---|---|---|---|---|---|---|
 | `checks` | (`wrong_quotes` / `wrong_dashes` / `multiple_spaces` / `space_before_punctuation` / `missing_nbsp`)[] | нет | `["wrong_quotes", "wrong_dashes", "multiple_spaces", "space_before_punctuation"]` | список, элементы — одно из: `wrong_quotes`, `wrong_dashes`, `multiple_spaces`, `space_before_punctuation`, `missing_nbsp` | Виды микротипографических ошибок, которые проверяет правило | `["wrong_quotes", "wrong_dashes", "multiple_spaces"]` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: microtypography -->
 ```json
@@ -1029,6 +1206,33 @@
 }
 ```
 
+#### `number_format` — Десятичный разделитель
+
+Десятичные числа записаны с запятой, а не с точкой.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `decimal_separator` | `comma` / `dot` | нет | `comma` | `comma`, `dot` | Разделитель целой и дробной части | `comma` |
+| `min_integer_digits` | integer | нет | `1` | `1`, `6` | Минимальное число цифр перед запятой | `1` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: number_format -->
+```json
+{
+  "rule_id": "number_format_example",
+  "code": "number_format",
+  "strictness": "warning",
+  "message": "Дробная часть отделяется запятой",
+  "quote": "Десятичные числа записаны с запятой, а не с точкой.",
+  "target": {
+    "scope": "body_paragraphs"
+  },
+  "params": {
+    "decimal_separator": "comma"
+  }
+}
+```
 #### `page_format` — Формат листа
 
 Размер листа и ориентация секции.
@@ -1040,7 +1244,7 @@
 | `tolerance_mm` | number | нет | `1.0` | число, не меньше 0.0 (мм) | Допуск к ширине и высоте листа, мм | `1.0` |
 | `orientation` | `portrait` / `landscape` / `any` | нет | `portrait` | одно из: `portrait`, `landscape`, `any` | Ориентация листа: книжная, альбомная или любая | `portrait` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: page_format -->
 ```json
@@ -1076,7 +1280,7 @@
 | `include_appendices` | boolean | нет | `false` | `true` или `false` | Учитывать страницы приложений при проверке сквозной нумерации; без этого приложения из сверки исключаются | `false` |
 | `first_numbered_page` | integer или `null` | нет | `null` | границы: 1 | Страница, на которой впервые напечатан номер: по методичке номер впервые появляется на второй странице (None — не проверять) | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: page_number_position -->
 ```json
@@ -1100,6 +1304,33 @@
 }
 ```
 
+#### `paragraph_style` — Стиль абзаца
+
+Абзац оформлен базовым стилем без прямого форматирования.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `allowed_styles` | string[] | нет | `["Normal", "Обычный"]` | любое значение | Стили абзаца, которые считаются базовыми | `["Normal", "Обычный"]` |
+| `forbid_direct_formatting` | boolean | нет | `true` | любое значение | Абзац не должен нести прямое форматирование | `true` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: paragraph_style -->
+```json
+{
+  "rule_id": "paragraph_style_example",
+  "code": "paragraph_style",
+  "strictness": "warning",
+  "message": "Абзац оформлен базовым стилем",
+  "quote": "Абзац оформлен базовым стилем без прямого форматирования.",
+  "target": {
+    "scope": "body_paragraphs"
+  },
+  "params": {
+    "forbid_direct_formatting": true
+  }
+}
+```
 #### `required_sections` — Состав и порядок разделов
 
 Наличие, порядок и роли разделов, число глав основной части.
@@ -1111,7 +1342,7 @@
 | `max_main_chapters` | integer или `null` | нет | `null` | целое число, не меньше 1, не больше 20 или `null` | Максимальное число глав основной части (роль main_chapter) | `null` |
 | `require_subsections` | boolean | нет | `false` | `true` или `false` | Требовать, чтобы у каждой главы основной части был хотя бы один подраздел: глава без подразделов считается нераскрытой | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: required_sections -->
 ```json
@@ -1171,6 +1402,126 @@
 }
 ```
 
+#### `source_label` — Подпись «Источник»
+
+Подпись источника содержит описание и стоит под таблицами.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `label_words` | string[] | нет | `["Источник", "Источник:"]` | любое значение | Слова подписи источника | `["Источник", "Источник:"]` |
+| `require_content` | boolean | нет | `true` | любое значение | После слова «Источник» указано, откуда взяты данные | `true` |
+| `require_under_tables` | boolean | нет | `false` | любое значение | Под каждой таблицей есть подпись источника | `false` |
+| `search_distance` | integer | нет | `3` | `1`, `10` | Сколько блоков после таблицы просматривать | `3` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: source_label -->
+```json
+{
+  "rule_id": "source_label_example",
+  "code": "source_label",
+  "strictness": "warning",
+  "message": "Подпись «Источник» содержит описание",
+  "quote": "Подпись источника содержит описание и стоит под таблицами.",
+  "target": {
+    "scope": "body_paragraphs"
+  },
+  "params": {
+    "require_content": true,
+    "search_distance": 3
+  }
+}
+```
+#### `source_note_figure` — Источник под рисунком
+
+Под рисунком указана библиографическая ссылка на источник.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `source_words` | string[] | нет | `["Источник", "Составлено по", "Источник:"]` | любое значение | Слова, с которых начинается ссылка на источник | `["Источник", "Составлено по", "Источник:"]` |
+| `require_note` | boolean | нет | `true` | любое значение | Ссылка на источник под объектом обязательна | `true` |
+| `search_distance` | integer | нет | `2` | `1`, `5` | Сколько блоков после объекта просматривать | `2` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: source_note_figure -->
+```json
+{
+  "rule_id": "source_note_figure_example",
+  "code": "source_note_figure",
+  "strictness": "warning",
+  "message": "Под рисунком указан источник",
+  "quote": "Под рисунком указана библиографическая ссылка на источник.",
+  "target": {
+    "scope": "captions"
+  },
+  "params": {
+    "require_note": true,
+    "source_words": [
+      "Источник"
+    ],
+    "search_distance": 2
+  }
+}
+```
+#### `source_note_table` — Источник под таблицей
+
+Под таблицей указана библиографическая ссылка на источник.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `source_words` | string[] | нет | `["Источник", "Составлено по", "Источник:"]` | любое значение | Слова, с которых начинается ссылка на источник | `["Источник", "Составлено по", "Источник:"]` |
+| `require_note` | boolean | нет | `true` | любое значение | Ссылка на источник под объектом обязательна | `true` |
+| `search_distance` | integer | нет | `2` | `1`, `5` | Сколько блоков после объекта просматривать | `2` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: source_note_table -->
+```json
+{
+  "rule_id": "source_note_table_example",
+  "code": "source_note_table",
+  "strictness": "warning",
+  "message": "Под таблицей указан источник",
+  "quote": "Под таблицей указана библиографическая ссылка на источник.",
+  "target": {
+    "scope": "captions"
+  },
+  "params": {
+    "require_note": true,
+    "source_words": [
+      "Источник"
+    ],
+    "search_distance": 2
+  }
+}
+```
+#### `table_after_reference` — Таблица после ссылки
+
+Таблица размещена после первой ссылки на неё в тексте.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `require_before_reference` | boolean | нет | `true` | любое значение | Ссылка на таблицу должна стоять в тексте до самой таблицы | `true` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: table_after_reference -->
+```json
+{
+  "rule_id": "table_after_reference_example",
+  "code": "table_after_reference",
+  "strictness": "warning",
+  "message": "Ссылка на таблицу появляется раньше таблицы",
+  "quote": "Таблица размещена после первой ссылки на неё в тексте.",
+  "target": {
+    "scope": "captions"
+  },
+  "params": {
+    "require_before_reference": true
+  }
+}
+```
 #### `table_continuation` — Перенос таблицы
 
 Метка продолжения, повтор шапки, линия на разрыве, отсутствие повторной подписи.
@@ -1184,7 +1535,7 @@
 | `forbid_bottom_border_on_break` | boolean | нет | `true` | `true` или `false` | Требовать отсутствие нижней линии у строки, разорванной переносом таблицы на другую страницу | `true` |
 | `forbid_repeated_caption` | boolean | нет | `true` | `true` или `false` | Запрещать повтор названия таблицы в таблице-продолжении | `true` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: table_continuation -->
 ```json
@@ -1221,7 +1572,7 @@
 | `subheader_case` | `any` / `lowercase` / `lowercase_if_continuation` | нет | `any` | одно из: `any`, `lowercase`, `lowercase_if_continuation` | Регистр подзаголовков-продолжений: 'lowercase' — со строчной буквы, если подзаголовок составляет одно предложение с заголовком; 'lowercase_if_continuation' — то же для строк ниже первой строки шапки | `any` |
 | `require_header_row` | boolean | нет | `false` | `true` или `false` | Требовать размеченную строку-шапку (Таблица должна иметь шапку, а не начинаться сразу с данных) | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: table_header_format -->
 ```json
@@ -1253,7 +1604,7 @@
 | `alignment` | `left` / `center` / `right` или `null` | нет | `null` | одно из: `left`, `center`, `right` | Ожидаемое выравнивание таблицы в тексте: по методичке таблица выравнивается по левому краю (None — не проверять) | `null` |
 | `forbid_number_column` | boolean | нет | `false` | `true` или `false` | Запрещать служебную графу «№ п/п»: по методичке номер строки не выносят в отдельную графу таблицы | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: table_layout -->
 ```json
@@ -1273,6 +1624,34 @@
 }
 ```
 
+#### `table_units` — Единицы измерения в таблице
+
+В шапке таблицы указаны единицы измерения и период.
+
+| Ключ | Тип | Обязательность | По умолчанию | Допустимые значения и единицы | Назначение | Пример |
+|---|---|---|---|---|---|---|
+| `require_units` | boolean | нет | `true` | любое значение | В таблице указаны единицы измерения | `true` |
+| `require_period` | boolean | нет | `false` | любое значение | В таблице указан период времени | `false` |
+| `unit_patterns` | string[] | нет | `["тыс\\.", "млн", "руб\\.", "%", "ед\\.", "шт\\.", "чел\\.", "\\bм\\b", "кг", "\\bл\\b", "\\bга\\b", "дн", "час", "мес\\.", "°[cс]"]` | любое значение | Регулярные выражения единиц измерения | `["тыс\\.", "млн", "руб\\.", "%", "ед\\.", "шт\\.", "чел\\.", "\\bм\\b", "кг", "\\bл\\b", "\\bга\\b", "дн", "час", "мес\\.", "°[cс]"]` |
+
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
+
+<!-- rule: table_units -->
+```json
+{
+  "rule_id": "table_units_example",
+  "code": "table_units",
+  "strictness": "warning",
+  "message": "В шапке таблицы указаны единицы измерения",
+  "quote": "В шапке таблицы указаны единицы измерения и период.",
+  "target": {
+    "scope": "table_cells"
+  },
+  "params": {
+    "require_units": true
+  }
+}
+```
 #### `title_page_content` — Реквизиты титульного листа
 
 Обязательные реквизиты титульного листа и вид работы.
@@ -1282,7 +1661,7 @@
 | `required_fields` | (`министерство` / `вуз` / `институт` / `кафедра` / `вид работы` / `тема` / `автор` / `руководитель` / `оценка` / `город` / `год`)[] | да | — | список, элементы — одно из: `министерство`, `вуз`, `институт`, `кафедра`, `вид работы`, `тема`, `автор`, `руководитель`, `оценка`, `город`, `год`, длина не меньше 1 | Обязательные реквизиты титульного листа в терминах методички | `["вуз", "тема", "автор", "город", "год"]` |
 | `work_type` | string или `null` | нет | `null` | строка или `null` | Ожидаемый вид работы в тексте титульного листа, например 'ВКР' | `null` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: title_page_content -->
 ```json
@@ -1332,7 +1711,7 @@
 | `start_page` | integer или `null` | нет | `null` | границы: 1 | Страница, на которой должно начинаться оглавление: по методичке оглавление идёт после титульного листа (None — не проверять) | `null` |
 | `require_entry_number` | boolean | нет | `false` | `true` или `false` | Требовать номер раздела в записи оглавления, если у самого заголовка номер есть: у «Глава 2» в оглавлении тоже стоит «2» | `false` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: toc -->
 ```json
@@ -1403,7 +1782,7 @@
 |---|---|---|---|---|---|---|
 | `enabled` | boolean | нет | `true` | `true` или `false` | Ожидаемое значение widowControl: true — висячие строки запрещены | `true` |
 
-Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 4.3.0):
+Пример правила (реальное правило из набора по умолчанию `vkr-rule-engine-test` 5.0.0):
 
 <!-- rule: widow_control -->
 ```json
@@ -1477,19 +1856,19 @@
 
 | Область | Подпись в отчёте | Что входит | Коды, которые её допускают |
 |---|---|---|---|
-| `body_text` | основной текст | абзацы верхнего уровня вне таблиц, колонтитулов и сносок; дополнительно отсекаются заголовки, подписи, элементы списков, пустые абзацы и абзацы из одних формул или рисунков, а также контексты из `exclude_contexts`; флаги `include_*` снимают соответствующий отсев | `alignment`, `font`, `indent`, `inline_reference_format`, `line_spacing`, `list_format`, `microtypography`, `widow_control` |
-| `body_paragraphs` | абзацы документа | те же абзацы, что и `body_text`, но без отсева заголовков, подписей, списков и пустых абзацев; `exclude_contexts` и `style_ids` действуют | `font`, `indent`, `inline_reference_format`, `line_spacing`, `list_format`, `microtypography`, `widow_control` |
-| `all_paragraphs` | все абзацы | все абзацы документа: тело, ячейки таблиц, колонтитулы секций, сноски; действует только `style_ids` | `font`, `indent`, `inline_reference_format`, `line_spacing`, `list_format`, `microtypography` |
-| `table_cells` | ячейки таблиц | абзацы внутри ячеек таблиц | `alignment`, `font`, `indent`, `inline_reference_format`, `line_spacing`, `table_continuation`, `table_header_format`, `table_layout` |
+| `body_text` | основной текст | абзацы верхнего уровня вне таблиц, колонтитулов и сносок; дополнительно отсекаются заголовки, подписи, элементы списков, пустые абзацы и абзацы из одних формул или рисунков, а также контексты из `exclude_contexts`; флаги `include_*` снимают соответствующий отсев | `alignment`, `citation_required`, `font`, `indent`, `inline_reference_format`, `line_spacing`, `list_format`, `microtypography`, `number_format`, `paragraph_style`, `source_label`, `widow_control` |
+| `body_paragraphs` | абзацы документа | те же абзацы, что и `body_text`, но без отсева заголовков, подписей, списков и пустых абзацев; `exclude_contexts` и `style_ids` действуют | `citation_required`, `font`, `indent`, `inline_reference_format`, `line_spacing`, `list_format`, `microtypography`, `number_format`, `paragraph_style`, `source_label`, `widow_control` |
+| `all_paragraphs` | все абзацы | все абзацы документа: тело, ячейки таблиц, колонтитулы секций, сноски; действует только `style_ids` | `citation_required`, `font`, `indent`, `inline_reference_format`, `line_spacing`, `list_format`, `microtypography`, `number_format`, `paragraph_style`, `source_label` |
+| `table_cells` | ячейки таблиц | абзацы внутри ячеек таблиц | `alignment`, `font`, `indent`, `inline_reference_format`, `line_spacing`, `table_continuation`, `table_header_format`, `table_layout`, `table_units` |
 | `headers_footers` | колонтитулы | абзацы колонтитулов и служебных абзацев секций | `font`, `indent`, `inline_reference_format`, `line_spacing`, `page_number_position` |
-| `footnotes` | сноски | абзацы сносок | `font`, `indent`, `inline_reference_format`, `line_spacing` |
+| `footnotes` | сноски | абзацы сносок | `font`, `footnote_numbering`, `indent`, `inline_reference_format`, `line_spacing`, `microtypography` |
 | `sections` | секции | секции документа: поля и формат листа | `margin`, `page_format` |
 | `headings` | заголовки | заголовки из дерева документа с учётом `min_heading_confidence` и `exclude_roles` | `font`, `heading_format`, `heading_hyphenation`, `heading_levels`, `heading_numbering`, `heading_page_break`, `indent`, `keep_next`, `line_spacing` |
 | `document_structure` | структуру разделов | структура документа: состав и порядок разделов, приложения, титульный лист | `appendix_order`, `required_sections`, `title_page_content` |
 | `toc` | оглавление | записи оглавления | `toc` |
 | `bibliography` | список литературы | записи списка литературы | `bibliography_cited`, `bibliography_count`, `bibliography_format`, `bibliography_link`, `bibliography_order`, `bibliography_recency` |
-| `captions` | подписи рисунков и таблиц | подписи рисунков, таблиц и приложений | `alignment`, `caption_format`, `caption_numbering`, `caption_placement`, `caption_reference` |
-| `document` | документ | документ целиком: объём работы, нумерация вынесенных формул | `document_volume`, `equation_numbering` |
+| `captions` | подписи рисунков и таблиц | подписи рисунков, таблиц и приложений | `alignment`, `caption_format`, `caption_numbering`, `caption_placement`, `caption_reference`, `figure_after_reference`, `source_note_figure`, `source_note_table`, `table_after_reference` |
+| `document` | документ | документ целиком: объём работы, нумерация вынесенных формул | `document_volume`, `equation_numbering`, `figure_spacing`, `formula_line_break`, `formula_placement` |
 
 Два пояснения, которые чаще всего нужны при разборе нарушений.
 
@@ -1616,7 +1995,7 @@
 
 Профиль — такой же набор, но с полем `extends`, равным `ruleset_id` базового набора. Файлы профилей лежат в `backend/rule_engine/rules/profiles/`, идентификатор профиля — имя файла без расширения. Слияние идёт по `rule_id`: правило профиля с тем же `rule_id` заменяет базовое целиком (не по отдельным полям), правило с новым `rule_id` добавляется в конец, порядок базовых правил сохраняется. Итоговый набор получает `ruleset_id` и `ruleset_version` профиля, а в отчёт попадает число применённых правил. Профиль может и переопределять существующие правила, и добавлять новые: без первого не выразить требования вуза, без второго — проверки, которых в базовом наборе нет.
 
-Базовый набор `vkr-rule-engine-test` 4.3.0 — 52 правил. `mpgu` — 5 правил (5 переопределений и 0 новых), после слияния 52 `urfu` — 6 правил (6 переопределений и 0 новых), после слияния 52 `urgpu` — 32 правил (24 переопределений и 8 новых), после слияния 60;
+Базовый набор `vkr-rule-engine-test` 5.0.0 — 59 правил. `mpgu` — 5 правил (5 переопределений и 0 новых), после слияния 59; `urfu` — 6 правил (6 переопределений и 0 новых), после слияния 59; `urgpu` — 32 правил (24 переопределений и 8 новых), после слияния 67;
 
 `extends` обязательно для профиля: набор без `extends` движок считает самостоятельным и не смешивает с базой. Профиль, который переопределяет больше половины правил, — сигнал, что базовый набор не подходит и нужен отдельный набор.
 

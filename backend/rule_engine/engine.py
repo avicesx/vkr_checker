@@ -122,6 +122,27 @@ from .checks.tables import (
     _check_table_header_format_rule,
     _check_table_layout_rule,
 )
+from .checks.footnotes import _check_footnote_numbering_rule
+from .checks.formulas import (
+    _check_formula_line_break_rule,
+    _check_formula_placement_rule,
+)
+from .checks.placement import (
+    _check_figure_after_reference_rule,
+    _check_figure_spacing_rule,
+    _check_table_after_reference_rule,
+)
+from .checks.sources import (
+    _check_citation_required_rule,
+    _check_source_label_rule,
+    _check_source_note_figure_rule,
+    _check_source_note_table_rule,
+)
+from .checks.tables_extra import _check_table_units_rule
+from .checks.text_extra import (
+    _check_number_format_rule,
+    _check_paragraph_style_rule,
+)
 from .checks.toc import _check_toc_rule
 from .checks.volume import _check_document_volume_rule
 from .findings import (
@@ -162,8 +183,21 @@ from .rules import (
     PageFormatRule,
     PageNumberPositionRule,
     RequiredSectionsRule,
+    CitationRequiredRule,
+    FigureAfterReferenceRule,
+    FigureSpacingRule,
+    FootnoteNumberingRule,
+    FormulaLineBreakRule,
+    FormulaPlacementRule,
+    NumberFormatRule,
+    ParagraphStyleRule,
     Rule,
     RuleSet,
+    SourceLabelRule,
+    SourceNoteFigureRule,
+    SourceNoteTableRule,
+    TableAfterReferenceRule,
+    TableUnitsRule,
     TableContinuationRule,
     TableHeaderFormatRule,
     TableLayoutRule,
@@ -284,4 +318,17 @@ class RuleEngine:
         BibliographyCountRule: _check_bibliography_count_rule,
         BibliographyOrderRule: _check_bibliography_order_rule,
         BibliographyRecencyRule: _check_bibliography_recency_rule,
+        FigureAfterReferenceRule: _check_figure_after_reference_rule,
+        TableAfterReferenceRule: _check_table_after_reference_rule,
+        FormulaPlacementRule: _check_formula_placement_rule,
+        FootnoteNumberingRule: _check_footnote_numbering_rule,
+        SourceNoteFigureRule: _check_source_note_figure_rule,
+        SourceNoteTableRule: _check_source_note_table_rule,
+        TableUnitsRule: _check_table_units_rule,
+        FormulaLineBreakRule: _check_formula_line_break_rule,
+        FigureSpacingRule: _check_figure_spacing_rule,
+        CitationRequiredRule: _check_citation_required_rule,
+        SourceLabelRule: _check_source_label_rule,
+        NumberFormatRule: _check_number_format_rule,
+        ParagraphStyleRule: _check_paragraph_style_rule,
     }

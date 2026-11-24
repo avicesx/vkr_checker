@@ -28,6 +28,7 @@ from typing import Any, Dict, Iterator, List, Set, Tuple, get_args
 import pytest
 
 from api.admin import DEFAULT_RULE_SCOPES
+from conftest import CODES_WITHOUT_DEFAULT_RULE
 from rule_engine.engine import RuleEngine
 from rule_engine.rules import (
     DEFAULT_RULESET_PATH,
@@ -200,11 +201,17 @@ def test_default_ruleset_is_the_current_baseline() -> None:
     default_codes: Set[str] = {rule.code for rule in default_ruleset.rules}
     default_version = _version_key(default_ruleset.ruleset_version)
 
-    missing_codes = sorted(RULE_CODES - default_codes)
+    documented = set(CODES_WITHOUT_DEFAULT_RULE)
+    missing_codes = sorted(RULE_CODES - default_codes - documented)
     assert not missing_codes, (
         "штатный набор vkr_test_rules.json не содержит правил видов: "
         + ", ".join(missing_codes)
         + ". Новый вид правила должен попасть в набор по умолчанию"
+    )
+    stale = sorted(documented & default_codes)
+    assert not stale, (
+        "коды перечислены как сознательно не включённые, но правила есть: "
+        + ", ".join(stale)
     )
 
     for profile_id, profile_path in PROFILE_RULESET_PATHS.items():
@@ -259,6 +266,8 @@ def test_default_rule_scopes_match_shipped_rulesets() -> None:
 
     drifted = []
     for code, scope in DEFAULT_RULE_SCOPES.items():
+        if code in CODES_WITHOUT_DEFAULT_RULE:
+            continue
         actual = used_scopes.get(code, set())
         if scope not in actual:
             drifted.append(

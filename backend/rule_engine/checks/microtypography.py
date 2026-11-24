@@ -217,8 +217,25 @@ def _check_microtypography_rule(
     violations: List[Violation] = []
     total_issues = 0
     issue_totals: Dict[str, int] = {check: 0 for check in checks}
+    footnotes_scope = rule.target.scope == "footnotes"
     for paragraph in targets:
         issues = _collect_issues(paragraph, checks)
+        if footnotes_scope:
+            # Хвостовые пробелы сноски — след вёрстки, а не авторская ошибка:
+            # в основном тексте их отсекает разбор абзаца, в сносках он их оставляет.
+            text = paragraph.text_visible or ""
+            trimmed = len(text.rstrip())
+            issues = {
+                check: [
+                    span for span in spans
+                    if not (
+                        span.start_char >= trimmed
+                        and not text[span.start_char:span.end_char].strip()
+                    )
+                ]
+                for check, spans in issues.items()
+            }
+            issues = {check: spans for check, spans in issues.items() if spans}
         if not issues:
             continue
         issue_count = sum(len(spans) for spans in issues.values())

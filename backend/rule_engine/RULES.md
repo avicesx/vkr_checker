@@ -1949,3 +1949,49 @@ ruleset = load_profile_ruleset("urgpu")    # 60 правил: база 4.3.0 + 3
 заполнил `section_number_raw` (например, «I. ВВЕДЕНИЕ» или «ГЛАВА II»). Тесты
 каждого параметра — в `tests/test_guideline_params.py`, положительный и
 отрицательный случай в одном тесте.
+
+## 12. Новые коды проверок (срез 2)
+
+Раздел описывает коды, добавленные для требований, которые прежние проверки не
+выражали. Каждый код — самостоятельный вид правила со своими `params`; адрес
+находки всегда содержит `block_id` и страницу, а при отсутствии данных правило
+возвращает `not_assessed` с объяснением в `details`.
+
+| Код | Что проверяет | `params` |
+| --- | --- | --- |
+| `figure_after_reference` | рисунок стоит после первой ссылки на него | `require_before_reference` |
+| `table_after_reference` | таблица стоит после первой ссылки на неё | `require_before_reference` |
+| `formula_placement` | формула вынесена в отдельную строку и выровнена | `require_standalone_line`, `alignment` |
+| `footnote_numbering` | сквозная нумерация сносок или с единицы на странице | `scheme`, `start_at` |
+| `source_note_figure` | под рисунком указан источник | `require_note`, `source_words`, `search_distance` |
+| `source_note_table` | под таблицей указан источник | `require_note`, `source_words`, `search_distance` |
+| `table_units` | в шапке таблицы указаны единицы измерения и период | `require_units`, `require_period`, `unit_patterns` |
+| `formula_line_break` | при переносе формулы знак повторён в начале строки | `require_operator_repeat`, `operators` |
+| `figure_spacing` | отбивка между иллюстрациями и до нижнего края страницы (PDF) | `min_gap_between_mm`, `min_gap_to_page_bottom_mm`, `tolerance_mm` |
+| `citation_required` | за цитатой в кавычках стоит ссылка на источник | `require_reference`, `quote_chars`, `allow_footnote_reference` |
+| `source_label` | подпись «Источник» и её содержание | `label_words`, `require_content`, `require_under_tables`, `search_distance` |
+| `number_format` | дробная часть отделяется запятой | `decimal_separator`, `min_integer_digits` |
+| `paragraph_style` | абзац оформлен базовым стилем без прямого форматирования | `allowed_styles`, `forbid_direct_formatting` |
+
+Дополнительно у `microtypography` появилась область `footnotes`: правило может
+проверять кавычки, пробелы и тире в сносках. Хвостовые пробелы сноски в этой
+области не считаются ошибкой: это след вёрстки, а не авторский текст.
+
+В штатный набор 5.0.0 включены семь правил: `figure_after_reference`,
+`table_after_reference`, `formula_placement`, `footnote_numbering`,
+`formula_line_break`, `source_label` и `microtypography` в области сносок.
+Остальные коды реализованы и покрыты тестами, но в набор не включены, потому
+что на корпусе ВКР дают ложные находки либо требуют согласования с методистом:
+`figure_spacing` (отбивка 2–5 мм у нижнего края встречается и у аккуратных
+работ), `source_note_figure` и `source_note_table` (источник обязателен только
+для заимствованных объектов, а признака заимствования в разборе нет),
+`table_units` (шапки счётных таблиц без единиц — норма), `citation_required`
+(кавычки в подписях интерфейса не являются цитатами), `number_format` (ловит
+версии и обозначения вроде «UML 2.0»), `paragraph_style` (прямое форматирование
+стоит в каждом абзаце реальных ВКР, а имена стилей Word не сопоставимы).
+Исключения зафиксированы в `tests/conftest.py` (`CODES_WITHOUT_DEFAULT_RULE`),
+чтобы тест покрытия не требовал правила для каждого кода молча.
+
+Тесты кодов — в `tests/test_rules_guideline_extra.py`: положительный и
+отрицательный случай на каждый код, для сносок, координат иллюстраций и формул
+используются синтетические документы, потому что в корпусе этих данных мало.

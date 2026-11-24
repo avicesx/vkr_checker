@@ -392,6 +392,71 @@ _CODE_DETAILS: dict[
         ReportSeverity.HIGH,
         "Добавьте на титульный лист обязательные реквизиты по методичке.",
     ),
+    "figure_after_reference": (
+        ReportCategory.FIGURES,
+        ReportSeverity.MEDIUM,
+        "Перенесите рисунок ниже первой ссылки на него или поставьте ссылку раньше.",
+    ),
+    "table_after_reference": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Перенесите таблицу ниже первой ссылки на неё или поставьте ссылку раньше.",
+    ),
+    "formula_placement": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Вынесите формулу в отдельную строку и выровняйте по методичке.",
+    ),
+    "footnote_numbering": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.MEDIUM,
+        "Приведите нумерацию сносок к сквозной или постраничной.",
+    ),
+    "source_note_figure": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.MEDIUM,
+        "Добавьте под рисунком ссылку на источник.",
+    ),
+    "source_note_table": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.MEDIUM,
+        "Добавьте под таблицей ссылку на источник.",
+    ),
+    "table_units": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Укажите в шапке таблицы единицы измерения и период.",
+    ),
+    "formula_line_break": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Начинайте строку переноса формулы со знака.",
+    ),
+    "figure_spacing": (
+        ReportCategory.FIGURES,
+        ReportSeverity.LOW,
+        "Увеличьте отбивку между иллюстрациями и от нижнего края страницы.",
+    ),
+    "citation_required": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.HIGH,
+        "Поставьте ссылку на источник после цитаты.",
+    ),
+    "source_label": (
+        ReportCategory.BIBLIOGRAPHY,
+        ReportSeverity.LOW,
+        "Оформите подпись «Источник» с описанием под таблицей.",
+    ),
+    "number_format": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Записывайте десятичные числа с запятой.",
+    ),
+    "paragraph_style": (
+        ReportCategory.FORMATTING,
+        ReportSeverity.LOW,
+        "Оформляйте абзац базовым стилем без прямого форматирования.",
+    ),
 }
 
 # резервные категории для семейств правил, которых нет в _CODE_DETAILS:

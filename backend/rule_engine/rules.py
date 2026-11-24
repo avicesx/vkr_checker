@@ -78,6 +78,19 @@ RuleCode = Literal[
     "heading_hyphenation",
     "appendix_order",
     "title_page_content",
+    "figure_after_reference",
+    "table_after_reference",
+    "formula_placement",
+    "footnote_numbering",
+    "source_note_figure",
+    "source_note_table",
+    "table_units",
+    "formula_line_break",
+    "figure_spacing",
+    "citation_required",
+    "source_label",
+    "number_format",
+    "paragraph_style",
 ]
 Strictness = Literal["error", "warning", "info"]
 
@@ -2650,6 +2663,289 @@ class TitlePageContentExpectation(BaseModel):
         return self
 
 
+class FigureAfterReferenceExpectation(BaseModel):
+    """Требование к порядку рисунка и первой ссылки на него."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_before_reference: bool = Field(
+        default=True,
+        description="Ссылка на рисунок должна стоять в тексте до самого рисунка",
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "FigureAfterReferenceExpectation":
+        if not self.require_before_reference:
+            raise ValueError(
+                "FigureAfterReferenceExpectation: при require_before_reference=False проверять нечего"
+            )
+        return self
+
+
+class TableAfterReferenceExpectation(BaseModel):
+    """Требование к порядку таблицы и первой ссылки на неё."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_before_reference: bool = Field(
+        default=True,
+        description="Ссылка на таблицу должна стоять в тексте до самой таблицы",
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "TableAfterReferenceExpectation":
+        if not self.require_before_reference:
+            raise ValueError(
+                "TableAfterReferenceExpectation: при require_before_reference=False проверять нечего"
+            )
+        return self
+
+
+class FormulaPlacementExpectation(BaseModel):
+    """Требование к выносу формулы в отдельную строку и её выравниванию."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_standalone_line: bool = Field(
+        default=True, description="Формула вынесена в отдельную строку"
+    )
+    alignment: Optional[Literal["left", "center", "right"]] = Field(
+        default="center", description="Выравнивание строки с формулой"
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "FormulaPlacementExpectation":
+        if not self.require_standalone_line and self.alignment is None:
+            raise ValueError(
+                "FormulaPlacementExpectation: задайте require_standalone_line или alignment"
+            )
+        return self
+
+
+class FootnoteNumberingExpectation(BaseModel):
+    """Требование к нумерации сносок: сквозной или с единицы на каждой странице."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scheme: Literal["continuous", "per_page", "any"] = Field(
+        default="continuous",
+        description="continuous — сквозная нумерация, per_page — с единицы на каждой странице",
+    )
+    start_at: int = Field(default=1, ge=1, le=100, description="Первый номер сноски")
+
+
+class SourceNoteExpectation(BaseModel):
+    """Требование к библиографической ссылке на источник под объектом."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_words: List[str] = Field(
+        default_factory=lambda: ["Источник", "Составлено по", "Источник:"],
+        description="Слова, с которых начинается ссылка на источник",
+    )
+    require_note: bool = Field(
+        default=True, description="Ссылка на источник под объектом обязательна"
+    )
+    search_distance: int = Field(
+        default=2, ge=1, le=5, description="Сколько блоков после объекта просматривать"
+    )
+
+    @field_validator("source_words")
+    @classmethod
+    def _validate_words(cls, value: List[str]) -> List[str]:
+        words = [word.strip() for word in value if word.strip()]
+        if not words:
+            raise ValueError("SourceNoteExpectation: source_words пуст")
+        return words
+
+
+class TableUnitsExpectation(BaseModel):
+    """Требование к единицам измерения и периоду в таблице."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_units: bool = Field(
+        default=True, description="В таблице указаны единицы измерения"
+    )
+    require_period: bool = Field(
+        default=False, description="В таблице указан период времени"
+    )
+    unit_patterns: List[str] = Field(
+        default_factory=lambda: [
+            r"тыс\.",
+            r"млн",
+            r"руб\.",
+            r"%",
+            r"ед\.",
+            r"шт\.",
+            r"чел\.",
+            r"\bм\b",
+            r"кг",
+            r"\bл\b",
+            r"\bга\b",
+            r"дн",
+            r"час",
+            r"мес\.",
+            r"°[cс]",
+        ],
+        description="Регулярные выражения единиц измерения",
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "TableUnitsExpectation":
+        if not self.require_units and not self.require_period:
+            raise ValueError(
+                "TableUnitsExpectation: задайте require_units или require_period"
+            )
+        for pattern in self.unit_patterns:
+            re.compile(pattern)
+        return self
+
+
+class FormulaLineBreakExpectation(BaseModel):
+    """Требование к переносу формулы по знакам с повтором знака."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_operator_repeat: bool = Field(
+        default=True,
+        description="При переносе знак операции повторяется в начале следующей строки",
+    )
+    operators: List[str] = Field(
+        default_factory=lambda: ["=", "+", "\u2212", "-", "\u00d7", "\u00b7", ":", "/"],
+        description="Знаки операций, которые переносятся с повтором",
+    )
+
+    @field_validator("operators")
+    @classmethod
+    def _validate_operators(cls, value: List[str]) -> List[str]:
+        operators = [operator.strip() for operator in value if operator.strip()]
+        if not operators:
+            raise ValueError("FormulaLineBreakExpectation: operators пуст")
+        return operators
+
+
+class FigureSpacingExpectation(BaseModel):
+    """Требование к отбивке между иллюстрациями и от нижнего края страницы."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_gap_between_mm: float = Field(
+        default=10.0, ge=0, le=100, description="Минимальная отбивка между иллюстрациями"
+    )
+    min_gap_to_page_bottom_mm: float = Field(
+        default=10.0,
+        ge=0,
+        le=100,
+        description="Минимальная отбивка от иллюстрации до нижнего края страницы",
+    )
+    tolerance_mm: float = Field(default=2.0, ge=0, le=20, description="Допуск измерения")
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "FigureSpacingExpectation":
+        if not self.min_gap_between_mm and not self.min_gap_to_page_bottom_mm:
+            raise ValueError(
+                "FigureSpacingExpectation: обе отбивки нулевые, проверять нечего"
+            )
+        return self
+
+
+class CitationRequiredExpectation(BaseModel):
+    """Требование к ссылке на источник после цитаты."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quote_chars: List[str] = Field(
+        default_factory=lambda: ["\u00ab", "\u00bb", "\u201c", "\u201d"],
+        description="Символы кавычек, которыми выделена цитата",
+    )
+    require_reference: bool = Field(
+        default=True, description="После цитаты в кавычках стоит ссылка на источник"
+    )
+    allow_footnote_reference: bool = Field(
+        default=True, description="Ссылка в сноске считается достаточной"
+    )
+
+    @field_validator("quote_chars")
+    @classmethod
+    def _validate_quote_chars(cls, value: List[str]) -> List[str]:
+        chars = [char for char in value if char]
+        if not chars:
+            raise ValueError("CitationRequiredExpectation: quote_chars пуст")
+        return chars
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "CitationRequiredExpectation":
+        if not self.require_reference:
+            raise ValueError(
+                "CitationRequiredExpectation: при require_reference=False проверять нечего"
+            )
+        return self
+
+
+class SourceLabelExpectation(BaseModel):
+    """Требование к подписи «Источник» под объектом и её содержанию."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label_words: List[str] = Field(
+        default_factory=lambda: ["Источник", "Источник:"],
+        description="Слова подписи источника",
+    )
+    require_content: bool = Field(
+        default=True, description="После слова «Источник» указано, откуда взяты данные"
+    )
+    require_under_tables: bool = Field(
+        default=False, description="Под каждой таблицей есть подпись источника"
+    )
+    search_distance: int = Field(
+        default=3, ge=1, le=10, description="Сколько блоков после таблицы просматривать"
+    )
+
+    @field_validator("label_words")
+    @classmethod
+    def _validate_labels(cls, value: List[str]) -> List[str]:
+        words = [word.strip() for word in value if word.strip()]
+        if not words:
+            raise ValueError("SourceLabelExpectation: label_words пуст")
+        return words
+
+
+class NumberFormatExpectation(BaseModel):
+    """Требование к записи десятичных чисел с запятой."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decimal_separator: Literal["comma", "dot"] = Field(
+        default="comma", description="Разделитель целой и дробной части"
+    )
+    min_integer_digits: int = Field(
+        default=1, ge=1, le=6, description="Минимальное число цифр перед запятой"
+    )
+
+
+class ParagraphStyleExpectation(BaseModel):
+    """Требование к оформлению абзаца базовым стилем без прямого форматирования."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_styles: List[str] = Field(
+        default_factory=lambda: ["Normal", "Обычный"],
+        description="Стили абзаца, которые считаются базовыми",
+    )
+    forbid_direct_formatting: bool = Field(
+        default=True, description="Абзац не должен нести прямое форматирование"
+    )
+
+    @field_validator("allowed_styles")
+    @classmethod
+    def _validate_styles(cls, value: List[str]) -> List[str]:
+        styles = [style.strip() for style in value if style.strip()]
+        if not styles:
+            raise ValueError("ParagraphStyleExpectation: allowed_styles пуст")
+        return styles
+
+
 class InlineReferenceFormatRule(_RuleBase):
     """Правило оформления ссылки на источник или объект внутри текста."""
 
@@ -2727,6 +3023,118 @@ class TitlePageContentRule(_RuleBase):
     params: TitlePageContentExpectation
 
 
+class FigureAfterReferenceRule(_RuleBase):
+    """Правило порядка рисунка и первой ссылки на него."""
+
+    code: Literal["figure_after_reference"] = "figure_after_reference"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: FigureAfterReferenceExpectation
+
+
+class TableAfterReferenceRule(_RuleBase):
+    """Правило порядка таблицы и первой ссылки на неё."""
+
+    code: Literal["table_after_reference"] = "table_after_reference"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: TableAfterReferenceExpectation
+
+
+class FormulaPlacementRule(_RuleBase):
+    """Правило выноса формулы в отдельную строку и её выравнивания."""
+
+    code: Literal["formula_placement"] = "formula_placement"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    params: FormulaPlacementExpectation
+
+
+class FootnoteNumberingRule(_RuleBase):
+    """Правило нумерации сносок."""
+
+    code: Literal["footnote_numbering"] = "footnote_numbering"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="footnotes"))
+    params: FootnoteNumberingExpectation
+
+
+class SourceNoteFigureRule(_RuleBase):
+    """Правило ссылки на источник под рисунком."""
+
+    code: Literal["source_note_figure"] = "source_note_figure"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: SourceNoteExpectation
+
+
+class SourceNoteTableRule(_RuleBase):
+    """Правило ссылки на источник под таблицей."""
+
+    code: Literal["source_note_table"] = "source_note_table"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: SourceNoteExpectation
+
+
+class TableUnitsRule(_RuleBase):
+    """Правило единиц измерения и периода в таблице."""
+
+    code: Literal["table_units"] = "table_units"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="table_cells"))
+    params: TableUnitsExpectation
+
+
+class FormulaLineBreakRule(_RuleBase):
+    """Правило переноса формулы по знакам."""
+
+    code: Literal["formula_line_break"] = "formula_line_break"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    params: FormulaLineBreakExpectation
+
+
+class FigureSpacingRule(_RuleBase):
+    """Правило отбивки иллюстраций от соседей и края страницы."""
+
+    code: Literal["figure_spacing"] = "figure_spacing"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    params: FigureSpacingExpectation
+
+
+class CitationRequiredRule(_RuleBase):
+    """Правило ссылки на источник после цитаты."""
+
+    code: Literal["citation_required"] = "citation_required"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: CitationRequiredExpectation
+
+
+class SourceLabelRule(_RuleBase):
+    """Правило подписи «Источник» под объектом."""
+
+    code: Literal["source_label"] = "source_label"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: SourceLabelExpectation
+
+
+class NumberFormatRule(_RuleBase):
+    """Правило десятичной запятой в числах."""
+
+    code: Literal["number_format"] = "number_format"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: NumberFormatExpectation
+
+
+class ParagraphStyleRule(_RuleBase):
+    """Правило оформления абзаца базовым стилем."""
+
+    code: Literal["paragraph_style"] = "paragraph_style"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: ParagraphStyleExpectation
+
+
 Rule = Annotated[
     Union[
         FontRule,
@@ -2765,6 +3173,19 @@ Rule = Annotated[
         HeadingHyphenationRule,
         AppendixOrderRule,
         TitlePageContentRule,
+        FigureAfterReferenceRule,
+        TableAfterReferenceRule,
+        FormulaPlacementRule,
+        FootnoteNumberingRule,
+        SourceNoteFigureRule,
+        SourceNoteTableRule,
+        TableUnitsRule,
+        FormulaLineBreakRule,
+        FigureSpacingRule,
+        CitationRequiredRule,
+        SourceLabelRule,
+        NumberFormatRule,
+        ParagraphStyleRule,
     ],
     Field(discriminator="code"),
 ]
@@ -2792,7 +3213,9 @@ CODE_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "keep_next": HEADING_SCOPES,
     "heading_page_break": HEADING_SCOPES,
     "document_volume": frozenset({"document"}),
-    "microtypography": frozenset({"body_text", "body_paragraphs", "all_paragraphs"}),
+    "microtypography": frozenset(
+        {"body_text", "body_paragraphs", "all_paragraphs", "footnotes"}
+    ),
     "equation_numbering": frozenset({"document"}),
     "bibliography_count": BIBLIOGRAPHY_SCOPES,
     "bibliography_order": BIBLIOGRAPHY_SCOPES,
@@ -2806,6 +3229,19 @@ CODE_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "heading_hyphenation": HEADING_SCOPES,
     "appendix_order": STRUCTURE_SCOPES,
     "title_page_content": STRUCTURE_SCOPES,
+    "figure_after_reference": CAPTION_SCOPES,
+    "table_after_reference": CAPTION_SCOPES,
+    "formula_placement": frozenset({"document"}),
+    "footnote_numbering": frozenset({"footnotes"}),
+    "source_note_figure": CAPTION_SCOPES,
+    "source_note_table": CAPTION_SCOPES,
+    "table_units": frozenset({"table_cells"}),
+    "formula_line_break": frozenset({"document"}),
+    "figure_spacing": frozenset({"document"}),
+    "citation_required": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
+    "source_label": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
+    "number_format": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
+    "paragraph_style": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
 }
 """Какие scope допустимы для каждого вида правила (проверяется при загрузке набора)."""
 
