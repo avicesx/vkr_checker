@@ -270,7 +270,8 @@
           "conclusion",
           "bibliography",
           "appendix"
-        ]
+        ],
+        "require_page_break": false
       }
     },
     {

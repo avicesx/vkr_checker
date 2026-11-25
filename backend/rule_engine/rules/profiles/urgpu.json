@@ -109,7 +109,8 @@
         ],
         "forbid_new_page_roles": [
           "sub_section"
-        ]
+        ],
+        "require_page_break": true
       }
     },
     {
