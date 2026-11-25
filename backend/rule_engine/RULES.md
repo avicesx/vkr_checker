@@ -31,7 +31,7 @@
 
 Версия набора 5.2.0 — это 58 правил на 41 коде; реестр движка знает 49 кодов,
 остальные восемь описаны, покрыты тестами и включаются профилем или методичкой, а
-не набором по умолчанию (раздел 12). Все ключи `params` — 212 на весь реестр —
+не набором по умолчанию (раздел 12). Все ключи `params` — 215 на весь реестр —
 перечислены в разделе 3.
 
 Проверки ссылок, подписей и формата записей работают по `cross_ref_index`:
@@ -326,6 +326,7 @@ python manual_test/check_rules.py manual_test/test.docx \
 | `size_pt` | `null` | кегль в пунктах (1…200) |
 | `bold` | `null` | ожидаемое начертание |
 | `italic` | `null` | ожидаемое начертание |
+| `color` | `null` | ожидаемый цвет видимых ранов и подсветка (`FontColorExpectation`: `allowed_colors`, `allow_highlight`); включается методичкой, где цвет прямо оговорён |
 | `size_tolerance_pt` | `0.5` | допуск по кеглю, пункты |
 | `check_complex_script` | `false` | дополнительно сверять `font_cs` |
 | `normalize_family` | `true` | сравнивать гарнитуру по нормализованному имени; `false` — прежнее строгое сравнение |
@@ -1944,7 +1945,7 @@ ruleset = load_profile_ruleset("urgpu")    # 67 правил: база 5.2.0 + 3
 
 ## 11. Опциональные параметры расширения охвата
 
-В наборе 5.2.0 есть 32 опциональных параметра расширения охвата: без них поведение правил не
+В наборе 5.2.0 есть 35 опциональных параметров расширения охвата: без них поведение правил не
 меняется, поэтому действующий набор и профили дают прежние находки. Параметры
 включаются в `params` конкретного правила; взаимоисключающие значения проверяет
 `RuleSet` при загрузке набора, а не при проверке документа.
@@ -1957,14 +1958,15 @@ ruleset = load_profile_ruleset("urgpu")    # 67 правил: база 5.2.0 + 3
 | `toc` | `start_page`, `require_entry_number` | страница начала оглавления и номер у обязательной записи |
 | `appendix_order` | `label_scheme` | буквенная или арабская запись обозначений приложений |
 | `page_number_position` | `first_numbered_page` | страница, с которой печатается номер (только PDF-режим) |
-| `table_layout` | `alignment`, `forbid_number_column` | выравнивание таблицы и колонка «№» |
+| `table_layout` | `alignment`, `forbid_number_column`, `forbid_color_fill` | выравнивание таблицы, колонка «№» и цветная заливка ячеек |
 | `table_header_format` | `require_header_row` | наличие строки-шапки |
 | `required_sections` | `require_subsections` | наличие подразделов у каждой главы |
-| `font` | `smaller_than_body_text` | кегль рана не меньше кегля основного текста (взаимоисключающе с `size_pt` и `min_size_pt`) |
+| `font` | `smaller_than_body_text`, `color` | кегль рана не меньше кегля основного текста (взаимоисключающе с `size_pt` и `min_size_pt`); цвет и подсветка рана |
 | `document_volume` | `section_page_limits`, `section_min_pages`, `max_appendix_share` | границы страниц по разделам и доля приложений |
 | `bibliography_order` | `foreign_sources_last`, `number_style`, `author_group_sort`, `legal_force_order` | иностранные источники в конце, запись номеров, порядок по авторам и юридической силе |
 | `bibliography_format` | `require_author`, `require_journal_title`, `require_publication_place`, `require_publication_source`, `require_archive_details`, `description_schema` | обязательные области описания и их порядок |
 | `equation_numbering` | `number_position`, `number_style` | положение и запись номера формулы |
+| `heading_page_break` | `require_page_break` | явный разрыв страницы в начале раздела: проверка включается только у DOCX, где разрывы вообще есть |
 
 Три параметра — `require_archive_details` (`bibliography_format`),
 `legal_force_order` (`bibliography_order`) и `require_header_row`
