@@ -1096,17 +1096,17 @@ class HeadingPageBreakExpectation(BaseModel):
         ),
     )
 
-    @field_validator("roles")
-    @classmethod
-    def _validate_roles(cls, value: List[HeadingRole]) -> List[HeadingRole]:
-        """Проверяет, что перечень ролей непустой."""
-        if not value:
-            raise ValueError("HeadingPageBreakExpectation: перечень roles не может быть пустым")
-        return value
-
     @model_validator(mode="after")
     def _validate_role_sets(self) -> "HeadingPageBreakExpectation":
-        """Проверяет, что роль не требуется и не запрещается одновременно."""
+        """Проверяет, что роль не требуется и не запрещается одновременно.
+
+        Разрешение пустого ``roles`` нужно правилу, которое проверяет только
+        запрет разрыва перед параграфом: у него нет обязательных ролей.
+        """
+        if not self.roles and not self.forbid_new_page_roles:
+            raise ValueError(
+                "HeadingPageBreakExpectation: задайте roles или forbid_new_page_roles"
+            )
         conflict = set(self.roles) & set(self.forbid_new_page_roles)
         if conflict:
             raise ValueError(

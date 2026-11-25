@@ -24,7 +24,12 @@ from parser.core.schema import (
     TextRun,
     ThemeData,
 )
-from rule_engine import RuleEngine, RuleSet, load_default_ruleset
+from rule_engine import (
+    RuleEngine,
+    RuleSet,
+    load_default_ruleset,
+    load_profile_ruleset,
+)
 from rule_engine.findings import RuleAssessment, RuleCheckReport
 from rule_engine.rules import Rule
 
@@ -483,6 +488,53 @@ def test_page_break_uses_exact_pdf_pages_without_rendered_breaks() -> None:
     assert [violation.location.block_id for violation in report.violations] == ["h_1"]
     assert report.violations[0].location.page_start_est == report.violations[0].found["start_page"]
     assert assessment.status == "fail"
+
+
+
+def test_profile_keeps_error_for_chapter_page_break() -> None:
+    """В профиле глава обязана начинать страницу, и находка остаётся error."""
+    rule = load_profile_ruleset("urgpu").get_rule("heading_page_break")
+    engine = RuleEngine(RuleSet(ruleset_id="test-chapter-break", ruleset_version="1.0.0", rules=[rule]))
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=2, page_end=2, breaks=[0]),
+            _heading("h_1", page_start=2, page_end=2),
+        ],
+        nodes=[_node("h_1")],
+        total_pages=8,
+    )
+
+    report = engine.check(document)
+
+    assert len(report.violations) == 1
+    violation = report.violations[0]
+    assert violation.rule_id == "heading_page_break"
+    assert violation.severity == "error"
+    assert violation.message == "Раздел должен начинаться с новой страницы"
+
+
+def test_profile_warns_when_paragraph_starts_new_page() -> None:
+    """Запрет разрыва перед параграфом — предупреждение с текстом про параграф."""
+    rule = load_profile_ruleset("urgpu").get_rule("heading_page_break_subsection")
+    engine = RuleEngine(RuleSet(ruleset_id="test-subsection-break", ruleset_version="1.0.0", rules=[rule]))
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=2, page_end=2),
+            _heading("h_1", level=2, page_start=3, page_end=3),
+        ],
+        nodes=[_node("h_1", level=2, role="sub_section", page_start=3, page_end=3)],
+        total_pages=8,
+    )
+
+    report = engine.check(document)
+
+    assert len(report.violations) == 1
+    violation = report.violations[0]
+    assert violation.rule_id == "heading_page_break_subsection"
+    assert violation.severity == "warning"
+    assert violation.message == "Параграф начинается с новой страницы, хотя не должен"
+    assert violation.expected_text == "параграф не должен начинаться с новой страницы"
+    assert violation.found["start_page"] == 3
 
 
 # ---------------------------------------------------------------- шрифт заголовков

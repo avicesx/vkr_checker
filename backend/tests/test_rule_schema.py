@@ -167,7 +167,7 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "5.2.0"
+    assert ruleset.ruleset_version == "5.3.0"
     expected_rule_ids = [
         "font_body_text",
         "indent_first_line",
@@ -817,6 +817,30 @@ def test_a4_requirement_comes_from_base_or_profile() -> None:
         assert inherited.params.width_mm == 210.0
 
 
+
+def test_page_break_rules_are_split_by_meaning() -> None:
+    """Требование и запрет разрыва страницы — разные правила со своими текстами."""
+    ruleset = load_profile_ruleset("urgpu")
+
+    chapters = ruleset.get_rule("heading_page_break")
+    assert chapters.strictness == "error"
+    assert chapters.message == "Раздел должен начинаться с новой страницы"
+    assert chapters.quote.startswith("Глава: с новой страницы")
+    assert chapters.params.require_page_break is True
+    assert chapters.params.forbid_new_page_roles == []
+
+    subsections = ruleset.get_rule("heading_page_break_subsection")
+    assert subsections.strictness == "warning"
+    assert subsections.message == "Параграф начинается с новой страницы, хотя не должен"
+    assert subsections.quote == "Начинать новый параграф с новой страницы не нужно."
+    assert subsections.params.forbid_new_page_roles == ["sub_section"]
+    assert subsections.params.require_page_break is False
+
+    base = load_default_ruleset().get_rule("heading_page_break")
+    assert base.strictness == "warning"
+    assert "по оценке страниц" in base.message
+
+
 def test_available_profiles_point_to_existing_files() -> None:
     """Каждый профиль поставляется отдельным файлом в каталоге rules."""
     assert available_profiles() == ("mpgu", "urgpu", "urfu")
@@ -858,5 +882,5 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "bibliography_recency",
     } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "5.2.0"
+    assert default_ruleset.ruleset_version == "5.3.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

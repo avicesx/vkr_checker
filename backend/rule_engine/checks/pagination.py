@@ -244,6 +244,8 @@ def _check_heading_page_break_rule(
     непустого абзаца. Пустые абзацы и разрывы перед ними не считаются
     содержимым: иначе глава, начатая сразу после пустой строки, выглядела бы
     нарушением. В PDF границы страниц точные, в DOCX — оценка по разрывам.
+    Требование и запрет разрыва — разные смыслы, поэтому в профиле это два
+    правила: глава обязана начинаться с новой страницы, параграф — нет.
     """
     roles = set(rule.params.roles)
     forbidden_roles = set(rule.params.forbid_new_page_roles)
@@ -334,7 +336,7 @@ def _check_heading_page_break_rule(
                     "start_page": start_page,
                     "previous_text_page": previous_page,
                 },
-                expected_text="раздел начинается с новой страницы",
+                expected_text="раздел должен начинаться с новой страницы",
                 found_text=(
                     f"раздел начинается на странице {start_page}, "
                     f"предыдущий текст заканчивается на странице {previous_page}"
@@ -363,9 +365,9 @@ def _check_heading_page_break_rule(
                     "start_page": start_page,
                     "previous_text_page": previous_page,
                 },
-                expected_text="раздел продолжается на текущей странице",
+                expected_text="параграф не должен начинаться с новой страницы",
                 found_text=(
-                    f"раздел начинается на странице {start_page}, "
+                    f"параграф начинается на странице {start_page}, "
                     f"предыдущий текст заканчивается на странице {previous_page}"
                 ),
                 confidence=confidence,

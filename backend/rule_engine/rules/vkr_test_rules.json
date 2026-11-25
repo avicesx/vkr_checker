@@ -1,6 +1,6 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "5.2.0",
+  "ruleset_version": "5.3.0",
   "description": "Штатный набор нормоконтроля ВКР: общие требования к тексту, структуре, таблицам, подписям и списку литературы",
   "rules": [
     {
@@ -258,7 +258,7 @@
       "rule_id": "heading_page_break",
       "code": "heading_page_break",
       "strictness": "warning",
-      "message": "Структурный раздел начинается с новой страницы",
+      "message": "Раздел начинается с новой страницы по оценке страниц",
       "quote": "Глава: с новой страницы (!), параграфы продолжать на той же странице",
       "target": {
         "scope": "headings"
