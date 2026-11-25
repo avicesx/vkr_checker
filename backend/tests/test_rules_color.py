@@ -213,11 +213,17 @@ def test_default_ruleset_has_no_color_or_fill_checks() -> None:
         assert getattr(params, "forbid_color_fill", False) is False
 
 
-def test_urgpu_profile_enables_color_and_fill() -> None:
-    """Профиль УрГПУ включает цвет текста и запрет заливки."""
-    ruleset = load_profile_ruleset("urgpu")
-    color_rule = ruleset.get_rule("font_color_body")
-    assert color_rule.params.color.allowed_colors == ["auto", "000000"]
-    assert color_rule.params.color.allow_highlight is False
-    table_rule = ruleset.get_rule("table_layout_borders")
-    assert table_rule.params.forbid_color_fill is True
+def test_no_shipped_ruleset_enables_color_or_fill() -> None:
+    """Ни один поставляемый набор не включает цвет и заливку.
+
+    Возможность движка реализована и покрыта тестами выше, но методичка УрГПУ
+    требований о цвете не содержит, поэтому профиль ее не включает.
+    """
+    for ruleset in (load_default_ruleset(), load_profile_ruleset("urgpu")):
+        assert not any(rule.rule_id == "font_color_body" for rule in ruleset.rules)
+        for rule in ruleset.rules:
+            params = getattr(rule, "params", None)
+            if params is None:
+                continue
+            assert getattr(params, "color", None) is None
+            assert getattr(params, "forbid_color_fill", False) is False
