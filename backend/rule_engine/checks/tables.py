@@ -156,6 +156,31 @@ def _table_location(table: TableBlock, snippet: str) -> ViolationLocation:
     )
 
 
+RE_NUMBER_COLUMN = re.compile(r"^\s*(?:№|N)\s*(?:п\s*/\s*п)?\.?\s*$", re.IGNORECASE)
+
+
+def _has_number_column(table: TableBlock) -> bool:
+    """Ищет служебную графу «№ п/п» в первых строках таблицы."""
+    for row in table.rows[:2]:
+        for cell in row.cells:
+            if cell.col_idx != 0 or cell.is_merged_shadow:
+                continue
+            if RE_NUMBER_COLUMN.match((cell.text_combined or "").strip()):
+                return True
+    return False
+
+
+def _cell_fill_hex(cell) -> Optional[str]:
+    """Возвращает HEX цветной заливки ячейки; белая и прозрачная не считаются."""
+    fill = cell.shading_fill
+    if fill is None or fill.is_auto:
+        return None
+    value = (fill.rgb_hex or "").upper()
+    if value in {"", "FFFFFF"}:
+        return None
+    return value
+
+
 def _check_table_layout_rule(
     rule: TableLayoutRule,
     document: ParsedDocxDocument,
@@ -190,6 +215,11 @@ def _check_table_layout_rule(
     violations: List[Violation] = []
     cells_checked = 0
     borders_not_measured: List[str] = []
+    alignment_checked = 0
+    alignment_not_set = 0
+    alignment_not_observed = 0
+    number_column_checked = 0
+    fill_checked = 0
 
     for table in tables:
         snippet = _table_snippet(table, captions)
@@ -255,11 +285,97 @@ def _check_table_layout_rule(
                     )
                 )
 
+        if expected.alignment is not None:
+            section_for_alignment = sections.get(table.section_idx)
+            if (
+                section_for_alignment is not None
+                and table.total_width_mm is not None
+                and table.total_width_mm
+                >= section_for_alignment.text_area_width_mm - 5.0
+            ):
+                # Таблица на всю ширину полосы: выравнивание по краям не
+                # наблюдаемо — проверять его нельзя.
+                alignment_not_observed += 1
+                actual_alignment = None
+                width_unobservable = True
+            else:
+                actual_alignment = table.alignment
+                width_unobservable = False
+            if width_unobservable:
+                pass
+            elif actual_alignment is None:
+                alignment_not_set += 1
+            else:
+                alignment_checked += 1
+                if actual_alignment != expected.alignment:
+                    violations.append(
+                        _build_violation(
+                            rule,
+                            address=f"{table.block_id}:alignment",
+                            location=location,
+                            expected={"alignment": expected.alignment},
+                            found={"alignment": actual_alignment},
+                            expected_text=(
+                                "таблица выровнена: "
+                                f"{ALIGNMENT_LABELS.get(expected.alignment, expected.alignment)}"
+                            ),
+                            found_text=(
+                                "таблица выровнена: "
+                                f"{ALIGNMENT_LABELS.get(actual_alignment, actual_alignment)}"
+                            ),
+                        )
+                    )
+
+        if expected.forbid_number_column:
+            number_column_checked += 1
+            if _has_number_column(table):
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{table.block_id}:number_column",
+                        location=location,
+                        expected={"number_column": False},
+                        found={"number_column": True, "table_id": table.block_id},
+                        expected_text="без служебной графы «№ п/п»",
+                        found_text="в таблице есть графа «№ п/п»",
+                    )
+                )
+
+        if expected.forbid_color_fill:
+            fill_checked += 1
+            filled = [cell for cell in _iter_cells(table) if _cell_fill_hex(cell)]
+            if filled:
+                first = filled[0]
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{table.block_id}:fill",
+                        location=location,
+                        expected={"fill": "none"},
+                        found={
+                            "cells_with_fill": len(filled),
+                            "first_cell_id": first.cell_id,
+                            "fill": _cell_fill_hex(first),
+                        },
+                        expected_text="ячейки без цветной заливки",
+                        found_text=(
+                            f"с цветной заливкой {len(filled)} ячеек, "
+                            f"первая — {first.cell_id}"
+                        ),
+                        occurrences=len(filled),
+                    )
+                )
+
     details = {
         "tables": len(tables),
         "cells_checked": cells_checked,
         "width_checked": expected.require_full_text_width,
         "borders_not_measured": len(borders_not_measured),
+        "alignment_checked": alignment_checked,
+        "alignment_not_set": alignment_not_set,
+        "alignment_not_observed": alignment_not_observed,
+        "number_column_checked": number_column_checked,
+        "fill_checked": fill_checked,
     }
     if (
         not violations
@@ -553,6 +669,12 @@ def _check_table_header_format_rule(
         for order, row in enumerate(_header_rows(table)):
             headers.append((table, row, order))
     expected_text = "заголовки граф и строк таблицы с заглавной буквы, без точки в конце"
+    violations: List[Violation] = []
+    headerless_tables = [table for table in tables if not _header_rows(table)]
+    # Требование «строка-шапка есть» не превращается в находку: в DOCX
+    # шапку часто не помечают флагом is_tbl_header, и находка спорила бы
+    # с видимой на странице шапкой. Таблицы без разметки уходят в
+    # not_assessed, а число таких таблиц видно в details.
     if not headers:
         return (
             [],
@@ -566,11 +688,14 @@ def _check_table_header_format_rule(
                     "(TableRow.is_tbl_header пуст): проверять заголовки нечего"
                 ),
                 confidence="low",
-                details={"tables": len(tables), "header_rows": 0},
+                details={
+                    "tables": len(tables),
+                    "header_rows": 0,
+                    "headerless_tables": len(tables),
+                },
             ),
         )
 
-    violations: List[Violation] = []
     cells_checked = 0
     for table, row, order in headers:
         for cell in row.cells:
@@ -644,6 +769,8 @@ def _check_table_header_format_rule(
             "tables": len(tables),
             "header_rows": len(headers),
             "cells_checked": cells_checked,
+            "require_header_row": expected.require_header_row,
+            "headerless_tables": len(headerless_tables),
         },
     )
     return violations, len(headers), assessment

@@ -406,7 +406,94 @@ def _is_normative_entry(entry: BibliographyEntry) -> bool:
     return bool(RE_NORMATIVE_ACT.match(entry.raw_text or ""))
 
 
+#: Автор в описании: фамилия с инициалами или организация-автор.
+RE_AUTHOR = re.compile(
+    r"(?:[А-ЯЁ][а-яё\-]{2,}\s+[А-ЯЁ]\.\s*(?:[А-ЯЁ]\.)?)"
+    r"|(?:[A-Z][a-z\-]{2,},?\s+[A-Z]\.)"
+    r"|(?:государственн\w*|российск\w*|институт|университет|академи|министерств"
+    r"|комитет|центр|центр\w*|научн\w*)",
+)
+
+#: Название журнала или сборника после «//».
+RE_JOURNAL_TITLE = re.compile(r"//\s*([^/]{2,})")
+
+#: Место издания: «М.», «СПб.», «Москва:» перед издательством.
+RE_PUBLICATION_PLACE = re.compile(
+    r"(?<![А-Яа-яЁё])(?:М|СПб|Л|К|Новосибирск|Екатеринбург|Москва|"
+    r"Санкт-Петербург|Казань|Томск|Омск|Ростов-на-Дону|Нижний Новгород|"
+    r"Саратов|Самара|Уфа|Пермь|Челябинск)\s*[.:]",
+)
+
+#: Издательство или издающая организация.
+RE_PUBLICATION_SOURCE = re.compile(
+    r"(?:изд-во|издательств|издательск|publisher|press|"
+    r"https?://|www\.)",
+    re.IGNORECASE,
+)
+
+#: Пометки диссертации и автореферата.
+RE_ARCHIVE_DETAILS = re.compile(
+    r"(?:дис\.|диссертац|автореф|защит\w*\s+на\s+соискание)",
+    re.IGNORECASE,
+)
+
+
+def _entry_has_author(entry: BibliographyEntry) -> bool:
+    """True, если в описании есть автор или ответственное лицо."""
+    return bool(RE_AUTHOR.search(entry.raw_text))
+
+
+def _entry_journal_title(entry: BibliographyEntry) -> bool:
+    """True, если после «//» указано непустое название источника."""
+    match = RE_JOURNAL_TITLE.search(entry.raw_text)
+    return bool(match and sum(ch.isalpha() for ch in match.group(1)) >= 2)
+
+
+def _entry_publication_place(entry: BibliographyEntry) -> bool:
+    """True, если в описании указано место издания."""
+    return bool(RE_PUBLICATION_PLACE.search(entry.raw_text))
+
+
+def _entry_publication_source(entry: BibliographyEntry) -> bool:
+    """True, если указан источник публикации."""
+    return bool(_entry_journal_title(entry) or RE_PUBLICATION_SOURCE.search(entry.raw_text))
+
+
+def _entry_archive_details(entry: BibliographyEntry) -> bool:
+    """True, если у диссертации или автореферата есть архивные реквизиты."""
+    return bool(RE_ARCHIVE_DETAILS.search(entry.raw_text))
+
+
+#: Области описания для проверки порядка: шаблон и подпись.
+DESCRIPTION_SCHEMA_PATTERNS: Dict[str, Tuple[str, str]] = {
+    "author": (RE_AUTHOR.pattern, "автор"),
+    "title": (r"^\s*[^/.:]{4,}", "название"),
+    "publication": (RE_JOURNAL_TITLE.pattern, "источник публикации"),
+    "edition": (r"(?:изд-во|издательств|издательск)", "издательство"),
+    "year": (r"(?<!\d)(?:19\d{2}|20\d{2})(?!\d)", "год"),
+    "pages": (r"(?:\d+\s*с\.|С\.\s*\d+)", "страницы"),
+}
+
+
+def _description_schema_positions(
+    entry: BibliographyEntry,
+    schema: List[str],
+) -> List[Tuple[str, int]]:
+    """Возвращает позиции областей описания в порядке схемы."""
+    positions: List[Tuple[str, int]] = []
+    for area in schema:
+        pattern_data = DESCRIPTION_SCHEMA_PATTERNS.get(area)
+        if pattern_data is None:
+            continue
+        pattern, _label = pattern_data
+        match = re.search(pattern, entry.raw_text, re.IGNORECASE | re.MULTILINE)
+        if match is not None:
+            positions.append((area, match.start()))
+    return positions
+
+
 def _check_bibliography_format_rule(
+
     rule: BibliographyFormatRule,
     document: ParsedDocxDocument,
     contexts: Dict[str, str],
@@ -498,6 +585,16 @@ def _check_bibliography_format_rule(
             checks.append(
                 ("has_text_type_designation", entry.has_text_type_designation)
             )
+        if expected.require_author:
+            checks.append(("author", _entry_has_author(entry)))
+        if expected.require_journal_title:
+            checks.append(("journal_title", _entry_journal_title(entry)))
+        if expected.require_publication_place:
+            checks.append(("publication_place", _entry_publication_place(entry)))
+        if expected.require_publication_source:
+            checks.append(("publication_source", _entry_publication_source(entry)))
+        if expected.require_archive_details:
+            checks.append(("archive_details", _entry_archive_details(entry)))
 
         if (
             expected.forbid_dot_dash
@@ -520,6 +617,33 @@ def _check_bibliography_format_rule(
                     found_text=f"{label}: {entry.dot_dash_count}",
                 )
             )
+
+        if expected.description_schema:
+            positions = _description_schema_positions(entry, expected.description_schema)
+            for (previous_area, previous_at), (area, at) in zip(
+                positions, positions[1:]
+            ):
+                if at >= previous_at:
+                    continue
+                label = BIBLIOGRAPHY_FORMAT_LABELS["description_schema"]
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{entry.bib_id}:description_schema",
+                        location=_bibliography_location(entry, blocks),
+                        expected={"description_schema": list(expected.description_schema)},
+                        found={
+                            "previous": previous_area,
+                            "current": area,
+                            "bib_id": entry.bib_id,
+                        },
+                        expected_text=f"{label}: {' → '.join(expected.description_schema)}",
+                        found_text=(
+                            f"область «{area}» стоит раньше «{previous_area}»"
+                        ),
+                    )
+                )
+                break
 
         for field, actual in checks:
             if _bibliography_field_present(actual):
@@ -717,6 +841,76 @@ def _first_letter(text: str) -> str:
             return char.casefold()
     return ""
 
+#: Римская запись номера записи списка: «IV», «XII.».
+RE_ROMAN_NUMBER_PREFIX = re.compile(r"^[IVXLCDM]+\s*\.?$")
+
+#: Латиница в описании: иностранный источник или латинское название.
+RE_LATIN_WORD = re.compile(r"[A-Za-z]{3,}")
+
+#: Юридическая сила нормативных актов: меньшее значение — выше в списке.
+LEGAL_FORCE_RANKS: Tuple[Tuple[str, int, str], ...] = (
+    (r"\bконституци", 1, "Конституция"),
+    (r"\bкодекс", 2, "кодекс"),
+    (r"^\s*федеральн\w*\s+закон|^\s*закон", 3, "федеральный закон"),
+    (r"\bуказ\b", 4, "указ"),
+    (r"\bпостановлени", 5, "постановление"),
+    (r"\bраспоряжени", 6, "распоряжение"),
+    (r"\bприказ\b", 7, "приказ"),
+    (r"\bписьмо\b", 8, "письмо"),
+    (r"\bинструкци", 9, "инструкция"),
+    (r"\bгост\b|\bстандарт", 10, "стандарт"),
+    (r"\bсанпин|\bснип", 11, "санитарные правила"),
+)
+
+
+def _entry_number_style(entry: BibliographyEntry) -> Optional[str]:
+    """Определяет форму записи номера: «arabic», «roman» или None."""
+    prefix = (entry.raw_number_prefix or "").strip()
+    if not prefix:
+        return None
+    if prefix.isdigit():
+        return "arabic"
+    if RE_ROMAN_NUMBER_PREFIX.match(prefix):
+        return "roman"
+    return None
+
+
+def _is_foreign_entry(entry: BibliographyEntry) -> bool:
+    """Определяет иностранный источник по латинице в описании."""
+    return bool(RE_LATIN_WORD.search(entry.raw_text))
+
+
+def _legal_force_rank(entry: BibliographyEntry) -> Optional[Tuple[int, str]]:
+    """Возвращает ранг юридической силы нормативного акта и его подпись."""
+    text = entry.raw_text.strip()
+    for pattern, rank, label in LEGAL_FORCE_RANKS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return rank, label
+    return None
+
+
+def _entry_author(entry: BibliographyEntry) -> str:
+    """Возвращает автора записи для групповой сортировки.
+
+    Автором считается начало описания до точки: «Иванов И. И.» или
+    «Дубровина О. А.». Записи без автора (сборники, словари) в групповую
+    сортировку не попадают.
+    """
+    text = (entry.raw_text or "").strip()
+    match = re.match(r"^\s*([А-ЯЁA-Z][A-Za-zА-Яа-яЁё\-]+(?:\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]?\.?)?)", text)
+    if not match:
+        return ""
+    return " ".join(match.group(1).replace(".", ". ").split()).casefold()
+
+
+def _entry_title_text(entry: BibliographyEntry) -> str:
+    """Возвращает название записи без автора и служебных знаков."""
+    text = (entry.raw_text or "").strip()
+    match = re.match(r"^\s*[А-ЯЁA-Z][A-Za-zА-Яа-яЁё\-]+(?:\s+[А-ЯЁA-Z]\.\s*[А-ЯЁA-Z]?\.?)?\s*[.:]?\s*", text)
+    if match:
+        text = text[match.end():]
+    return text.lstrip("«\"„ “”")
+
 
 def _check_bibliography_order_rule(
     rule: BibliographyOrderRule,
@@ -872,6 +1066,121 @@ def _check_bibliography_order_rule(
             previous_letter = letter
             previous_entry = entry
 
+    if expected.number_style is not None:
+        style_label = {"arabic": "арабские цифры", "roman": "римские цифры"}[
+            expected.number_style
+        ]
+        for entry in entries:
+            if _is_group_header(entry):
+                continue
+            actual_style = _entry_number_style(entry)
+            if actual_style is None or actual_style == expected.number_style:
+                continue
+            violations.append(
+                _build_violation(
+                    rule,
+                    address=f"{entry.bib_id}:number_style",
+                    location=_bibliography_location(entry, blocks),
+                    expected={"number_style": expected.number_style},
+                    found={
+                        "number_style": actual_style,
+                        "raw_number": entry.raw_number_prefix,
+                    },
+                    expected_text=f"номера записей: {style_label}",
+                    found_text=f"номер записи: {entry.raw_number_prefix}",
+                    confidence="high",
+                )
+            )
+
+    if expected.foreign_sources_last:
+        foreign_seen = False
+        for entry in entries:
+            if _is_group_header(entry):
+                continue
+            if _is_foreign_entry(entry):
+                foreign_seen = True
+                continue
+            if foreign_seen:
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{entry.bib_id}:foreign_order",
+                        location=_bibliography_location(entry, blocks),
+                        expected={"foreign_sources_last": True},
+                        found={"foreign_sources_last": False},
+                        expected_text="иностранные источники в конце списка",
+                        found_text=(
+                            "русскоязычная запись стоит после иностранной: "
+                            f"«{_collapse_text(entry.raw_text)}»"
+                        ),
+                        confidence="high",
+                    )
+                )
+
+    if expected.author_group_sort:
+        previous_key: Optional[Tuple[str, str]] = None
+        for entry in entries:
+            if _is_group_header(entry):
+                previous_key = None
+                continue
+            if _legal_force_rank(entry) is not None:
+                # Нормативные акты группируются по юридической силе, а не по
+                # авторам: сравнивать их с фамилиями нельзя.
+                previous_key = None
+                continue
+            author = _entry_author(entry)
+            letter = _first_letter(_entry_title_text(entry))
+            if not author or not letter:
+                previous_key = None
+                continue
+            if previous_key is not None and previous_key[0] == author and letter < previous_key[1]:
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{entry.bib_id}:author_order",
+                        location=_bibliography_location(entry, blocks),
+                        expected={"author_group_sort": True},
+                        found={
+                            "author": author,
+                            "previous_title_letter": previous_key[1],
+                            "current_title_letter": letter,
+                        },
+                        expected_text="работы одного автора упорядочены по названиям",
+                        found_text=(
+                            f"у автора «{author}» название на «{letter}» стоит "
+                            f"после названия на «{previous_key[1]}»"
+                        ),
+                        confidence="high",
+                    )
+                )
+            previous_key = (author, letter)
+
+    if expected.legal_force_order:
+        previous_rank: Optional[int] = None
+        previous_label = ""
+        for entry in entries:
+            if _is_group_header(entry):
+                continue
+            rank_data = _legal_force_rank(entry)
+            if rank_data is None:
+                continue
+            rank, label = rank_data
+            if previous_rank is not None and rank < previous_rank:
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{entry.bib_id}:legal_force",
+                        location=_bibliography_location(entry, blocks),
+                        expected={"legal_force_rank": previous_rank},
+                        found={"legal_force_rank": rank, "document": label},
+                        expected_text=f"акт не выше по силе, чем {previous_label}",
+                        found_text=f"после акта ниже по силе идёт {label}",
+                        confidence="high",
+                    )
+                )
+            previous_rank = rank
+            previous_label = label
+
     assessment = _counted_assessment(
         rule,
         violations,
@@ -888,6 +1197,10 @@ def _check_bibliography_order_rule(
                 else None
             ),
             "sorted": expected.sort,
+            "foreign_sources_last": expected.foreign_sources_last,
+            "number_style": expected.number_style,
+            "author_group_sort": expected.author_group_sort,
+            "legal_force_order": expected.legal_force_order,
         },
     )
     return violations, len(entries), assessment

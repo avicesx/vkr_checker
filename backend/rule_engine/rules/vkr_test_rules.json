@@ -1,6 +1,6 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "4.3.0",
+  "ruleset_version": "5.3.0",
   "description": "Штатный набор нормоконтроля ВКР: общие требования к тексту, структуре, таблицам, подписям и списку литературы",
   "rules": [
     {
@@ -258,7 +258,7 @@
       "rule_id": "heading_page_break",
       "code": "heading_page_break",
       "strictness": "warning",
-      "message": "Структурный раздел начинается с новой страницы",
+      "message": "Раздел начинается с новой страницы по оценке страниц",
       "quote": "Глава: с новой страницы (!), параграфы продолжать на той же странице",
       "target": {
         "scope": "headings"
@@ -270,7 +270,8 @@
           "conclusion",
           "bibliography",
           "appendix"
-        ]
+        ],
+        "require_page_break": false
       }
     },
     {
@@ -489,19 +490,6 @@
       },
       "params": {
         "require_all_cited": true
-      }
-    },
-    {
-      "rule_id": "bibliography_count",
-      "code": "bibliography_count",
-      "strictness": "warning",
-      "message": "Список литературы содержит не менее 20 источников",
-      "quote": "Список литературы должен включать не менее 15-17 источников в полном библиографическом описании.",
-      "target": {
-        "scope": "bibliography"
-      },
-      "params": {
-        "min_sources": 20
       }
     },
     {
@@ -905,6 +893,100 @@
           "руководитель",
           "город",
           "год"
+        ]
+      }
+    },
+    {
+      "rule_id": "figure_after_reference",
+      "code": "figure_after_reference",
+      "strictness": "warning",
+      "message": "Рисунок стоит после первой ссылки на него в тексте",
+      "quote": "Рисунок размещают сразу после первой ссылки на него в тексте.",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {}
+    },
+    {
+      "rule_id": "table_after_reference",
+      "code": "table_after_reference",
+      "strictness": "warning",
+      "message": "Таблица стоит после первой ссылки на неё в тексте",
+      "quote": "Таблица размещается после первой ссылки на неё в тексте.",
+      "target": {
+        "scope": "captions"
+      },
+      "params": {}
+    },
+    {
+      "rule_id": "formula_placement",
+      "code": "formula_placement",
+      "strictness": "warning",
+      "message": "Формула вынесена в отдельную строку и выровнена по центру",
+      "quote": "Формула выносится в отдельную строку и выравнивается по центру.",
+      "target": {
+        "scope": "document"
+      },
+      "params": {
+        "require_standalone_line": true,
+        "alignment": "center"
+      }
+    },
+    {
+      "rule_id": "footnote_numbering",
+      "code": "footnote_numbering",
+      "strictness": "warning",
+      "message": "Сноски пронумерованы сквозным образом",
+      "quote": "Сноски нумеруются сквозным образом или с единицы на каждой странице.",
+      "target": {
+        "scope": "footnotes"
+      },
+      "params": {
+        "scheme": "continuous",
+        "start_at": 1
+      }
+    },
+    {
+      "rule_id": "formula_line_break",
+      "code": "formula_line_break",
+      "strictness": "warning",
+      "message": "При переносе формулы знак остаётся в начале строки",
+      "quote": "При переносе формулы знак повторяют в начале следующей строки.",
+      "target": {
+        "scope": "document"
+      },
+      "params": {
+        "require_operator_repeat": true
+      }
+    },
+    {
+      "rule_id": "source_label",
+      "code": "source_label",
+      "strictness": "warning",
+      "message": "Подпись «Источник» содержит описание",
+      "quote": "Подпись «Источник» под таблицей сопровождается описанием источника.",
+      "target": {
+        "scope": "body_paragraphs"
+      },
+      "params": {
+        "require_content": true,
+        "require_under_tables": false,
+        "search_distance": 3
+      }
+    },
+    {
+      "rule_id": "microtypography_footnotes",
+      "code": "microtypography",
+      "strictness": "info",
+      "message": "В сносках нет лишних пробелов и неверных кавычек",
+      "quote": "В сносках применяются кавычки-ёлочки и одиночные пробелы.",
+      "target": {
+        "scope": "footnotes"
+      },
+      "params": {
+        "checks": [
+          "wrong_quotes",
+          "multiple_spaces"
         ]
       }
     }

@@ -14,7 +14,6 @@ from rule_engine import (
     DEFAULT_RULESET_PATH,
     AlignmentRule,
     BibliographyCitedRule,
-    BibliographyCountRule,
     BibliographyFormatRule,
     BibliographyLinkRule,
     BibliographyOrderRule,
@@ -45,6 +44,10 @@ from rule_engine.rules import (
     AppendixOrderRule,
     CaptionPlacementRule,
     HeadingHyphenationRule,
+    FormulaLineBreakRule,
+    FormulaPlacementRule,
+    FootnoteNumberingRule,
+    FigureAfterReferenceRule,
     InlineReferenceFormatRule,
     LineSpacingRule,
     ListFormatRule,
@@ -53,6 +56,8 @@ from rule_engine.rules import (
     TableContinuationRule,
     TableHeaderFormatRule,
     TableLayoutRule,
+    SourceLabelRule,
+    TableAfterReferenceRule,
     TitlePageContentRule,
     available_profiles,
     load_profile_ruleset,
@@ -162,7 +167,7 @@ def test_default_ruleset_describes_all_checks() -> None:
     ruleset = load_default_ruleset()
 
     assert ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert ruleset.ruleset_version == "4.3.0"
+    assert ruleset.ruleset_version == "5.3.0"
     expected_rule_ids = [
         "font_body_text",
         "indent_first_line",
@@ -190,7 +195,6 @@ def test_default_ruleset_describes_all_checks() -> None:
         "equation_numbering",
         "bibliography_links_resolved",
         "bibliography_all_cited",
-        "bibliography_count",
         "bibliography_order",
         "bibliography_recency",
         "bibliography_format_electronic",
@@ -216,6 +220,13 @@ def test_default_ruleset_describes_all_checks() -> None:
         "list_format_default",
         "appendix_order_default",
         "title_page_content_default",
+        "figure_after_reference",
+        "table_after_reference",
+        "formula_placement",
+        "footnote_numbering",
+        "formula_line_break",
+        "source_label",
+        "microtypography_footnotes",
     ]
     assert [rule.rule_id for rule in ruleset.rules] == expected_rule_ids
     expected_types = [
@@ -245,7 +256,6 @@ def test_default_ruleset_describes_all_checks() -> None:
         EquationNumberingRule,
         BibliographyLinkRule,
         BibliographyCitedRule,
-        BibliographyCountRule,
         BibliographyOrderRule,
         BibliographyRecencyRule,
         BibliographyFormatRule,
@@ -271,6 +281,13 @@ def test_default_ruleset_describes_all_checks() -> None:
         ListFormatRule,
         AppendixOrderRule,
         TitlePageContentRule,
+        FigureAfterReferenceRule,
+        TableAfterReferenceRule,
+        FormulaPlacementRule,
+        FootnoteNumberingRule,
+        FormulaLineBreakRule,
+        SourceLabelRule,
+        MicroTypographyRule,
     ]
     assert len(expected_types) == len(expected_rule_ids)
     for rule, expected_type in zip(ruleset.rules, expected_types):
@@ -305,7 +322,6 @@ def test_default_ruleset_describes_all_checks() -> None:
     ]
     assert ruleset.get_rule("microtypography_nbsp").params.checks == ["missing_nbsp"]
     assert ruleset.get_rule("equation_numbering").params.require_numbering is True
-    assert ruleset.get_rule("bibliography_count").params.min_sources == 20
     order = ruleset.get_rule("bibliography_order").params
     assert (order.start_at, order.allow_gaps, order.allow_duplicates) == (1, False, False)
     recency = ruleset.get_rule("bibliography_recency").params
@@ -801,6 +817,30 @@ def test_a4_requirement_comes_from_base_or_profile() -> None:
         assert inherited.params.width_mm == 210.0
 
 
+
+def test_page_break_rules_are_split_by_meaning() -> None:
+    """Требование и запрет разрыва страницы — разные правила со своими текстами."""
+    ruleset = load_profile_ruleset("urgpu")
+
+    chapters = ruleset.get_rule("heading_page_break")
+    assert chapters.strictness == "error"
+    assert chapters.message == "Раздел должен начинаться с новой страницы"
+    assert chapters.quote.startswith("Глава: с новой страницы")
+    assert chapters.params.require_page_break is True
+    assert chapters.params.forbid_new_page_roles == []
+
+    subsections = ruleset.get_rule("heading_page_break_subsection")
+    assert subsections.strictness == "warning"
+    assert subsections.message == "Параграф начинается с новой страницы, хотя не должен"
+    assert subsections.quote == "Начинать новый параграф с новой страницы не нужно."
+    assert subsections.params.forbid_new_page_roles == ["sub_section"]
+    assert subsections.params.require_page_break is False
+
+    base = load_default_ruleset().get_rule("heading_page_break")
+    assert base.strictness == "warning"
+    assert "по оценке страниц" in base.message
+
+
 def test_available_profiles_point_to_existing_files() -> None:
     """Каждый профиль поставляется отдельным файлом в каталоге rules."""
     assert available_profiles() == ("mpgu", "urgpu", "urfu")
@@ -838,10 +878,9 @@ def test_profile_rulesets_do_not_change_default_ruleset() -> None:
         "document_volume",
         "microtypography",
         "equation_numbering",
-        "bibliography_count",
         "bibliography_order",
         "bibliography_recency",
     } <= default_codes
     assert default_ruleset.ruleset_id == "vkr-rule-engine-test"
-    assert default_ruleset.ruleset_version == "4.3.0"
+    assert default_ruleset.ruleset_version == "5.3.0"
     assert default_ruleset.ruleset_id != profile_ruleset.ruleset_id

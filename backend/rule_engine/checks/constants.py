@@ -50,6 +50,12 @@ BIBLIOGRAPHY_FORMAT_LABELS: Dict[str, str] = {
     "has_double_slash_source": "разделитель «//» перед источником",
     "has_text_type_designation": "обозначение вида издания",
     "dot_dash_count": "тире между элементами описания",
+    "author": "автор или ответственное лицо",
+    "journal_title": "название журнала или сборника",
+    "publication_place": "место издания",
+    "publication_source": "источник публикации",
+    "archive_details": "архивные реквизиты диссертации",
+    "description_schema": "порядок областей описания",
 }
 
 CAPTION_ENTITY_LABELS: Dict[str, str] = {

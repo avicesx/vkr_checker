@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Annotated, List, Literal, Optional, Set, Union
+from typing import Dict, Annotated, List, Literal, Optional, Set, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -78,6 +78,19 @@ RuleCode = Literal[
     "heading_hyphenation",
     "appendix_order",
     "title_page_content",
+    "figure_after_reference",
+    "table_after_reference",
+    "formula_placement",
+    "footnote_numbering",
+    "source_note_figure",
+    "source_note_table",
+    "table_units",
+    "formula_line_break",
+    "figure_spacing",
+    "citation_required",
+    "source_label",
+    "number_format",
+    "paragraph_style",
 ]
 Strictness = Literal["error", "warning", "info"]
 
@@ -261,6 +274,49 @@ class RuleTarget(BaseModel):
     )
 
 
+class FontColorExpectation(BaseModel):
+    """Ожидаемый цвет текста и подсветка.
+
+    ``allowed_colors`` перечисляет допустимые значения: ``auto`` — цвет по
+    умолчанию (в DOCX это ``w:val="auto"``), иначе шестизначный HEX в верхнем
+    регистре без решетки. Черный ``000000`` обычно проставлен явно и ничего не
+    выделяет, поэтому методички разрешают его наравне с ``auto``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_colors: List[str] = Field(
+        default_factory=lambda: ["auto", "000000"],
+        description="Допустимые цвета: auto или HEX вида 000000",
+    )
+    allow_highlight: bool = Field(
+        default=False,
+        description="Разрешать подсветку текста (w:highlight)",
+    )
+
+    @field_validator("allowed_colors")
+    @classmethod
+    def _normalize_colors(cls, values: List[str]) -> List[str]:
+        """Нормализует цвета и отбрасывает повторы."""
+        normalized: List[str] = []
+        for value in values:
+            color = value.strip().upper()
+            if color == "AUTO":
+                color = "auto"
+            if color != "auto" and not re.fullmatch(r"[0-9A-F]{6}", color):
+                raise ValueError(
+                    "FontColorExpectation: цвет задается как 'auto' "
+                    "или HEX из шести цифр"
+                )
+            if color not in normalized:
+                normalized.append(color)
+        if not normalized:
+            raise ValueError(
+                "FontColorExpectation: allowed_colors не может быть пустым"
+            )
+        return normalized
+
+
 class FontExpectation(BaseModel):
     """Ожидаемое шрифтовое оформление: гарнитура, кегль и начертание."""
 
@@ -287,6 +343,13 @@ class FontExpectation(BaseModel):
     )
     bold: Optional[bool] = Field(default=None, description="Ожидаемое начертание: полужирный")
     italic: Optional[bool] = Field(default=None, description="Ожидаемое начертание: курсив")
+    color: Optional[FontColorExpectation] = Field(
+        default=None,
+        description=(
+            "Ожидаемый цвет текста и подсветка: гиперссылки и поля пропускаются, "
+            "чтобы цвет ссылки из стиля не считался выделением"
+        ),
+    )
     size_tolerance_pt: float = Field(
         default=0.5,
         ge=0.0,
@@ -302,6 +365,14 @@ class FontExpectation(BaseModel):
             "Сравнивать гарнитуру по нормализованному имени: без учета регистра, пробелов, "
             "дефисов, subset-префикса 'XXXXXX+' и стилевых маркеров "
             "(MT/PS/PSMT/Bold/Italic/Regular/Roman). false — прежнее строгое сравнение"
+        ),
+    )
+    smaller_than_body_text: bool = Field(
+        default=False,
+        description=(
+            "Запрещать кегль меньше кегля основного текста: кегль основного текста "
+            "определяется по самому частому кеглю абзацев тела документа. "
+            "Взаимоисключающе с size_pt и min_size_pt"
         ),
     )
 
@@ -322,16 +393,25 @@ class FontExpectation(BaseModel):
                 "FontExpectation: size_pt и min_size_pt взаимоисключающи, "
                 "задайте либо точный кегль, либо нижнюю границу"
             )
+        if self.smaller_than_body_text and (
+            self.size_pt is not None or self.min_size_pt is not None
+        ):
+            raise ValueError(
+                "FontExpectation: smaller_than_body_text несовместим с size_pt "
+                "и min_size_pt — кегль либо задан числом, либо сравнивается с текстом"
+            )
         if (
             self.family is None
             and self.size_pt is None
             and self.min_size_pt is None
             and self.bold is None
             and self.italic is None
+            and self.color is None
+            and not self.smaller_than_body_text
         ):
             raise ValueError(
                 "FontExpectation пусто: задайте хотя бы одно из family, size_pt, "
-                "min_size_pt, bold, italic"
+                "min_size_pt, bold, italic, color, smaller_than_body_text"
             )
         return self
 
@@ -446,6 +526,28 @@ class HeadingNumberingExpectation(BaseModel):
             "приложения, лист задания, перечень сокращений) номер не требуют"
         ),
     )
+    number_style: Literal["any", "arabic", "roman", "chapter"] = Field(
+        default="any",
+        description=(
+            "Стиль записи номера заголовка: 'arabic' — арабские цифры («2», «2.1»), "
+            "'roman' — римские («II», «II.1»), 'chapter' — номер со словом «Глава» "
+            "перед ним («Глава 2», «ГЛАВА II»). 'any' — стиль не проверяется"
+        ),
+    )
+    forbid_prefix_words: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Слова, которые не должны стоять перед номером заголовка, например "
+            "«параграф» или «пункт»; сравнение без учета регистра"
+        ),
+    )
+
+    @field_validator("forbid_prefix_words")
+    @classmethod
+    def _validate_forbid_prefix_words(cls, words: List[str]) -> List[str]:
+        """Нормализует запрещенные слова и отбрасывает пустые."""
+        cleaned = [" ".join(word.split()) for word in words if word and word.strip()]
+        return list(dict.fromkeys(cleaned))
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "HeadingNumberingExpectation":
@@ -456,6 +558,8 @@ class HeadingNumberingExpectation(BaseModel):
             and not self.check_depth_matches_level
             and self.number_ending == "any"
             and not self.require_number_for_roles
+            and self.number_style == "any"
+            and not self.forbid_prefix_words
         ):
             raise ValueError(
                 "HeadingNumberingExpectation пусто: включите хотя бы одну проверку нумерации"
@@ -471,6 +575,17 @@ class HeadingFormatExpectation(BaseModel):
     trailing_dot: Literal["any", "forbid", "require"] = Field(
         default="any",
         description="Точка в конце текста заголовка: 'forbid' — не допускается, 'require' — обязательна",
+    )
+    prefix_word: Optional[str] = Field(
+        default=None,
+        description=(
+            "Обязательное слово перед номером заголовка, например «ГЛАВА». "
+            "Сравнение без учета регистра; проверяется только у нумерованных заголовков"
+        ),
+    )
+    forbid_quotes: bool = Field(
+        default=False,
+        description="Запрещать кавычки в тексте заголовка (« », „ “, \" \")",
     )
     trailing_dot_in_number: Literal["any", "forbid", "require"] = Field(
         default="any",
@@ -535,11 +650,13 @@ class HeadingFormatExpectation(BaseModel):
             and self.underline == "any"
             and self.space_after_lines is None
             and self.space_before_lines is None
+            and self.prefix_word is None
+            and not self.forbid_quotes
         ):
             raise ValueError(
                 "HeadingFormatExpectation пусто: задайте trailing_dot, "
                 "trailing_dot_in_number, case, alignment, font, underline, "
-                "space_after_lines или space_before_lines"
+                "space_after_lines, space_before_lines, prefix_word или forbid_quotes"
             )
         return self
 
@@ -616,6 +733,13 @@ class RequiredSectionsExpectation(BaseModel):
         le=20,
         description="Максимальное число глав основной части (роль main_chapter)",
     )
+    require_subsections: bool = Field(
+        default=False,
+        description=(
+            "Требовать, чтобы у каждой главы основной части был хотя бы один "
+            "подраздел: глава без подразделов считается нераскрытой"
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_unique_labels(self) -> "RequiredSectionsExpectation":
@@ -633,10 +757,15 @@ class RequiredSectionsExpectation(BaseModel):
                 "RequiredSectionsExpectation: min_main_chapters не может быть больше "
                 "max_main_chapters"
             )
-        if not self.sections and self.min_main_chapters is None and self.max_main_chapters is None:
+        if (
+            not self.sections
+            and self.min_main_chapters is None
+            and self.max_main_chapters is None
+            and not self.require_subsections
+        ):
             raise ValueError(
-                "RequiredSectionsExpectation пусто: задайте sections, min_main_chapters "
-                "или max_main_chapters"
+                "RequiredSectionsExpectation пусто: задайте sections, min_main_chapters, "
+                "max_main_chapters или require_subsections"
             )
         return self
 
@@ -713,6 +842,21 @@ class TocExpectation(BaseModel):
             "Пусто — все уровни. Записи оглавления глубже этой глубины допускаются"
         ),
     )
+    start_page: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Страница, на которой должно начинаться оглавление: по методичке "
+            "оглавление идёт после титульного листа (None — не проверять)"
+        ),
+    )
+    require_entry_number: bool = Field(
+        default=False,
+        description=(
+            "Требовать номер раздела в записи оглавления, если у самого заголовка "
+            "номер есть: у «Глава 2» в оглавлении тоже стоит «2»"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "TocExpectation":
@@ -735,6 +879,8 @@ class TocExpectation(BaseModel):
             and self.entry_bold is None
             and not self.capitalize_entry
             and not self.check_completeness
+            and self.start_page is None
+            and not self.require_entry_number
         ):
             raise ValueError("TocExpectation пусто: включите хотя бы одну проверку оглавления")
         if self.check_completeness and not self.required_entries:
@@ -796,6 +942,14 @@ class PageNumberPositionExpectation(BaseModel):
         description=(
             "Учитывать страницы приложений при проверке сквозной нумерации; "
             "без этого приложения из сверки исключаются"
+        ),
+    )
+    first_numbered_page: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Страница, на которой впервые напечатан номер: по методичке номер "
+            "впервые появляется на второй странице (None — не проверять)"
         ),
     )
 
@@ -908,7 +1062,9 @@ class HeadingPageBreakExpectation(BaseModel):
 
     Начало раздела сравнивается со страницей, на которой заканчивается
     предыдущий непустой абзац документа: заголовок обязан оказаться на
-    следующей странице.
+    следующей странице. Параметр ``require_page_break`` дополнительно требует
+    явный разрыв страницы в начале главы и не считается с документами, где
+    явных разрывов нет вовсе.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -930,18 +1086,27 @@ class HeadingPageBreakExpectation(BaseModel):
             "продолжает текст на той же странице. Пересечение с roles недопустимо"
         ),
     )
-
-    @field_validator("roles")
-    @classmethod
-    def _validate_roles(cls, value: List[HeadingRole]) -> List[HeadingRole]:
-        """Проверяет, что перечень ролей непустой."""
-        if not value:
-            raise ValueError("HeadingPageBreakExpectation: перечень roles не может быть пустым")
-        return value
+    require_page_break: bool = Field(
+        default=False,
+        description=(
+            "Требовать явный разрыв страницы в начале главы: позиция нулевого "
+            "разрыва в rendered_page_breaks_offsets или page_break_before. "
+            "Проверка работает только у документов с явными разрывами, иначе "
+            "положение главы не определено и правило отдаёт not_assessed"
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_role_sets(self) -> "HeadingPageBreakExpectation":
-        """Проверяет, что роль не требуется и не запрещается одновременно."""
+        """Проверяет, что роль не требуется и не запрещается одновременно.
+
+        Разрешение пустого ``roles`` нужно правилу, которое проверяет только
+        запрет разрыва перед параграфом: у него нет обязательных ролей.
+        """
+        if not self.roles and not self.forbid_new_page_roles:
+            raise ValueError(
+                "HeadingPageBreakExpectation: задайте roles или forbid_new_page_roles"
+            )
         conflict = set(self.roles) & set(self.forbid_new_page_roles)
         if conflict:
             raise ValueError(
@@ -966,6 +1131,29 @@ class DocumentVolumeExpectation(BaseModel):
     max_pages: Optional[int] = Field(default=None, ge=1, description="Максимум страниц")
     min_words: Optional[int] = Field(default=None, ge=1, description="Минимум слов")
     max_words: Optional[int] = Field(default=None, ge=1, description="Максимум слов")
+    section_page_limits: Dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Максимум страниц по разделам: ключ — роль узла дерева (introduction, "
+            "conclusion, appendix, main_chapter и т. п.), значение — предел страниц"
+        ),
+    )
+    section_min_pages: Dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Минимум страниц по разделам: ключ — роль узла дерева, значение — "
+            "минимальный объём раздела"
+        ),
+    )
+    max_appendix_share: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Максимальная доля страниц приложений в общем объёме работы "
+            "(0.3 — не более 30 % страниц)"
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_bounds(self) -> "DocumentVolumeExpectation":
@@ -975,11 +1163,25 @@ class DocumentVolumeExpectation(BaseModel):
             and self.max_pages is None
             and self.min_words is None
             and self.max_words is None
+            and not self.section_page_limits
+            and not self.section_min_pages
+            and self.max_appendix_share is None
         ):
             raise ValueError(
                 "DocumentVolumeExpectation пусто: задайте min_pages, max_pages, "
-                "min_words или max_words"
+                "min_words, max_words, section_page_limits, section_min_pages "
+                "или max_appendix_share"
             )
+        for name, limits in (
+            ("section_page_limits", self.section_page_limits),
+            ("section_min_pages", self.section_min_pages),
+        ):
+            for role, pages in limits.items():
+                if pages < 1:
+                    raise ValueError(
+                        f"DocumentVolumeExpectation: {name}[{role!r}] должен быть "
+                        "положительным числом страниц"
+                    )
         if (
             self.min_pages is not None
             and self.max_pages is not None
@@ -1055,14 +1257,32 @@ class EquationNumberingExpectation(BaseModel):
         default=True,
         description="Требовать номер у вынесенной в отдельную строку формулы",
     )
+    number_position: Optional[Literal["left", "center", "right"]] = Field(
+        default=None,
+        description=(
+            "Положение номера формулы: 'right' — у правого поля, 'center' — по центру, "
+            "'left' — у левого поля; None — положение не проверяется"
+        ),
+    )
+    number_style: Optional[Literal["arabic", "roman"]] = Field(
+        default=None,
+        description=(
+            "Форма записи номера формулы: 'arabic' — арабские цифры, 'roman' — "
+            "римские; None — форма не проверяется"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "EquationNumberingExpectation":
-        """Запрещает набор, в котором требование нумерации отключено."""
-        if not self.require_numbering:
+        """Запрещает набор, в котором нет ни одной проверки формул."""
+        if (
+            not self.require_numbering
+            and self.number_position is None
+            and self.number_style is None
+        ):
             raise ValueError(
-                "EquationNumberingExpectation пусто: require_numbering=False отключает "
-                "проверку нумерации формул"
+                "EquationNumberingExpectation пусто: включите require_numbering, "
+                "number_position или number_style"
             )
         return self
 
@@ -1145,6 +1365,34 @@ class BibliographyOrderExpectation(BaseModel):
         description=(
             "Требуемый порядок записей внутри списка: 'alphabetical' — по первой букве "
             "описания без учета регистра"
+        ),
+    )
+    foreign_sources_last: bool = Field(
+        default=False,
+        description=(
+            "Иностранные источники размещаются в конце списка: true — запись с "
+            "латинским названием или автором не может стоять перед русскоязычной"
+        ),
+    )
+    number_style: Optional[Literal["arabic", "roman"]] = Field(
+        default=None,
+        description=(
+            "Форма записи номеров списка: 'arabic' — арабские цифры, 'roman' — "
+            "римские; None — форма не проверяется"
+        ),
+    )
+    author_group_sort: bool = Field(
+        default=False,
+        description=(
+            "Записи внутри группы упорядочены по фамилии первого автора: true — "
+            "алфавитный порядок соблюдается с учётом границ групп"
+        ),
+    )
+    legal_force_order: bool = Field(
+        default=False,
+        description=(
+            "Нормативные акты упорядочены по убыванию юридической силы: закон, "
+            "кодекс, указ, постановление, распоряжение, приказ, письмо, инструкция"
         ),
     )
 
@@ -1352,6 +1600,50 @@ class BibliographyFormatExpectation(BaseModel):
             "области разделяются точкой"
         ),
     )
+    require_author: bool = Field(
+        default=False,
+        description=(
+            "Требовать автора или ответственное лицо: фамилию с инициалами либо "
+            "организацию-автора в начале описания"
+        ),
+    )
+    require_journal_title: bool = Field(
+        default=False,
+        description="Требовать название журнала или сборника после разделителя «//»",
+    )
+    require_publication_place: bool = Field(
+        default=False,
+        description="Требовать место издания (М., СПб. и т. п.) перед издательством",
+    )
+    require_publication_source: bool = Field(
+        default=False,
+        description=(
+            "Требовать источник публикации: журнал или сборник для статьи, "
+            "издательство или адрес ресурса для книги и электронного ресурса"
+        ),
+    )
+    require_archive_details: bool = Field(
+        default=False,
+        description=(
+            "Требовать архивные реквизиты диссертации или автореферата: пометки "
+            "«дис.»/«автореф.» и место защиты"
+        ),
+    )
+    description_schema: Optional[List[Literal[
+        "author",
+        "title",
+        "publication",
+        "edition",
+        "year",
+        "pages",
+    ]]] = Field(
+        default=None,
+        description=(
+            "Порядок областей описания: элементы перечисляются в требуемой "
+            "последовательности (author, title, publication, edition, year, pages); "
+            "проверяется, что позиции элементов в тексте не убывают"
+        ),
+    )
     exempt_categories: List[BibliographyCategory] = Field(
         default_factory=lambda: [
             "electronic_resource",
@@ -1408,13 +1700,21 @@ class BibliographyFormatExpectation(BaseModel):
                 self.require_double_slash,
                 self.require_text_type_designation,
                 self.forbid_dot_dash,
+                self.require_author,
+                self.require_journal_title,
+                self.require_publication_place,
+                self.require_publication_source,
+                self.require_archive_details,
+                self.description_schema,
             )
         ):
             raise ValueError(
                 "BibliographyFormatExpectation пусто: включите хотя бы одно требование "
                 "(require_url, require_access_date, require_year, require_pages, "
                 "require_isbn_or_issn, require_double_slash, require_text_type_designation, "
-                "forbid_dot_dash)"
+                "forbid_dot_dash, require_author, require_journal_title, "
+                "require_publication_place, require_publication_source, "
+                "require_archive_details, description_schema)"
             )
         return self
 
@@ -1544,6 +1844,34 @@ class CaptionFormatExpectation(BaseModel):
             "Данные» (None — не проверять)"
         ),
     )
+    forbid_hyphenation: bool = Field(
+        default=False,
+        description=(
+            "Запрещать переносы в тексте подписи: мягкий перенос, перенос строки "
+            "по дефису и разрыв слова на границе строк"
+        ),
+    )
+    forbid_break_after_prefix: bool = Field(
+        default=False,
+        description=(
+            "Запрещать перенос строки сразу после префикса и номера подписи: "
+            "«Таблица 1» и название должны оставаться на одной строке"
+        ),
+    )
+    forbid_number_sign: bool = Field(
+        default=False,
+        description=(
+            "Запрещать знак номера «№» перед номером подписи: «Таблица 1», "
+            "а не «Таблица № 1»"
+        ),
+    )
+    sentence_case: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Требовать запись названия подписи с прописной буквы без заглавных "
+            "букв в остальных словах (None — не проверять)"
+        ),
+    )
 
     @field_validator("prefix_words")
     @classmethod
@@ -1561,17 +1889,32 @@ class CaptionFormatExpectation(BaseModel):
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "CaptionFormatExpectation":
-        """Требует хотя бы одно проверяемое свойство подписи."""
+        """Требует хотя бы одно проверяемое свойство подписи.
+
+        Одновременные ``uppercase=True`` и ``sentence_case=True`` противоречат
+        друг другу: подпись не может быть и целиком прописной, и записанной
+        обычным предложением, поэтому такой набор отвергается при загрузке.
+        """
+        if self.uppercase is True and self.sentence_case is True:
+            raise ValueError(
+                "CaptionFormatExpectation: uppercase и sentence_case взаимоисключающи, "
+                "подпись не может быть одновременно прописной и обычным предложением"
+            )
         if (
             self.separator is None
             and self.require_trailing_dot is None
             and self.prefix_words is None
             and self.uppercase is None
             and self.capitalize_first_letter is None
+            and not self.forbid_hyphenation
+            and not self.forbid_break_after_prefix
+            and not self.forbid_number_sign
+            and self.sentence_case is None
         ):
             raise ValueError(
                 "CaptionFormatExpectation пусто: задайте separator, require_trailing_dot, "
-                "prefix_words, uppercase или capitalize_first_letter"
+                "prefix_words, uppercase, capitalize_first_letter, forbid_hyphenation, "
+                "forbid_break_after_prefix, forbid_number_sign или sentence_case"
             )
         return self
 
@@ -2006,11 +2349,38 @@ class TableLayoutExpectation(BaseModel):
         le=50.0,
         description="Допуск сравнения ширины таблицы с текстовым полем, мм",
     )
+    alignment: Optional[Literal["left", "center", "right"]] = Field(
+        default=None,
+        description=(
+            "Ожидаемое выравнивание таблицы в тексте: по методичке таблица "
+            "выравнивается по левому краю (None — не проверять)"
+        ),
+    )
+    forbid_number_column: bool = Field(
+        default=False,
+        description=(
+            "Запрещать служебную графу «№ п/п»: по методичке номер строки "
+            "не выносят в отдельную графу таблицы"
+        ),
+    )
+    forbid_color_fill: bool = Field(
+        default=False,
+        description=(
+            "Запрещать цветную заливку ячеек: белая и прозрачная заливка "
+            "допускается, остальные цвета — нарушение"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "TableLayoutExpectation":
         """Требует хотя бы одну проверку таблицы."""
-        if not self.require_all_sides_borders and not self.require_full_text_width:
+        if (
+            not self.require_all_sides_borders
+            and not self.require_full_text_width
+            and self.alignment is None
+            and not self.forbid_number_column
+            and not self.forbid_color_fill
+        ):
             raise ValueError(
                 "TableLayoutExpectation пусто: включите require_all_sides_borders "
                 "или require_full_text_width"
@@ -2176,6 +2546,13 @@ class TableHeaderFormatExpectation(BaseModel):
             "'lowercase_if_continuation' — то же для строк ниже первой строки шапки"
         ),
     )
+    require_header_row: bool = Field(
+        default=False,
+        description=(
+            "Требовать размеченную строку-шапку (Таблица должна иметь шапку, "
+            "а не начинаться сразу с данных)"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "TableHeaderFormatExpectation":
@@ -2184,10 +2561,11 @@ class TableHeaderFormatExpectation(BaseModel):
             self.first_letter == "any"
             and not self.forbid_trailing_dot
             and self.subheader_case == "any"
+            and not self.require_header_row
         ):
             raise ValueError(
                 "TableHeaderFormatExpectation пусто: задайте first_letter, "
-                "forbid_trailing_dot или subheader_case"
+                "forbid_trailing_dot, subheader_case или require_header_row"
             )
         return self
 
@@ -2289,14 +2667,21 @@ class AppendixOrderExpectation(BaseModel):
     new_page_each: bool = Field(
         default=True, description="Требовать начало каждого приложения с нового листа"
     )
+    label_scheme: Literal["any", "russian_letters", "arabic"] = Field(
+        default="any",
+        description=(
+            "Схема обозначения приложений: заглавными русскими буквами (А, Б, В) "
+            "или арабскими цифрами (1, 2, 3); any — не проверять"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "AppendixOrderExpectation":
         """Требует хотя бы одну проверку приложений."""
-        if self.order == "any" and not self.new_page_each:
+        if self.order == "any" and not self.new_page_each and self.label_scheme == "any":
             raise ValueError(
-                "AppendixOrderExpectation пусто: задайте order=by_first_mention "
-                "или new_page_each"
+                "AppendixOrderExpectation пусто: задайте order=by_first_mention, "
+                "new_page_each или label_scheme"
             )
         return self
 
@@ -2346,6 +2731,289 @@ class TitlePageContentExpectation(BaseModel):
                 f"required_fields: реквизиты перечислены дважды: {sorted(duplicates)}"
             )
         return self
+
+
+class FigureAfterReferenceExpectation(BaseModel):
+    """Требование к порядку рисунка и первой ссылки на него."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_before_reference: bool = Field(
+        default=True,
+        description="Ссылка на рисунок должна стоять в тексте до самого рисунка",
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "FigureAfterReferenceExpectation":
+        if not self.require_before_reference:
+            raise ValueError(
+                "FigureAfterReferenceExpectation: при require_before_reference=False проверять нечего"
+            )
+        return self
+
+
+class TableAfterReferenceExpectation(BaseModel):
+    """Требование к порядку таблицы и первой ссылки на неё."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_before_reference: bool = Field(
+        default=True,
+        description="Ссылка на таблицу должна стоять в тексте до самой таблицы",
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "TableAfterReferenceExpectation":
+        if not self.require_before_reference:
+            raise ValueError(
+                "TableAfterReferenceExpectation: при require_before_reference=False проверять нечего"
+            )
+        return self
+
+
+class FormulaPlacementExpectation(BaseModel):
+    """Требование к выносу формулы в отдельную строку и её выравниванию."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_standalone_line: bool = Field(
+        default=True, description="Формула вынесена в отдельную строку"
+    )
+    alignment: Optional[Literal["left", "center", "right"]] = Field(
+        default="center", description="Выравнивание строки с формулой"
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "FormulaPlacementExpectation":
+        if not self.require_standalone_line and self.alignment is None:
+            raise ValueError(
+                "FormulaPlacementExpectation: задайте require_standalone_line или alignment"
+            )
+        return self
+
+
+class FootnoteNumberingExpectation(BaseModel):
+    """Требование к нумерации сносок: сквозной или с единицы на каждой странице."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scheme: Literal["continuous", "per_page", "any"] = Field(
+        default="continuous",
+        description="continuous — сквозная нумерация, per_page — с единицы на каждой странице",
+    )
+    start_at: int = Field(default=1, ge=1, le=100, description="Первый номер сноски")
+
+
+class SourceNoteExpectation(BaseModel):
+    """Требование к библиографической ссылке на источник под объектом."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_words: List[str] = Field(
+        default_factory=lambda: ["Источник", "Составлено по", "Источник:"],
+        description="Слова, с которых начинается ссылка на источник",
+    )
+    require_note: bool = Field(
+        default=True, description="Ссылка на источник под объектом обязательна"
+    )
+    search_distance: int = Field(
+        default=2, ge=1, le=5, description="Сколько блоков после объекта просматривать"
+    )
+
+    @field_validator("source_words")
+    @classmethod
+    def _validate_words(cls, value: List[str]) -> List[str]:
+        words = [word.strip() for word in value if word.strip()]
+        if not words:
+            raise ValueError("SourceNoteExpectation: source_words пуст")
+        return words
+
+
+class TableUnitsExpectation(BaseModel):
+    """Требование к единицам измерения и периоду в таблице."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_units: bool = Field(
+        default=True, description="В таблице указаны единицы измерения"
+    )
+    require_period: bool = Field(
+        default=False, description="В таблице указан период времени"
+    )
+    unit_patterns: List[str] = Field(
+        default_factory=lambda: [
+            r"тыс\.",
+            r"млн",
+            r"руб\.",
+            r"%",
+            r"ед\.",
+            r"шт\.",
+            r"чел\.",
+            r"\bм\b",
+            r"кг",
+            r"\bл\b",
+            r"\bга\b",
+            r"дн",
+            r"час",
+            r"мес\.",
+            r"°[cс]",
+        ],
+        description="Регулярные выражения единиц измерения",
+    )
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "TableUnitsExpectation":
+        if not self.require_units and not self.require_period:
+            raise ValueError(
+                "TableUnitsExpectation: задайте require_units или require_period"
+            )
+        for pattern in self.unit_patterns:
+            re.compile(pattern)
+        return self
+
+
+class FormulaLineBreakExpectation(BaseModel):
+    """Требование к переносу формулы по знакам с повтором знака."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    require_operator_repeat: bool = Field(
+        default=True,
+        description="При переносе знак операции повторяется в начале следующей строки",
+    )
+    operators: List[str] = Field(
+        default_factory=lambda: ["=", "+", "\u2212", "-", "\u00d7", "\u00b7", ":", "/"],
+        description="Знаки операций, которые переносятся с повтором",
+    )
+
+    @field_validator("operators")
+    @classmethod
+    def _validate_operators(cls, value: List[str]) -> List[str]:
+        operators = [operator.strip() for operator in value if operator.strip()]
+        if not operators:
+            raise ValueError("FormulaLineBreakExpectation: operators пуст")
+        return operators
+
+
+class FigureSpacingExpectation(BaseModel):
+    """Требование к отбивке между иллюстрациями и от нижнего края страницы."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_gap_between_mm: float = Field(
+        default=10.0, ge=0, le=100, description="Минимальная отбивка между иллюстрациями"
+    )
+    min_gap_to_page_bottom_mm: float = Field(
+        default=10.0,
+        ge=0,
+        le=100,
+        description="Минимальная отбивка от иллюстрации до нижнего края страницы",
+    )
+    tolerance_mm: float = Field(default=2.0, ge=0, le=20, description="Допуск измерения")
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "FigureSpacingExpectation":
+        if not self.min_gap_between_mm and not self.min_gap_to_page_bottom_mm:
+            raise ValueError(
+                "FigureSpacingExpectation: обе отбивки нулевые, проверять нечего"
+            )
+        return self
+
+
+class CitationRequiredExpectation(BaseModel):
+    """Требование к ссылке на источник после цитаты."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quote_chars: List[str] = Field(
+        default_factory=lambda: ["\u00ab", "\u00bb", "\u201c", "\u201d"],
+        description="Символы кавычек, которыми выделена цитата",
+    )
+    require_reference: bool = Field(
+        default=True, description="После цитаты в кавычках стоит ссылка на источник"
+    )
+    allow_footnote_reference: bool = Field(
+        default=True, description="Ссылка в сноске считается достаточной"
+    )
+
+    @field_validator("quote_chars")
+    @classmethod
+    def _validate_quote_chars(cls, value: List[str]) -> List[str]:
+        chars = [char for char in value if char]
+        if not chars:
+            raise ValueError("CitationRequiredExpectation: quote_chars пуст")
+        return chars
+
+    @model_validator(mode="after")
+    def _require_check(self) -> "CitationRequiredExpectation":
+        if not self.require_reference:
+            raise ValueError(
+                "CitationRequiredExpectation: при require_reference=False проверять нечего"
+            )
+        return self
+
+
+class SourceLabelExpectation(BaseModel):
+    """Требование к подписи «Источник» под объектом и её содержанию."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label_words: List[str] = Field(
+        default_factory=lambda: ["Источник", "Источник:"],
+        description="Слова подписи источника",
+    )
+    require_content: bool = Field(
+        default=True, description="После слова «Источник» указано, откуда взяты данные"
+    )
+    require_under_tables: bool = Field(
+        default=False, description="Под каждой таблицей есть подпись источника"
+    )
+    search_distance: int = Field(
+        default=3, ge=1, le=10, description="Сколько блоков после таблицы просматривать"
+    )
+
+    @field_validator("label_words")
+    @classmethod
+    def _validate_labels(cls, value: List[str]) -> List[str]:
+        words = [word.strip() for word in value if word.strip()]
+        if not words:
+            raise ValueError("SourceLabelExpectation: label_words пуст")
+        return words
+
+
+class NumberFormatExpectation(BaseModel):
+    """Требование к записи десятичных чисел с запятой."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decimal_separator: Literal["comma", "dot"] = Field(
+        default="comma", description="Разделитель целой и дробной части"
+    )
+    min_integer_digits: int = Field(
+        default=1, ge=1, le=6, description="Минимальное число цифр перед запятой"
+    )
+
+
+class ParagraphStyleExpectation(BaseModel):
+    """Требование к оформлению абзаца базовым стилем без прямого форматирования."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_styles: List[str] = Field(
+        default_factory=lambda: ["Normal", "Обычный"],
+        description="Стили абзаца, которые считаются базовыми",
+    )
+    forbid_direct_formatting: bool = Field(
+        default=True, description="Абзац не должен нести прямое форматирование"
+    )
+
+    @field_validator("allowed_styles")
+    @classmethod
+    def _validate_styles(cls, value: List[str]) -> List[str]:
+        styles = [style.strip() for style in value if style.strip()]
+        if not styles:
+            raise ValueError("ParagraphStyleExpectation: allowed_styles пуст")
+        return styles
 
 
 class InlineReferenceFormatRule(_RuleBase):
@@ -2425,6 +3093,118 @@ class TitlePageContentRule(_RuleBase):
     params: TitlePageContentExpectation
 
 
+class FigureAfterReferenceRule(_RuleBase):
+    """Правило порядка рисунка и первой ссылки на него."""
+
+    code: Literal["figure_after_reference"] = "figure_after_reference"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: FigureAfterReferenceExpectation
+
+
+class TableAfterReferenceRule(_RuleBase):
+    """Правило порядка таблицы и первой ссылки на неё."""
+
+    code: Literal["table_after_reference"] = "table_after_reference"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: TableAfterReferenceExpectation
+
+
+class FormulaPlacementRule(_RuleBase):
+    """Правило выноса формулы в отдельную строку и её выравнивания."""
+
+    code: Literal["formula_placement"] = "formula_placement"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    params: FormulaPlacementExpectation
+
+
+class FootnoteNumberingRule(_RuleBase):
+    """Правило нумерации сносок."""
+
+    code: Literal["footnote_numbering"] = "footnote_numbering"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="footnotes"))
+    params: FootnoteNumberingExpectation
+
+
+class SourceNoteFigureRule(_RuleBase):
+    """Правило ссылки на источник под рисунком."""
+
+    code: Literal["source_note_figure"] = "source_note_figure"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: SourceNoteExpectation
+
+
+class SourceNoteTableRule(_RuleBase):
+    """Правило ссылки на источник под таблицей."""
+
+    code: Literal["source_note_table"] = "source_note_table"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="captions"))
+    params: SourceNoteExpectation
+
+
+class TableUnitsRule(_RuleBase):
+    """Правило единиц измерения и периода в таблице."""
+
+    code: Literal["table_units"] = "table_units"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="table_cells"))
+    params: TableUnitsExpectation
+
+
+class FormulaLineBreakRule(_RuleBase):
+    """Правило переноса формулы по знакам."""
+
+    code: Literal["formula_line_break"] = "formula_line_break"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    params: FormulaLineBreakExpectation
+
+
+class FigureSpacingRule(_RuleBase):
+    """Правило отбивки иллюстраций от соседей и края страницы."""
+
+    code: Literal["figure_spacing"] = "figure_spacing"
+    target: RuleTarget = Field(default_factory=lambda: RuleTarget(scope="document"))
+    params: FigureSpacingExpectation
+
+
+class CitationRequiredRule(_RuleBase):
+    """Правило ссылки на источник после цитаты."""
+
+    code: Literal["citation_required"] = "citation_required"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: CitationRequiredExpectation
+
+
+class SourceLabelRule(_RuleBase):
+    """Правило подписи «Источник» под объектом."""
+
+    code: Literal["source_label"] = "source_label"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: SourceLabelExpectation
+
+
+class NumberFormatRule(_RuleBase):
+    """Правило десятичной запятой в числах."""
+
+    code: Literal["number_format"] = "number_format"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: NumberFormatExpectation
+
+
+class ParagraphStyleRule(_RuleBase):
+    """Правило оформления абзаца базовым стилем."""
+
+    code: Literal["paragraph_style"] = "paragraph_style"
+    target: RuleTarget = Field(
+        default_factory=lambda: RuleTarget(scope="body_paragraphs")
+    )
+    params: ParagraphStyleExpectation
+
+
 Rule = Annotated[
     Union[
         FontRule,
@@ -2463,6 +3243,19 @@ Rule = Annotated[
         HeadingHyphenationRule,
         AppendixOrderRule,
         TitlePageContentRule,
+        FigureAfterReferenceRule,
+        TableAfterReferenceRule,
+        FormulaPlacementRule,
+        FootnoteNumberingRule,
+        SourceNoteFigureRule,
+        SourceNoteTableRule,
+        TableUnitsRule,
+        FormulaLineBreakRule,
+        FigureSpacingRule,
+        CitationRequiredRule,
+        SourceLabelRule,
+        NumberFormatRule,
+        ParagraphStyleRule,
     ],
     Field(discriminator="code"),
 ]
@@ -2490,7 +3283,9 @@ CODE_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "keep_next": HEADING_SCOPES,
     "heading_page_break": HEADING_SCOPES,
     "document_volume": frozenset({"document"}),
-    "microtypography": frozenset({"body_text", "body_paragraphs", "all_paragraphs"}),
+    "microtypography": frozenset(
+        {"body_text", "body_paragraphs", "all_paragraphs", "footnotes"}
+    ),
     "equation_numbering": frozenset({"document"}),
     "bibliography_count": BIBLIOGRAPHY_SCOPES,
     "bibliography_order": BIBLIOGRAPHY_SCOPES,
@@ -2504,6 +3299,19 @@ CODE_ALLOWED_SCOPES: dict[str, frozenset[str]] = {
     "heading_hyphenation": HEADING_SCOPES,
     "appendix_order": STRUCTURE_SCOPES,
     "title_page_content": STRUCTURE_SCOPES,
+    "figure_after_reference": CAPTION_SCOPES,
+    "table_after_reference": CAPTION_SCOPES,
+    "formula_placement": frozenset({"document"}),
+    "footnote_numbering": frozenset({"footnotes"}),
+    "source_note_figure": CAPTION_SCOPES,
+    "source_note_table": CAPTION_SCOPES,
+    "table_units": frozenset({"table_cells"}),
+    "formula_line_break": frozenset({"document"}),
+    "figure_spacing": frozenset({"document"}),
+    "citation_required": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
+    "source_label": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
+    "number_format": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
+    "paragraph_style": frozenset({"body_paragraphs", "body_text", "all_paragraphs"}),
 }
 """Какие scope допустимы для каждого вида правила (проверяется при загрузке набора)."""
 
@@ -2571,6 +3379,27 @@ class RuleSet(BaseModel):
                     f"Правило '{rule.rule_id}': exclude_roles применим только к scope "
                     f"'headings' и 'document_structure'"
                 )
+        prefix_rules = [
+            rule
+            for rule in self.rules
+            if isinstance(rule, HeadingFormatRule)
+            and rule.params.prefix_word is not None
+        ]
+        for rule in self.rules:
+            if not isinstance(rule, HeadingNumberingRule):
+                continue
+            forbidden = {
+                word.strip().strip(".").casefold()
+                for word in rule.params.forbid_prefix_words
+            }
+            for format_rule in prefix_rules:
+                prefix = format_rule.params.prefix_word or ""
+                if prefix.strip().strip(".").casefold() in forbidden:
+                    raise ValueError(
+                        f"Правила '{format_rule.rule_id}' и '{rule.rule_id}' "
+                        f"противоречат друг другу: слово «{prefix}» одновременно "
+                        "обязательный префикс и запрещенный"
+                    )
         return self
 
     def get_rule(self, rule_id: str) -> Rule:

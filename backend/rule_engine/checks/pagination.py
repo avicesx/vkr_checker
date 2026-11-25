@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from ..findings import (
     RuleAssessment,
     Violation,
+    ViolationLocation,
 )
 from ..rules import (
     HeadingPageBreakRule,
@@ -171,6 +172,28 @@ def _heading_start_page(paragraph: ParagraphBlock) -> int:
     return start_page
 
 
+def _heading_location(
+    paragraph: ParagraphBlock,
+    start_page: int,
+) -> ViolationLocation:
+    """Адрес находки: страница совпадает с найденной страницей заголовка.
+
+    ``page_start_est`` — оценка по разбиению, а ``start_page`` учитывает
+    разрыв в нулевой позиции, поэтому на границе страницы значения расходятся
+    на единицу. В отчете читатель видит ``start_page``, и адрес берет его же;
+    ``page_start_est`` остается резервом, когда страница не определена.
+    """
+    location = _paragraph_location(paragraph)
+    if start_page is None or location.page_start_est == start_page:
+        return location
+    end_page = location.page_end_est
+    if end_page is None or end_page < start_page:
+        end_page = start_page
+    return location.model_copy(
+        update={"page_start_est": start_page, "page_end_est": end_page}
+    )
+
+
 def _previous_text_page(
     document: ParsedDocxDocument,
     block_id: str,
@@ -187,6 +210,29 @@ def _previous_text_page(
     return None
 
 
+def _has_explicit_page_breaks(document: ParsedDocxDocument) -> bool:
+    """Проверяет, размечены ли в документе явные разрывы страницы.
+
+    Без таких блоков разбиение на страницы оценочное: по пустым абзацам нельзя
+    понять, начинается глава с новой страницы или просто с отбивки.
+    """
+    for block in document.blocks:
+        if not isinstance(block, ParagraphBlock):
+            continue
+        if block.rendered_page_breaks_offsets:
+            return True
+        if block.effective_props.page_break_before:
+            return True
+    return False
+
+
+def _heading_starts_with_break(paragraph: ParagraphBlock) -> bool:
+    """Проверяет, что заголовок начинается с явного разрыва страницы."""
+    if 0 in paragraph.rendered_page_breaks_offsets:
+        return True
+    return bool(paragraph.effective_props.page_break_before)
+
+
 def _check_heading_page_break_rule(
     rule: HeadingPageBreakRule,
     document: ParsedDocxDocument,
@@ -198,12 +244,27 @@ def _check_heading_page_break_rule(
     непустого абзаца. Пустые абзацы и разрывы перед ними не считаются
     содержимым: иначе глава, начатая сразу после пустой строки, выглядела бы
     нарушением. В PDF границы страниц точные, в DOCX — оценка по разрывам.
+    Требование и запрет разрыва — разные смыслы, поэтому в профиле это два
+    правила: глава обязана начинаться с новой страницы, параграф — нет.
     """
     roles = set(rule.params.roles)
     forbidden_roles = set(rule.params.forbid_new_page_roles)
+    # В PDF границы страниц точные, поэтому оценка по page_start_est надёжна.
+    # Явный разрыв нужен только там, где страницы DOCX расставлены оценкой.
+    explicit_mode = rule.params.require_page_break and not _is_pdf_only(document)
     all_records = _heading_records(document, rule.target)
+    chapters = [
+        record
+        for record in all_records
+        if record.node.semantic_role == "main_chapter"
+    ]
+    # При включённом параметре главы проверяются по явному разрыву, а не по
+    # оценке страницы: иначе одна и та же глава могла бы дать две находки.
     records = [
-        record for record in all_records if record.node.semantic_role in roles
+        record
+        for record in all_records
+        if record.node.semantic_role in roles
+        and not (explicit_mode and record.node.semantic_role == "main_chapter")
     ]
     forbidden_records = [
         record
@@ -213,6 +274,49 @@ def _check_heading_page_break_rule(
     ]
     violations: List[Violation] = []
     confidence = "high" if _is_pdf_only(document) else "medium"
+
+    explicit_breaks_found = _has_explicit_page_breaks(document)
+    if explicit_mode and chapters and not explicit_breaks_found:
+        # В документе нет ни одного явного разрыва: страницы расставлены
+        # оценкой, поэтому проверять положение главы нельзя.
+        return [], 0, _build_assessment(
+            rule,
+            "not_assessed",
+            expected_text="глава должна начинаться с явного разрыва страницы",
+            observed_text=(
+                "документ не содержит явных разрывов страницы, "
+                "положение главы не определено"
+            ),
+            confidence="low",
+            details={
+                "chapters": len(chapters),
+                "explicit_breaks_found": 0,
+                "require_page_break": True,
+            },
+        )
+
+    for record in chapters if explicit_mode else []:
+        paragraph = record.paragraph
+        if _heading_starts_with_break(paragraph):
+            continue
+        violations.append(
+            _build_violation(
+                rule,
+                address=paragraph.block_id,
+                location=_paragraph_location(paragraph),
+                expected={"page_break": True},
+                found={
+                    "page_break": False,
+                    "page_start": paragraph.page_start_est,
+                },
+                expected_text="глава должна начинаться с явного разрыва страницы",
+                found_text=(
+                    "в начале главы нет явного разрыва страницы "
+                    f"(страница {paragraph.page_start_est})"
+                ),
+                confidence=confidence,
+            )
+        )
 
     for record in records:
         paragraph = record.paragraph
@@ -226,13 +330,13 @@ def _check_heading_page_break_rule(
             _build_violation(
                 rule,
                 address=paragraph.block_id,
-                location=_paragraph_location(paragraph),
+                location=_heading_location(paragraph, start_page),
                 expected={"start": "new_page"},
                 found={
                     "start_page": start_page,
                     "previous_text_page": previous_page,
                 },
-                expected_text="раздел начинается с новой страницы",
+                expected_text="раздел должен начинаться с новой страницы",
                 found_text=(
                     f"раздел начинается на странице {start_page}, "
                     f"предыдущий текст заканчивается на странице {previous_page}"
@@ -255,15 +359,15 @@ def _check_heading_page_break_rule(
             _build_violation(
                 rule,
                 address=paragraph.block_id,
-                location=_paragraph_location(paragraph),
+                location=_heading_location(paragraph, start_page),
                 expected={"start": "same_page"},
                 found={
                     "start_page": start_page,
                     "previous_text_page": previous_page,
                 },
-                expected_text="раздел продолжается на текущей странице",
+                expected_text="параграф не должен начинаться с новой страницы",
                 found_text=(
-                    f"раздел начинается на странице {start_page}, "
+                    f"параграф начинается на странице {start_page}, "
                     f"предыдущий текст заканчивается на странице {previous_page}"
                 ),
                 confidence=confidence,
@@ -271,6 +375,8 @@ def _check_heading_page_break_rule(
         )
 
     checked = len(records) + len(forbidden_records)
+    if explicit_mode:
+        checked += len(chapters)
     assessment = _counted_assessment(
         rule,
         violations,
@@ -282,6 +388,10 @@ def _check_heading_page_break_rule(
             "headings": checked,
             "roles": sorted(roles),
             "forbid_new_page_roles": sorted(forbidden_roles),
+            "require_page_break": rule.params.require_page_break,
+            "chapters": len(chapters) if explicit_mode else 0,
+            "explicit_breaks_found": explicit_breaks_found,
+            "page_mode": "pdf_exact" if _is_pdf_only(document) else "docx_estimate",
         },
     )
     return violations, checked, assessment

@@ -27,6 +27,8 @@ from .common import (
     _is_pdf_only,
     _is_symbolic_run,
     _parse_section_number,
+    _section_number_digit_style,
+    _section_number_prefix_word,
 )
 from .constants import (
     ALIGNMENT_LABELS,
@@ -38,6 +40,35 @@ from parser.core.schema import ParagraphBlock, ParsedDocxDocument
 
 LINE_UNIT_PT = 21.0
 """Один межстрочный интервал при кегле 14 пт: 14 × 1,5 = 21 пт."""
+
+QUOTE_CHARS = "«»„“”\""
+"""Кавычки, которые проверяет параметр forbid_quotes."""
+
+NUMBER_STYLE_LABELS = {
+    "arabic": "арабские цифры",
+    "roman": "римские цифры",
+    "chapter": "слово «Глава» перед номером",
+}
+
+
+def _is_chapter_prefix(word: Optional[str]) -> bool:
+    """Проверяет, что слово перед номером является словом «Глава»."""
+    return bool(word) and word.strip().casefold().startswith("глав")
+
+
+def _starts_with_word(text: Optional[str], word: str) -> bool:
+    """Проверяет, что текст начинается с заданного слова (без учета регистра)."""
+    if not text or not word:
+        return False
+    pattern = r"^\s*" + re.escape(word.strip()) + r"(?![А-Яа-яЁёA-Za-z])"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def _same_word(left: Optional[str], right: str) -> bool:
+    """Сравнивает слова перед номером без учета регистра и краевых знаков."""
+    if not left or not right:
+        return False
+    return left.strip().strip(".").casefold() == right.strip().strip(".").casefold()
 
 
 def _check_heading_levels_rule(
@@ -212,6 +243,54 @@ def _check_heading_numbering_rule(
                 expected_parts.append(NUMBER_ENDING_LABELS[expected.number_ending])
                 found_parts.append(NUMBER_ENDING_LABELS[actual_ending])
 
+        raw_number = _heading_section_number(record)
+        if expected.number_style != "any":
+            prefix_word = _section_number_prefix_word(raw_number)
+            digit_style = _section_number_digit_style(raw_number)
+            if expected.number_style == "chapter":
+                style_ok = _is_chapter_prefix(prefix_word)
+                found_style = (
+                    "chapter"
+                    if style_ok
+                    else (digit_style if digit_style is not None else "без номера")
+                )
+            else:
+                style_ok = digit_style == expected.number_style
+                found_style = digit_style if digit_style is not None else "не распознан"
+            if not style_ok:
+                expected_values["number_style"] = expected.number_style
+                found_values["number_style"] = found_style
+                expected_parts.append(
+                    "номер: " + NUMBER_STYLE_LABELS[expected.number_style]
+                )
+                found_parts.append(
+                    "номер: "
+                    + (
+                        "без слова «Глава»"
+                        if expected.number_style == "chapter"
+                        else "стиль не тот"
+                    )
+                )
+
+        if expected.forbid_prefix_words:
+            raw_prefix = _section_number_prefix_word(raw_number)
+            found_word: Optional[str] = None
+            for word in expected.forbid_prefix_words:
+                if _same_word(raw_prefix, word):
+                    found_word = raw_prefix
+                    break
+            if found_word is None:
+                title = heading.clean_title_text if heading is not None else None
+                for word in expected.forbid_prefix_words:
+                    if _starts_with_word(title, word):
+                        found_word = word
+                        break
+            if found_word is not None:
+                expected_values["prefix_word"] = None
+                found_values["prefix_word"] = found_word
+                expected_parts.append("номер без слова перед ним")
+                found_parts.append(f"слово «{found_word}» перед номером")
+
         if not expected_values:
             continue
         violations.append(
@@ -265,6 +344,50 @@ def _check_heading_format_rule(
                     if heading.has_trailing_dot_in_title
                     else "без точки в конце заголовка"
                 )
+
+        if expected.prefix_word and _heading_section_number(record):
+            # Слово перед номером требуется только у глав: подразделы
+            # нумеруются без «Глава», и требование к ним давало ложные находки.
+            is_chapter = record.node.semantic_role == "main_chapter" or (
+                record.node.level == 1
+                and record.node.semantic_role != "sub_section"
+            )
+            title_text_for_prefix = (
+                heading.clean_title_text or record.paragraph.text_visible or ""
+            )
+            actual_prefix = _section_number_prefix_word(
+                _heading_section_number(record)
+            )
+            combined_title_text = " ".join(
+                (
+                    title_text_for_prefix,
+                    record.paragraph.text_visible or "",
+                )
+            )
+            if not actual_prefix and re.search(
+                rf"(?<![А-Яа-яЁё]){re.escape(expected.prefix_word)}(?![А-Яа-яЁё])",
+                combined_title_text,
+                re.IGNORECASE,
+            ):
+                actual_prefix = expected.prefix_word
+            if is_chapter and not _same_word(actual_prefix, expected.prefix_word):
+                expected_values["prefix_word"] = expected.prefix_word
+                found_values["prefix_word"] = actual_prefix
+                expected_parts.append(f"слово «{expected.prefix_word}» перед номером")
+                found_parts.append(
+                    f"слово «{actual_prefix}»"
+                    if actual_prefix
+                    else "слово перед номером отсутствует"
+                )
+
+        if expected.forbid_quotes:
+            title_text = heading.clean_title_text or record.paragraph.text_visible or ""
+            quotes = sorted({char for char in title_text if char in QUOTE_CHARS})
+            if quotes:
+                expected_values["quotes"] = False
+                found_values["quotes"] = quotes
+                expected_parts.append("без кавычек в заголовке")
+                found_parts.append("кавычки: " + " ".join(f"«{char}»" for char in quotes))
 
         if expected.trailing_dot_in_number != "any" and heading.section_number_raw:
             wants_dot = expected.trailing_dot_in_number == "require"

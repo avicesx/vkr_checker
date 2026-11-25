@@ -203,7 +203,6 @@ CONTENT_RULE_IDS: frozenset = frozenset(
         "microtypography_prose",
         "microtypography_nbsp",
         "equation_numbering",
-        "bibliography_count",
         "bibliography_order",
         "bibliography_recency",
     }
@@ -211,15 +210,15 @@ CONTENT_RULE_IDS: frozenset = frozenset(
 
 #: Первый замер контентных правил на корпусе (t6, набор 2.4.0): микротипографика
 #: прозы 88 абзацев (Бикчуркина 4, Бутаков 70, Прокси 14), неразрывные пробелы
-#: 104 абзаца (15 + 79 + 10), количество источников 2 (Бикчуркина 16, Смолина 19),
-#: нумерация формул, порядок и свежесть — 0 (в корпусе нет нумеруемых формул,
-#: все списки пронумерованы подряд, свежесть в норме). Числа детерминированы.
-CONTENT_RULE_NOISE_BASELINE = 144
+#: 104 абзаца (15 + 79 + 10), нумерация формул, порядок и свежесть — 0
+#: (в корпусе нет нумеруемых формул, все списки пронумерованы подряд,
+#: свежесть в норме). Число источников задаёт только методичка УрГПУ, поэтому
+#: правило живёт в профиле вуза и в базовый набор не входит.
+CONTENT_RULE_NOISE_BASELINE = 142
 CONTENT_RULE_NOISE_BASELINE_BY_RULE: Dict[str, int] = {
     "microtypography_prose": 55,
     "microtypography_nbsp": 87,
     "equation_numbering": 0,
-    "bibliography_count": 2,
     "bibliography_order": 0,
     "bibliography_recency": 0,
 }

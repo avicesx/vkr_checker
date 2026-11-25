@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
 
 from ..findings import (
@@ -32,12 +33,73 @@ from .common import (
 )
 from .constants import (
     ALIGNMENT_LABELS,
+    EPSILON,
     INDENT_LABELS,
 )
 from parser.core.schema import (
     ParagraphBlock,
     ParsedDocxDocument,
 )
+
+
+def _body_font_size(document: ParsedDocxDocument) -> Optional[float]:
+    """Определяет кегль основного текста по самому частому кеглю его ранов.
+
+    Кегль считается по видимым ранам абзацев тела без заголовков: взвешивание
+    по числу знаков устойчиво к отдельным вставкам формул и сносок. Если
+    измерить нечего, возвращается ``None`` и проверка не оценивается.
+    """
+    weights: Counter = Counter()
+    for block in document.blocks:
+        if not isinstance(block, ParagraphBlock) or block.container_type != "body":
+            continue
+        if block.heading_info is not None:
+            continue
+        for run in block.runs:
+            text = run.visible_text.strip()
+            if not text or run.in_field or run.effective_props.vanish_hidden:
+                continue
+            weights[round(float(run.effective_props.size_pt), 1)] += len(text)
+    if not weights:
+        return None
+    return weights.most_common(1)[0][0]
+
+
+# Предел для кегля, который меньше кегля основного текста: методичка
+# разрешает уменьшать шрифт в таблицах, но не ниже 10 pt.
+SMALLER_FONT_FLOOR_PT = 10.0
+
+
+def _font_color_diff(run, expected) -> Optional[Tuple[dict, dict, List[str], List[str]]]:
+    """Сравнивает цвет и подсветку рана с ожиданием.
+
+    Гиперссылки и поля пропускаются: цвет ссылки приходит из стиля символа и
+    ничего не выделяет. Возвращает части нарушения в том же виде, что и
+    ``_compare_font``, либо ``None``, если цвет и подсветка допустимы.
+    """
+    if expected is None:
+        return None
+    props = run.effective_props
+    if run.is_hyperlink or run.in_field:
+        return None
+    color = props.color
+    actual = "auto" if color.is_auto else color.rgb_hex
+    if actual is not None and actual not in set(expected.allowed_colors):
+        allowed = " / ".join(expected.allowed_colors)
+        return (
+            {"color": expected.allowed_colors},
+            {"color": actual, "run_id": run.run_id},
+            [f"цвет текста: {allowed}"],
+            [f"цвет текста #{actual}"],
+        )
+    if not expected.allow_highlight and props.highlight_color:
+        return (
+            {"highlight": False},
+            {"highlight_color": props.highlight_color, "run_id": run.run_id},
+            ["без подсветки текста"],
+            [f"подсветка текста {props.highlight_color}"],
+        )
+    return None
 
 
 def _check_font_rule(
@@ -57,6 +119,7 @@ def _check_font_rule(
     violations: List[Violation] = []
     targets = _paragraph_targets(document, rule.target, contexts)
     pdf_only = _is_pdf_only(document)
+    body_size = _body_font_size(document) if rule.params.smaller_than_body_text else None
 
     for paragraph in targets:
         mismatched = []
@@ -73,8 +136,31 @@ def _check_font_rule(
                 check_family=True,
                 check_complex_script=not pdf_only,
             )
+            if diff is None:
+                diff = _font_color_diff(run, rule.params.color)
             if diff is not None:
                 mismatched.append((run, diff))
+            elif body_size is not None and (
+                run.effective_props.size_pt
+                < SMALLER_FONT_FLOOR_PT - rule.params.size_tolerance_pt - EPSILON
+            ):
+                mismatched.append(
+                    (
+                        run,
+                        (
+                            {"min_size_pt": SMALLER_FONT_FLOOR_PT},
+                            {"size_pt": run.effective_props.size_pt},
+                            [
+                                "кегль не меньше 10 pt: меньший кегль "
+                                "допустим, но не ниже предела"
+                            ],
+                            [
+                                f"кегль {run.effective_props.size_pt} пт "
+                                f"при основном тексте {body_size} пт"
+                            ],
+                        ),
+                    )
+                )
 
         if not mismatched:
             continue
@@ -100,7 +186,11 @@ def _check_font_rule(
         expected_text=rule.message,
         confidence="medium" if pdf_only else "high",
         empty_observed="в области действия правила нет абзацев",
-        details={"scope": rule.target.scope, "pdf_only": pdf_only},
+        details={
+            "scope": rule.target.scope,
+            "pdf_only": pdf_only,
+            "body_size_pt": body_size,
+        },
     )
     return violations, len(targets), assessment
 

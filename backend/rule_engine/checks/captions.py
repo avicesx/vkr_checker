@@ -1,6 +1,8 @@
 """Семейство подписей: нумерация, формат, ссылки на объекты."""
 from __future__ import annotations
 
+import re
+
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..findings import (
@@ -410,6 +412,73 @@ def _check_caption_numbering_rule(
     )
 
 
+def _caption_has_hyphenation(
+    text: Optional[str],
+    block: Optional[ParagraphBlock],
+) -> bool:
+    """Ищет следы переноса слова в тексте подписи.
+
+    Мягкий перенос и дефис в конце строки видны в тексте, а признак
+    ``pdf_has_hyphenated_break`` приходит из PDF-разбора: строка оборвана
+    переносом, хотя в тексте дефиса нет.
+    """
+    if block is not None and block.pdf_has_hyphenated_break:
+        return True
+    if not text:
+        return False
+    if "\u00ad" in text:
+        return True
+    return bool(re.search(r"[А-Яа-яЁёA-Za-z]-\s*$", text))
+
+
+def _caption_breaks_after_prefix(
+    entity: NumberedCaptionEntity,
+    text: Optional[str],
+) -> bool:
+    """Проверяет разрыв строки сразу после префикса и номера подписи."""
+    if not text:
+        return False
+    head = " ".join(
+        part for part in ((entity.prefix_word or "").strip(), (entity.number_str or "").strip()) if part
+    )
+    if not head:
+        return False
+    position = text.find(head)
+    if position < 0:
+        return False
+    tail = text[position + len(head):]
+    return bool(re.match(r"\s*(?:[—–.:-]\s*)?\n", tail))
+
+
+def _caption_has_number_sign(
+    entity: NumberedCaptionEntity,
+    text: Optional[str],
+) -> bool:
+    """Ищет знак номера «№» перед номером подписи."""
+    if not text:
+        return False
+    number = (entity.number_str or "").strip()
+    if number:
+        return bool(re.search(r"№\s*" + re.escape(number), text))
+    return "№" in text and bool(entity.prefix_word)
+
+
+def _caption_sentence_case_ok(title: Optional[str]) -> Optional[bool]:
+    """Проверяет запись названия подписи обычным предложением.
+
+    Возвращает ``None``, если букв в названии нет. Нарушением считается
+    строчная первая буква и запись «Каждое Слово С Заглавной», когда
+    заглавные буквы стоят больше чем в половине слов.
+    """
+    words = re.findall(r"[А-Яа-яЁёA-Za-z]{2,}", title or "")
+    if not words:
+        return None
+    if not words[0][0].isupper():
+        return False
+    capitalized = sum(1 for word in words if word[0].isupper())
+    return capitalized * 2 <= len(words) + 1
+
+
 def _check_caption_format_rule(
     rule: CaptionFormatRule,
     document: ParsedDocxDocument,
@@ -454,6 +523,7 @@ def _check_caption_format_rule(
     violations: List[Violation] = []
     assessed_entities = 0
     skipped_uppercase = 0
+    skipped_sentence_case = 0
     for entity in entities:
         block = blocks.get(entity.caption_block_id)
         expected_values: Dict[str, Any] = {}
@@ -547,6 +617,51 @@ def _check_caption_format_rule(
                         else "со строчной"
                     )
 
+        if expected.sentence_case is not None:
+            sentence_case_ok = _caption_sentence_case_ok(entity.title_text)
+            if sentence_case_ok is None:
+                skipped_sentence_case += 1
+            else:
+                measurable = True
+                if sentence_case_ok != expected.sentence_case:
+                    expected_values["sentence_case"] = expected.sentence_case
+                    found_values["sentence_case"] = sentence_case_ok
+                    expected_parts.append(
+                        "название записано обычным предложением"
+                        if expected.sentence_case
+                        else "название записано не обычным предложением"
+                    )
+                    found_parts.append(
+                        "обычное предложение"
+                        if sentence_case_ok
+                        else "Каждое Слово С Заглавной"
+                    )
+
+        if expected.forbid_hyphenation or expected.forbid_break_after_prefix or expected.forbid_number_sign:
+            caption_text = (
+                block.text_visible
+                if block is not None and block.text_visible
+                else _caption_display(entity)
+            )
+            measurable = True
+            if expected.forbid_hyphenation and _caption_has_hyphenation(caption_text, block):
+                expected_values["hyphenation"] = False
+                found_values["hyphenation"] = True
+                expected_parts.append("без переносов в подписи")
+                found_parts.append("подпись с переносом слова")
+            if expected.forbid_break_after_prefix and _caption_breaks_after_prefix(
+                entity, caption_text
+            ):
+                expected_values["break_after_prefix"] = False
+                found_values["break_after_prefix"] = True
+                expected_parts.append("подпись не разрывается после префикса")
+                found_parts.append("разрыв строки после префикса и номера")
+            if expected.forbid_number_sign and _caption_has_number_sign(entity, caption_text):
+                expected_values["number_sign"] = False
+                found_values["number_sign"] = True
+                expected_parts.append("номер подписи без знака «№»")
+                found_parts.append("перед номером стоит знак «№»")
+
         if measurable:
             assessed_entities += 1
         if not expected_values:
@@ -577,6 +692,7 @@ def _check_caption_format_rule(
         "entities_considered": len(entities),
         "entities_assessed": assessed_entities,
         "skipped_uppercase": skipped_uppercase,
+        "skipped_sentence_case": skipped_sentence_case,
         "mismatches_total": len(violations),
     }
     if assessed_entities == 0:

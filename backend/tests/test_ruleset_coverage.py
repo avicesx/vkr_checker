@@ -28,6 +28,7 @@ from typing import Any, Dict, Iterator, List, Set, Tuple, get_args
 import pytest
 
 from api.admin import DEFAULT_RULE_SCOPES
+from conftest import CODES_WITHOUT_DEFAULT_RULE, PROFILE_ONLY_CODES
 from rule_engine.engine import RuleEngine
 from rule_engine.rules import (
     DEFAULT_RULESET_PATH,
@@ -35,6 +36,8 @@ from rule_engine.rules import (
     PROFILE_RULESET_PATHS,
     Rule,
     RuleCode,
+    load_default_ruleset,
+    load_profile_ruleset,
     load_ruleset,
 )
 
@@ -200,11 +203,17 @@ def test_default_ruleset_is_the_current_baseline() -> None:
     default_codes: Set[str] = {rule.code for rule in default_ruleset.rules}
     default_version = _version_key(default_ruleset.ruleset_version)
 
-    missing_codes = sorted(RULE_CODES - default_codes)
+    documented = set(CODES_WITHOUT_DEFAULT_RULE)
+    missing_codes = sorted(RULE_CODES - default_codes - documented)
     assert not missing_codes, (
         "штатный набор vkr_test_rules.json не содержит правил видов: "
         + ", ".join(missing_codes)
         + ". Новый вид правила должен попасть в набор по умолчанию"
+    )
+    stale = sorted(documented & default_codes)
+    assert not stale, (
+        "коды перечислены как сознательно не включённые, но правила есть: "
+        + ", ".join(stale)
     )
 
     for profile_id, profile_path in PROFILE_RULESET_PATHS.items():
@@ -216,11 +225,34 @@ def test_default_ruleset_is_the_current_baseline() -> None:
         )
 
         profile_kinds = {rule.code for rule in profile_ruleset.rules}
-        extra_codes = sorted(profile_kinds - default_codes)
+        extra_codes = sorted(profile_kinds - default_codes - set(PROFILE_ONLY_CODES))
         assert not extra_codes, (
             f"профиль {profile_id} использует виды, которых нет в штатном наборе: "
             + ", ".join(extra_codes)
         )
+
+
+def test_profile_only_codes_live_in_profiles() -> None:
+    """Виды, вынесенные в профиль вуза, присутствуют хотя бы в одном профиле."""
+    profile_codes: Set[str] = set()
+    for profile_path in PROFILE_RULESET_PATHS.values():
+        profile_codes |= {rule.code for rule in load_ruleset(profile_path).rules}
+
+    missing = sorted(set(PROFILE_ONLY_CODES) - profile_codes)
+    assert not missing, (
+        "виды объявлены профильными, но ни один профиль их не использует: "
+        + ", ".join(missing)
+    )
+
+
+def test_bibliography_count_is_profile_only() -> None:
+    """Число источников задаёт методичка УрГПУ: в базе правила нет, в профиле 35."""
+    default_codes = {rule.code for rule in load_default_ruleset().rules}
+    assert "bibliography_count" not in default_codes
+
+    rule = load_profile_ruleset("urgpu").get_rule("bibliography_count")
+    assert rule.params.min_sources == 35
+    assert "35" in rule.quote
 
 
 def test_default_rule_scopes_cover_every_rule_kind() -> None:
@@ -259,6 +291,8 @@ def test_default_rule_scopes_match_shipped_rulesets() -> None:
 
     drifted = []
     for code, scope in DEFAULT_RULE_SCOPES.items():
+        if code in CODES_WITHOUT_DEFAULT_RULE:
+            continue
         actual = used_scopes.get(code, set())
         if scope not in actual:
             drifted.append(

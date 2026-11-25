@@ -160,6 +160,32 @@ def _mention_ranks(document: ParsedDocxDocument) -> Dict[str, int]:
     return ranks
 
 
+RE_APPENDIX_LABEL = re.compile(r"приложени[ея]\s*[№]?\s*([А-ЯЁA-Z0-9]+)", re.IGNORECASE)
+CYRILLIC_LETTERS = "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ"
+LATIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _appendix_label(node: DocumentTreeNode) -> Optional[str]:
+    """Возвращает обозначение приложения из номера узла или из заголовка."""
+    if node.section_number:
+        return node.section_number.strip()
+    match = RE_APPENDIX_LABEL.search(node.title or "")
+    return match.group(1) if match else None
+
+
+def _appendix_label_scheme(label: Optional[str]) -> Optional[str]:
+    """Определяет схему обозначения приложения по его метке."""
+    if not label:
+        return None
+    if label in CYRILLIC_LETTERS:
+        return "russian_letters"
+    if label in LATIN_LETTERS:
+        return "latin_letters"
+    if label.isdigit():
+        return "arabic"
+    return None
+
+
 def _check_appendix_order_rule(
     rule: AppendixOrderRule,
     document: ParsedDocxDocument,
@@ -200,6 +226,33 @@ def _check_appendix_order_rule(
     )
     ranks = _mention_ranks(document)
     violations: List[Violation] = []
+    labels_checked = 0
+    labels_not_found = 0
+
+    if expected.label_scheme != "any":
+        for node in ordered:
+            label = _appendix_label(node)
+            if label is None:
+                labels_not_found += 1
+                continue
+            labels_checked += 1
+            actual_scheme = _appendix_label_scheme(label)
+            if actual_scheme != expected.label_scheme:
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{_node_anchor(node)}:label_scheme",
+                        location=_node_location(node, node.title),
+                        expected={"label_scheme": expected.label_scheme},
+                        found={"label": label, "label_scheme": actual_scheme},
+                        expected_text=(
+                            "приложения обозначены русскими буквами"
+                            if expected.label_scheme == "russian_letters"
+                            else "приложения обозначены арабскими цифрами"
+                        ),
+                        found_text=f"приложение обозначено «{label}»",
+                    )
+                )
 
     order_checked = expected.order == "by_first_mention" and bool(ranks)
     if order_checked:
@@ -274,6 +327,9 @@ def _check_appendix_order_rule(
             "mentions_found": len(ranks),
             "order_checked": order_checked,
             "new_page_checked": expected.new_page_each,
+            "label_scheme": expected.label_scheme,
+            "labels_checked": labels_checked,
+            "labels_not_found": labels_not_found,
         },
     )
     if not order_checked and expected.order == "by_first_mention":

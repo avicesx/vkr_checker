@@ -24,7 +24,12 @@ from parser.core.schema import (
     TextRun,
     ThemeData,
 )
-from rule_engine import RuleEngine, RuleSet, load_default_ruleset
+from rule_engine import (
+    RuleEngine,
+    RuleSet,
+    load_default_ruleset,
+    load_profile_ruleset,
+)
 from rule_engine.findings import RuleAssessment, RuleCheckReport
 from rule_engine.rules import Rule
 
@@ -85,6 +90,7 @@ def _heading(
     page_end: int = 5,
     keep_next: bool = True,
     page_break_before: bool = False,
+    breaks: Optional[List[int]] = None,
     family: str = "Times New Roman",
     size_pt: float = 14.0,
     bold: bool = True,
@@ -96,6 +102,7 @@ def _heading(
         section_idx=0,
         page_start_est=page_start,
         page_end_est=page_end,
+        rendered_page_breaks_offsets=breaks or [],
         text_raw=title,
         text_visible=title,
         style_id="Heading1",
@@ -185,6 +192,21 @@ def _make_document(
 def _engine(rule_id: str) -> tuple[RuleEngine, Rule]:
     """Создает движок с единственным правилом из штатного набора."""
     rule = load_default_ruleset().get_rule(rule_id)
+    engine = RuleEngine(
+        RuleSet(
+            ruleset_id=f"test-{rule_id}",
+            ruleset_version="1.0.0",
+            rules=[rule],
+        )
+    )
+    return engine, rule
+
+
+def _engine_with_params(rule_id: str, **params: object) -> tuple[RuleEngine, Rule]:
+    """Создает движок с правилом из набора и заменой отдельных ``params``."""
+    rule = load_default_ruleset().get_rule(rule_id)
+    updated = rule.params.model_copy(update=params)
+    rule = rule.model_copy(update={"params": updated})
     engine = RuleEngine(
         RuleSet(
             ruleset_id=f"test-{rule_id}",
@@ -349,6 +371,170 @@ def test_heading_page_break_passes_when_chapter_starts_new_page() -> None:
 
     assert report.violations == []
     assert _assessment(report, rule.rule_id).status == "pass"
+
+
+def test_heading_page_break_address_matches_heading_page() -> None:
+    """Страница в адресе совпадает с найденной страницей заголовка.
+
+    Абзац заголовка оценен 18-й страницей, но разрыв в нулевой позиции
+    переносит начало на 19-ю. Адрес должен показывать 19 — то же значение,
+    которое читатель видит в ``found.start_page``.
+    """
+    engine, rule = _engine("heading_page_break")
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=18, page_end=19),
+            _heading("h_1", page_start=18, page_end=20, breaks=[0]),
+        ],
+        nodes=[_node("h_1", page_start=18, page_end=20)],
+        total_pages=25,
+    )
+
+    report = engine.check(document)
+
+    assert len(report.violations) == 1
+    violation = report.violations[0]
+    assert violation.found["start_page"] == 19
+    assert violation.location.page_start_est == 19
+    assert violation.location.page_end_est == 20
+
+
+# ------------------------------------------- явный разрыв страницы перед главой
+
+
+def test_page_break_disabled_in_default_ruleset() -> None:
+    """В штатном наборе требование явного разрыва выключено."""
+    rule = load_default_ruleset().get_rule("heading_page_break")
+
+    assert rule.params.require_page_break is False
+
+
+def test_page_break_flags_chapter_without_explicit_break() -> None:
+    """Глава без явного разрыва — нарушение, если разрывы в документе есть."""
+    engine, rule = _engine_with_params("heading_page_break", require_page_break=True)
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=4, page_end=4, breaks=[10]),
+            _heading("h_1", page_start=5, page_end=7),
+        ],
+        nodes=[_node("h_1")],
+        total_pages=8,
+    )
+
+    report = engine.check(document)
+    assessment = _assessment(report, rule.rule_id)
+
+    assert [violation.location.block_id for violation in report.violations] == ["h_1"]
+    assert report.violations[0].found == {"page_break": False, "page_start": 5}
+    assert assessment.status == "fail"
+    assert assessment.details["explicit_breaks_found"] == 1
+
+
+def test_page_break_passes_chapter_with_explicit_break() -> None:
+    """Глава с явным разрывом в нулевой позиции проходит проверку."""
+    engine, rule = _engine_with_params("heading_page_break", require_page_break=True)
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=4, page_end=4, breaks=[10]),
+            _heading("h_1", page_start=5, page_end=7, breaks=[0]),
+        ],
+        nodes=[_node("h_1")],
+        total_pages=8,
+    )
+
+    report = engine.check(document)
+
+    assert report.violations == []
+    assert _assessment(report, rule.rule_id).status == "pass"
+
+
+def test_page_break_not_assessed_without_explicit_breaks() -> None:
+    """Без явных разрывов в документе положение главы не определено."""
+    engine, rule = _engine_with_params("heading_page_break", require_page_break=True)
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=4, page_end=4),
+            _heading("h_1", page_start=5, page_end=7),
+        ],
+        nodes=[_node("h_1")],
+        total_pages=8,
+    )
+
+    report = engine.check(document)
+    assessment = _assessment(report, rule.rule_id)
+
+    assert report.violations == []
+    assert assessment.status == "not_assessed"
+    assert "явных разрывов страницы" in assessment.observed_text
+
+
+def test_page_break_uses_exact_pdf_pages_without_rendered_breaks() -> None:
+    """В PDF страницы точные, поэтому явный разрыв не обязателен."""
+    engine, rule = _engine_with_params("heading_page_break", require_page_break=True)
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=4, page_end=4),
+            _heading("h_1", page_start=4, page_end=6),
+        ],
+        nodes=[_node("h_1")],
+        total_pages=8,
+        parse_mode="pdf_only",
+        has_pdf=True,
+    )
+
+    report = engine.check(document)
+    assessment = _assessment(report, rule.rule_id)
+
+    assert [violation.location.block_id for violation in report.violations] == ["h_1"]
+    assert report.violations[0].location.page_start_est == report.violations[0].found["start_page"]
+    assert assessment.status == "fail"
+
+
+
+def test_profile_keeps_error_for_chapter_page_break() -> None:
+    """В профиле глава обязана начинать страницу, и находка остаётся error."""
+    rule = load_profile_ruleset("urgpu").get_rule("heading_page_break")
+    engine = RuleEngine(RuleSet(ruleset_id="test-chapter-break", ruleset_version="1.0.0", rules=[rule]))
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=2, page_end=2, breaks=[0]),
+            _heading("h_1", page_start=2, page_end=2),
+        ],
+        nodes=[_node("h_1")],
+        total_pages=8,
+    )
+
+    report = engine.check(document)
+
+    assert len(report.violations) == 1
+    violation = report.violations[0]
+    assert violation.rule_id == "heading_page_break"
+    assert violation.severity == "error"
+    assert violation.message == "Раздел должен начинаться с новой страницы"
+
+
+def test_profile_warns_when_paragraph_starts_new_page() -> None:
+    """Запрет разрыва перед параграфом — предупреждение с текстом про параграф."""
+    rule = load_profile_ruleset("urgpu").get_rule("heading_page_break_subsection")
+    engine = RuleEngine(RuleSet(ruleset_id="test-subsection-break", ruleset_version="1.0.0", rules=[rule]))
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=2, page_end=2),
+            _heading("h_1", level=2, page_start=3, page_end=3),
+        ],
+        nodes=[_node("h_1", level=2, role="sub_section", page_start=3, page_end=3)],
+        total_pages=8,
+    )
+
+    report = engine.check(document)
+
+    assert len(report.violations) == 1
+    violation = report.violations[0]
+    assert violation.rule_id == "heading_page_break_subsection"
+    assert violation.severity == "warning"
+    assert violation.message == "Параграф начинается с новой страницы, хотя не должен"
+    assert violation.expected_text == "параграф не должен начинаться с новой страницы"
+    assert violation.found["start_page"] == 3
 
 
 # ---------------------------------------------------------------- шрифт заголовков

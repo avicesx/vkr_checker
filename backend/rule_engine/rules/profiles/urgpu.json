@@ -1,6 +1,6 @@
 {
   "ruleset_id": "urgpu-vkr-profile",
-  "ruleset_version": "2.3.0",
+  "ruleset_version": "2.6.0",
   "extends": "vkr-rule-engine-test",
   "description": "Профиль УрГПУ: переопределения требований к оформлению ВКР поверх штатного набора",
   "rules": [
@@ -94,8 +94,8 @@
       "rule_id": "heading_page_break",
       "code": "heading_page_break",
       "strictness": "error",
-      "message": "Параграф не начинается с новой страницы, раздел — с новой",
-      "quote": "Начинать новый параграф с новой страницы не нужно.",
+      "message": "Раздел должен начинаться с новой страницы",
+      "quote": "Глава: с новой страницы (!), параграфы продолжать на той же странице",
       "target": {
         "scope": "headings"
       },
@@ -107,6 +107,20 @@
           "bibliography",
           "appendix"
         ],
+        "require_page_break": true
+      }
+    },
+    {
+      "rule_id": "heading_page_break_subsection",
+      "code": "heading_page_break",
+      "strictness": "warning",
+      "message": "Параграф начинается с новой страницы, хотя не должен",
+      "quote": "Начинать новый параграф с новой страницы не нужно.",
+      "target": {
+        "scope": "headings"
+      },
+      "params": {
+        "roles": [],
         "forbid_new_page_roles": [
           "sub_section"
         ]
@@ -608,5 +622,6 @@
         "require_trailing_dot": false
       }
     }
+
   ]
 }

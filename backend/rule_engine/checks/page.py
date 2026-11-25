@@ -619,6 +619,7 @@ PAGE_NUMBER_PROPERTY_LABELS = {
     "forbid_trailing_dot": "без точки после номера страницы",
     "require_continuous": "сквозная нумерация без перезапуска",
     "include_appendices": "нумерация страниц в приложениях",
+    "first_numbered_page": "страница первого напечатанного номера",
 }
 """Подписи дополнительных требований к номеру страницы."""
 
@@ -660,6 +661,16 @@ def _pdf_page_number_property_violations(
         "numbered_pages": len(numbered),
     }
 
+    def _page_anchor(page_num: int) -> Tuple[Optional[str], Optional[int]]:
+        '''Возвращает блок и раздел первой строки страницы.'''
+        for block in document.blocks:
+            if getattr(block, "page_start_est", None) == page_num:
+                return (
+                    getattr(block, "block_id", None),
+                    getattr(block, "section_idx", None),
+                )
+        return None, None
+
     def _add(
         page: Any,
         property_key: str,
@@ -668,11 +679,14 @@ def _pdf_page_number_property_violations(
         expected_text: str,
         found_text: str,
     ) -> None:
+        anchor_block_id, anchor_section_idx = _page_anchor(page.page_num)
         violations.append(
             _build_violation(
                 rule,
                 address=f"page:{page.page_num}:{property_key}",
                 location=ViolationLocation(
+                    block_id=anchor_block_id,
+                    section_idx=anchor_section_idx,
                     page_start_est=page.page_num,
                     snippet=f"страница {page.page_num}",
                 ),
@@ -769,6 +783,30 @@ def _pdf_page_number_property_violations(
                         PAGE_NUMBER_PROPERTY_LABELS["include_appendices"],
                         f"страница приложения {page.page_num} без номера",
                     )
+    if params.first_numbered_page is not None:
+        checks += 1
+        if numbered:
+            actual_first = min(page.page_num for page in numbered)
+            if actual_first != params.first_numbered_page:
+                first_numbered = next(
+                    page for page in numbered if page.page_num == actual_first
+                )
+                _add(
+                    first_numbered,
+                    "first_numbered_page",
+                    {"first_numbered_page": params.first_numbered_page},
+                    {
+                        "first_numbered_page": actual_first,
+                        "rendered_number": first_numbered.rendered_page_number_raw,
+                    },
+                    PAGE_NUMBER_PROPERTY_LABELS["first_numbered_page"],
+                    f"номер впервые напечатан на странице {actual_first}",
+                )
+        else:
+            details["first_numbered_page_note"] = (
+                "на страницах не найдено напечатанных номеров"
+            )
+
     return violations, checks, details
 
 
@@ -875,6 +913,9 @@ def _docx_page_number_property_violations(
     if params.include_appendices:
         skipped.append("include_appendices")
 
+    if params.first_numbered_page is not None:
+        skipped.append("first_numbered_page")
+
     if skipped:
         details["skipped_docx"] = skipped
         details["skipped_note"] = (
@@ -917,6 +958,7 @@ def _check_page_number_position_rule(
         or params.forbid_trailing_dot
         or params.require_continuous
         or params.include_appendices
+        or params.first_numbered_page is not None
     )
     if not property_flags:
         return violations, number_count, assessment
