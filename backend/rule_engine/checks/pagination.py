@@ -282,7 +282,7 @@ def _check_heading_page_break_rule(
         return [], 0, _build_assessment(
             rule,
             "not_assessed",
-            expected_text="глава начинается с явного разрыва страницы",
+            expected_text="глава должна начинаться с явного разрыва страницы",
             observed_text=(
                 "документ не содержит явных разрывов страницы, "
                 "положение главы не определено"
@@ -309,7 +309,7 @@ def _check_heading_page_break_rule(
                     "page_break": False,
                     "page_start": paragraph.page_start_est,
                 },
-                expected_text="глава начинается с явного разрыва страницы",
+                expected_text="глава должна начинаться с явного разрыва страницы",
                 found_text=(
                     "в начале главы нет явного разрыва страницы "
                     f"(страница {paragraph.page_start_est})"
