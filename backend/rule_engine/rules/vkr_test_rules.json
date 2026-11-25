@@ -1,6 +1,6 @@
 {
   "ruleset_id": "vkr-rule-engine-test",
-  "ruleset_version": "5.1.0",
+  "ruleset_version": "5.2.0",
   "description": "Штатный набор нормоконтроля ВКР: общие требования к тексту, структуре, таблицам, подписям и списку литературы",
   "rules": [
     {

@@ -274,6 +274,49 @@ class RuleTarget(BaseModel):
     )
 
 
+class FontColorExpectation(BaseModel):
+    """Ожидаемый цвет текста и подсветка.
+
+    ``allowed_colors`` перечисляет допустимые значения: ``auto`` — цвет по
+    умолчанию (в DOCX это ``w:val="auto"``), иначе шестизначный HEX в верхнем
+    регистре без решетки. Черный ``000000`` обычно проставлен явно и ничего не
+    выделяет, поэтому методички разрешают его наравне с ``auto``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_colors: List[str] = Field(
+        default_factory=lambda: ["auto", "000000"],
+        description="Допустимые цвета: auto или HEX вида 000000",
+    )
+    allow_highlight: bool = Field(
+        default=False,
+        description="Разрешать подсветку текста (w:highlight)",
+    )
+
+    @field_validator("allowed_colors")
+    @classmethod
+    def _normalize_colors(cls, values: List[str]) -> List[str]:
+        """Нормализует цвета и отбрасывает повторы."""
+        normalized: List[str] = []
+        for value in values:
+            color = value.strip().upper()
+            if color == "AUTO":
+                color = "auto"
+            if color != "auto" and not re.fullmatch(r"[0-9A-F]{6}", color):
+                raise ValueError(
+                    "FontColorExpectation: цвет задается как 'auto' "
+                    "или HEX из шести цифр"
+                )
+            if color not in normalized:
+                normalized.append(color)
+        if not normalized:
+            raise ValueError(
+                "FontColorExpectation: allowed_colors не может быть пустым"
+            )
+        return normalized
+
+
 class FontExpectation(BaseModel):
     """Ожидаемое шрифтовое оформление: гарнитура, кегль и начертание."""
 
@@ -300,6 +343,13 @@ class FontExpectation(BaseModel):
     )
     bold: Optional[bool] = Field(default=None, description="Ожидаемое начертание: полужирный")
     italic: Optional[bool] = Field(default=None, description="Ожидаемое начертание: курсив")
+    color: Optional[FontColorExpectation] = Field(
+        default=None,
+        description=(
+            "Ожидаемый цвет текста и подсветка: гиперссылки и поля пропускаются, "
+            "чтобы цвет ссылки из стиля не считался выделением"
+        ),
+    )
     size_tolerance_pt: float = Field(
         default=0.5,
         ge=0.0,
@@ -356,11 +406,12 @@ class FontExpectation(BaseModel):
             and self.min_size_pt is None
             and self.bold is None
             and self.italic is None
+            and self.color is None
             and not self.smaller_than_body_text
         ):
             raise ValueError(
                 "FontExpectation пусто: задайте хотя бы одно из family, size_pt, "
-                "min_size_pt, bold, italic, smaller_than_body_text"
+                "min_size_pt, bold, italic, color, smaller_than_body_text"
             )
         return self
 
@@ -2312,6 +2363,13 @@ class TableLayoutExpectation(BaseModel):
             "не выносят в отдельную графу таблицы"
         ),
     )
+    forbid_color_fill: bool = Field(
+        default=False,
+        description=(
+            "Запрещать цветную заливку ячеек: белая и прозрачная заливка "
+            "допускается, остальные цвета — нарушение"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_checked_property(self) -> "TableLayoutExpectation":
@@ -2321,6 +2379,7 @@ class TableLayoutExpectation(BaseModel):
             and not self.require_full_text_width
             and self.alignment is None
             and not self.forbid_number_column
+            and not self.forbid_color_fill
         ):
             raise ValueError(
                 "TableLayoutExpectation пусто: включите require_all_sides_borders "

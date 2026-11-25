@@ -170,6 +170,17 @@ def _has_number_column(table: TableBlock) -> bool:
     return False
 
 
+def _cell_fill_hex(cell) -> Optional[str]:
+    """Возвращает HEX цветной заливки ячейки; белая и прозрачная не считаются."""
+    fill = cell.shading_fill
+    if fill is None or fill.is_auto:
+        return None
+    value = (fill.rgb_hex or "").upper()
+    if value in {"", "FFFFFF"}:
+        return None
+    return value
+
+
 def _check_table_layout_rule(
     rule: TableLayoutRule,
     document: ParsedDocxDocument,
@@ -208,6 +219,7 @@ def _check_table_layout_rule(
     alignment_not_set = 0
     alignment_not_observed = 0
     number_column_checked = 0
+    fill_checked = 0
 
     for table in tables:
         snippet = _table_snippet(table, captions)
@@ -329,6 +341,31 @@ def _check_table_layout_rule(
                     )
                 )
 
+        if expected.forbid_color_fill:
+            fill_checked += 1
+            filled = [cell for cell in _iter_cells(table) if _cell_fill_hex(cell)]
+            if filled:
+                first = filled[0]
+                violations.append(
+                    _build_violation(
+                        rule,
+                        address=f"{table.block_id}:fill",
+                        location=location,
+                        expected={"fill": "none"},
+                        found={
+                            "cells_with_fill": len(filled),
+                            "first_cell_id": first.cell_id,
+                            "fill": _cell_fill_hex(first),
+                        },
+                        expected_text="ячейки без цветной заливки",
+                        found_text=(
+                            f"с цветной заливкой {len(filled)} ячеек, "
+                            f"первая — {first.cell_id}"
+                        ),
+                        occurrences=len(filled),
+                    )
+                )
+
     details = {
         "tables": len(tables),
         "cells_checked": cells_checked,
@@ -338,6 +375,7 @@ def _check_table_layout_rule(
         "alignment_not_set": alignment_not_set,
         "alignment_not_observed": alignment_not_observed,
         "number_column_checked": number_column_checked,
+        "fill_checked": fill_checked,
     }
     if (
         not violations

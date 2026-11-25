@@ -70,6 +70,38 @@ def _body_font_size(document: ParsedDocxDocument) -> Optional[float]:
 SMALLER_FONT_FLOOR_PT = 10.0
 
 
+def _font_color_diff(run, expected) -> Optional[Tuple[dict, dict, List[str], List[str]]]:
+    """Сравнивает цвет и подсветку рана с ожиданием.
+
+    Гиперссылки и поля пропускаются: цвет ссылки приходит из стиля символа и
+    ничего не выделяет. Возвращает части нарушения в том же виде, что и
+    ``_compare_font``, либо ``None``, если цвет и подсветка допустимы.
+    """
+    if expected is None:
+        return None
+    props = run.effective_props
+    if run.is_hyperlink or run.in_field:
+        return None
+    color = props.color
+    actual = "auto" if color.is_auto else color.rgb_hex
+    if actual is not None and actual not in set(expected.allowed_colors):
+        allowed = " / ".join(expected.allowed_colors)
+        return (
+            {"color": expected.allowed_colors},
+            {"color": actual, "run_id": run.run_id},
+            [f"цвет текста: {allowed}"],
+            [f"цвет текста #{actual}"],
+        )
+    if not expected.allow_highlight and props.highlight_color:
+        return (
+            {"highlight": False},
+            {"highlight_color": props.highlight_color, "run_id": run.run_id},
+            ["без подсветки текста"],
+            [f"подсветка текста {props.highlight_color}"],
+        )
+    return None
+
+
 def _check_font_rule(
     rule: FontRule,
     document: ParsedDocxDocument,
@@ -104,6 +136,8 @@ def _check_font_rule(
                 check_family=True,
                 check_complex_script=not pdf_only,
             )
+            if diff is None:
+                diff = _font_color_diff(run, rule.params.color)
             if diff is not None:
                 mismatched.append((run, diff))
             elif body_size is not None and (

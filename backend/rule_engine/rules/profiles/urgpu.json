@@ -1,6 +1,6 @@
 {
   "ruleset_id": "urgpu-vkr-profile",
-  "ruleset_version": "2.4.0",
+  "ruleset_version": "2.5.0",
   "extends": "vkr-rule-engine-test",
   "description": "Профиль УрГПУ: переопределения требований к оформлению ВКР поверх штатного набора",
   "rules": [
@@ -607,6 +607,41 @@
         "entity_type": "figure",
         "separator": "dot",
         "require_trailing_dot": false
+      }
+    },
+    {
+      "rule_id": "table_layout_borders",
+      "code": "table_layout",
+      "strictness": "error",
+      "message": "Таблица обведена со всех сторон, занимает ширину текста и без цветной заливки ячеек",
+      "quote": "Таблицу со всех сторон ограничить линиями, точно соответствовать размерам полей",
+      "target": {
+        "scope": "table_cells"
+      },
+      "params": {
+        "require_all_sides_borders": true,
+        "require_full_text_width": true,
+        "width_tolerance_mm": 1.0,
+        "forbid_color_fill": true
+      }
+    },
+    {
+      "rule_id": "font_color_body",
+      "code": "font",
+      "strictness": "error",
+      "message": "Цветное выделение текста не допускается: для выделения используется курсив",
+      "quote": "для выделения в тексте можно использовать курсив; полужирный не допускается.",
+      "target": {
+        "scope": "body_text"
+      },
+      "params": {
+        "color": {
+          "allowed_colors": [
+            "auto",
+            "000000"
+          ],
+          "allow_highlight": false
+        }
       }
     }
   ]
