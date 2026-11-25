@@ -62,6 +62,20 @@ from .table_parser import TableParser, link_table_captions_and_continuations
 from .visual_and_math_parser import VisualAndMathParser
 
 
+def _ends_with_explicit_page_break(block: ParagraphBlock) -> bool:
+    """Явный w:br type=page в конце абзаца переносит следующий блок на новую страницу.
+
+    Разрыв, за которым внутри того же абзаца остаётся видимый текст, следующий
+    блок на новую страницу не переносит: там действует обычная геометрия.
+    """
+    visible_len = len(block.text_visible)
+    for run in block.runs:
+        for special in run.special_chars:
+            if special.char_type == "page_break" and special.char_offset_in_para >= visible_len:
+                return True
+    return False
+
+
 class DocxParserPipeline:
     """
     Главный оркестратор: нормализованный .docx (+ эталонный PDF) -> ParsedDocument.
@@ -212,11 +226,13 @@ class DocxParserPipeline:
 
             p_seq = 0
             tbl_seq = 0
+            pending_page_break = False
 
             for sec_idx, bound in enumerate(section_bounds):
                 sec_props = sections[sec_idx]
                 page_tracker.on_section_enter(sec_props, is_first_section=(sec_idx == 0))
                 visual_math_parser.active_text_area_width_mm = sec_props.text_area_width_mm
+                pending_page_break = False
 
                 slice_nodes = body_children[bound.start_body_child_idx : bound.end_body_child_idx + 1]
                 for node in self._iter_unwrapped_body_nodes(slice_nodes):
@@ -239,6 +255,17 @@ class DocxParserPipeline:
                             if v_id in visual_math_parser.visuals_registry
                         ]
                         page_tracker.advance_after_paragraph(p_block, page_after, vis_heights)
+                        if pending_page_break:
+                            # Разрыв в конце предыдущего абзаца уже поднял счётчик
+                            # страниц: блок начинается с новой страницы. Если разрыв
+                            # в нулевой позиции уже отмечен у самого блока, признак не
+                            # дублируем — иначе сдвиг страницы посчитается дважды.
+                            if not p_block.effective_props.page_break_before and 0 not in (
+                                p_block.rendered_page_breaks_offsets
+                            ):
+                                p_block.effective_props.page_break_before = True
+                            pending_page_break = False
+                        pending_page_break = _ends_with_explicit_page_break(p_block)
                         blocks.append(p_block)
                         xml_para_to_block_map[node] = p_block
 
@@ -285,6 +312,9 @@ class DocxParserPipeline:
                         )
                         page_tracker.advance_after_table(t_block, page_after)
                         blocks.append(t_block)
+                        # Таблица забирает разрыв на себя: следующий за ней абзац
+                        # продолжает страницу таблицы, а не начинает новую.
+                        pending_page_break = False
 
                 sec_props.page_end_est = page_tracker.current_page
 
