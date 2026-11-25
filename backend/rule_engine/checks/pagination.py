@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from ..findings import (
     RuleAssessment,
     Violation,
+    ViolationLocation,
 )
 from ..rules import (
     HeadingPageBreakRule,
@@ -171,6 +172,28 @@ def _heading_start_page(paragraph: ParagraphBlock) -> int:
     return start_page
 
 
+def _heading_location(
+    paragraph: ParagraphBlock,
+    start_page: int,
+) -> ViolationLocation:
+    """Адрес находки: страница совпадает с найденной страницей заголовка.
+
+    ``page_start_est`` — оценка по разбиению, а ``start_page`` учитывает
+    разрыв в нулевой позиции, поэтому на границе страницы значения расходятся
+    на единицу. В отчете читатель видит ``start_page``, и адрес берет его же;
+    ``page_start_est`` остается резервом, когда страница не определена.
+    """
+    location = _paragraph_location(paragraph)
+    if start_page is None or location.page_start_est == start_page:
+        return location
+    end_page = location.page_end_est
+    if end_page is None or end_page < start_page:
+        end_page = start_page
+    return location.model_copy(
+        update={"page_start_est": start_page, "page_end_est": end_page}
+    )
+
+
 def _previous_text_page(
     document: ParsedDocxDocument,
     block_id: str,
@@ -305,7 +328,7 @@ def _check_heading_page_break_rule(
             _build_violation(
                 rule,
                 address=paragraph.block_id,
-                location=_paragraph_location(paragraph),
+                location=_heading_location(paragraph, start_page),
                 expected={"start": "new_page"},
                 found={
                     "start_page": start_page,
@@ -334,7 +357,7 @@ def _check_heading_page_break_rule(
             _build_violation(
                 rule,
                 address=paragraph.block_id,
-                location=_paragraph_location(paragraph),
+                location=_heading_location(paragraph, start_page),
                 expected={"start": "same_page"},
                 found={
                     "start_page": start_page,

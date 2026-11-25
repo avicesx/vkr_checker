@@ -368,6 +368,32 @@ def test_heading_page_break_passes_when_chapter_starts_new_page() -> None:
     assert _assessment(report, rule.rule_id).status == "pass"
 
 
+def test_heading_page_break_address_matches_heading_page() -> None:
+    """Страница в адресе совпадает с найденной страницей заголовка.
+
+    Абзац заголовка оценен 18-й страницей, но разрыв в нулевой позиции
+    переносит начало на 19-ю. Адрес должен показывать 19 — то же значение,
+    которое читатель видит в ``found.start_page``.
+    """
+    engine, rule = _engine("heading_page_break")
+    document = _make_document(
+        blocks=[
+            _body("p_1", page_start=18, page_end=19),
+            _heading("h_1", page_start=18, page_end=20, breaks=[0]),
+        ],
+        nodes=[_node("h_1", page_start=18, page_end=20)],
+        total_pages=25,
+    )
+
+    report = engine.check(document)
+
+    assert len(report.violations) == 1
+    violation = report.violations[0]
+    assert violation.found["start_page"] == 19
+    assert violation.location.page_start_est == 19
+    assert violation.location.page_end_est == 20
+
+
 # ------------------------------------------- явный разрыв страницы перед главой
 
 
@@ -455,6 +481,7 @@ def test_page_break_uses_exact_pdf_pages_without_rendered_breaks() -> None:
     assessment = _assessment(report, rule.rule_id)
 
     assert [violation.location.block_id for violation in report.violations] == ["h_1"]
+    assert report.violations[0].location.page_start_est == report.violations[0].found["start_page"]
     assert assessment.status == "fail"
 
 
